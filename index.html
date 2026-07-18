@@ -57,8 +57,10 @@ a{color:var(--primary-600);text-decoration:none}
 .brand{padding:20px 18px 14px;display:flex;align-items:center;gap:10px}
 .brand-mark{
   width:30px;height:30px;border-radius:7px;background:var(--primary);
-  color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px;flex:0 0 auto;
+  color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
 }
+.brand-mark svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
 .brand-txt{font-weight:700;font-size:14px;letter-spacing:.01em;line-height:1.25}
 .brand-txt small{display:block;font-weight:400;font-size:11px;color:var(--text-3)}
 .nav{padding:6px 10px;flex:1;overflow-y:auto}
@@ -71,7 +73,9 @@ a{color:var(--primary-600);text-decoration:none}
 }
 .nav-item:hover{background:var(--gray-bg);color:var(--text)}
 .nav-item.active{background:var(--primary-050);color:var(--primary);font-weight:700}
-.nav-item .ico{width:18px;text-align:center;flex:0 0 18px;opacity:.85}
+.nav-item .ico{width:18px;flex:0 0 18px;opacity:.85;display:flex;align-items:center;justify-content:center}
+.nav-item .ico svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round;display:block}
 .nav-item .count{margin-left:auto;font-size:11px;background:var(--red);color:#fff;
   border-radius:9px;padding:1px 6px;font-weight:700;font-family:var(--mono)}
 .sidebar-foot{padding:10px;border-top:1px solid var(--line);font-size:11px;color:var(--text-3)}
@@ -246,7 +250,9 @@ select.inp{padding-right:6px;cursor:pointer}
 
 /* Empty */
 .empty{padding:52px 20px;text-align:center;color:var(--text-3)}
-.empty .e{font-size:30px;margin-bottom:10px;opacity:.5}
+.empty .e{margin-bottom:10px;opacity:.4;display:flex;justify-content:center}
+.empty .e svg{width:40px;height:40px;stroke:currentColor;fill:none;stroke-width:1.4;
+  stroke-linecap:round;stroke-linejoin:round}
 .empty h3{margin:0 0 5px;font-size:14px;color:var(--text-2);font-weight:600}
 .empty p{margin:0 0 16px;font-size:12px}
 
@@ -688,6 +694,28 @@ body.ctx-quote .main{background:#F5F8FF}
 body.ctx-delivery .main{background:#FFF8F2}
 
 /* ============================================================
+   報價/出貨「詳情頁」依目前所在步驟給不同底色，一眼就能分辨進度
+   刻意避開跟當下會出現的動作按鈕相近的色系（登記下單=青綠／
+   開立出貨單=靛藍／已出貨=橘／已完成=綠），避免按鈕不明顯
+   ============================================================ */
+/* 報價：草稿→已送出→已下單(客戶簽回)→已完成／已失效／已取消 */
+body.st-q-draft .main{background:#F7F8FA}
+body.st-q-sent .main{background:#FFFCF2}
+body.st-q-signed .main{background:#F2FBF6}
+body.st-q-completed .main{background:#F8F5FC}
+body.st-q-expired .main{background:#FFF4F4}
+body.st-q-cancelled .main{background:#F5F5F5}
+
+/* 出貨：待叫貨→已叫貨→待組裝→已組裝→待配送→已出貨→已完成 */
+body.st-d-pending_order .main{background:#FFF3F3}
+body.st-d-ordered .main{background:#FFF8EC}
+body.st-d-pending_assembly .main{background:#FFF6E9}
+body.st-d-assembled .main{background:#EEF5FF}
+body.st-d-pending_delivery .main{background:#F1F4FF}
+body.st-d-shipped .main{background:#EEFAFA}
+body.st-d-completed .main{background:#F0FBF4}
+
+/* ============================================================
    總覽表：可排序表頭 + 公司配色列
    ============================================================ */
 .tbl th.sortable{cursor:pointer;user-select:none;transition:color .12s}
@@ -726,7 +754,9 @@ body.ctx-delivery .main{background:#FFF8F2}
     flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:2px;font-size:10px;color:var(--text-3);font-weight:500;min-height:44px;
   }
-  .tabbar a .ico{font-size:19px;line-height:1}
+  .tabbar a .ico{line-height:1;display:flex;justify-content:center}
+  .tabbar a .ico svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round}
   .tabbar a.active{color:var(--primary);font-weight:700}
 
   /* 觸控目標 ≥44pt */
@@ -830,7 +860,7 @@ body.mobile.has-sticky .sticky-total{display:flex}
 <div id="app">
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark">報</div>
+      <div class="brand-mark"><svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg></div>
       <div class="brand-txt">報價出貨系統<small id="brandSub">—</small></div>
     </div>
     <nav class="nav" id="nav"></nav>
@@ -2212,6 +2242,23 @@ function floatAC(input, searchFn, pickFn) {
 window.addEventListener('scroll', closeFloatAC, true);
 window.addEventListener('resize', closeFloatAC);
 
+/* ===========================================================
+   圖示庫 —— 線條風格 SVG，內嵌不依賴外部圖示庫／CDN
+   =========================================================== */
+const ICONS = {
+  dash: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>',
+  quote: '<svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 15.5h6M9 8.5h2"/></svg>',
+  delivery: '<svg viewBox="0 0 24 24"><rect x="2" y="6" width="12" height="10" rx="1"/><path d="M14 10h4l3 3v3h-7z"/><circle cx="6.5" cy="18" r="1.7"/><circle cx="17" cy="18" r="1.7"/></svg>',
+  customer: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3.3 2.6-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16.5 8.3a3 3 0 0 1 0 5.9"/><path d="M15.5 13.6c2.4.4 4 2.3 4 5"/></svg>',
+  product: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.6v9L12 21l-8-4.4v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>',
+  user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M9 8.3l2 2 3.5-3.6" stroke-width="2"/></svg>',
+  supplier: '<svg viewBox="0 0 24 24"><path d="M4 21V9l8-5 8 5v12"/><path d="M4 21h16M9 21v-6h6v6M9 12h.01M15 12h.01M12 12h.01"/></svg>',
+  settings: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.8-1.4-1.7-2.9-2.1.7a7.4 7.4 0 0 0-2.6-1.5L14.4 3H9.6l-.4 2.4a7.4 7.4 0 0 0-2.6 1.5l-2.1-.7-1.7 2.9 1.8 1.4a7.6 7.6 0 0 0 0 3l-1.8 1.4 1.7 2.9 2.1-.7a7.4 7.4 0 0 0 2.6 1.5l.4 2.4h4.8l.4-2.4a7.4 7.4 0 0 0 2.6-1.5l2.1.7 1.7-2.9z"/></svg>',
+  logo: '<svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg>',
+  notfound: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5"/></svg>'
+};
+function icon(name) { return ICONS[name] || ICONS.notfound; }
+
 
 /* ===========================================================
    種子資料
@@ -2344,14 +2391,14 @@ function seed() {
    路由
    =========================================================== */
 const ROUTES = [
-  { k: 'dash',      t: '總覽',     ico: '◧', tab: true  },
-  { k: 'quotes',    t: '報價管理', ico: '▤', tab: true  },
-  { k: 'deliveries',t: '出貨管理', ico: '▦', tab: true  },
-  { k: 'customers', t: '客戶管理', ico: '◑', tab: true  },
-  { k: 'products',  t: '商品管理', ico: '◈', tab: false, group: '主檔' },
-  { k: 'users',     t: '業務管理', ico: '☺', tab: false, group: '主檔' },
-  { k: 'suppliers', t: '常用代理商', ico: '◐', tab: false, group: '主檔' },
-  { k: 'settings',  t: '設定',     ico: '⚙', tab: false, group: '系統' }
+  { k: 'dash',      t: '總覽',     ico: 'dash', tab: true  },
+  { k: 'quotes',    t: '報價管理', ico: 'quote', tab: true  },
+  { k: 'deliveries',t: '出貨管理', ico: 'delivery', tab: true  },
+  { k: 'customers', t: '客戶管理', ico: 'customer', tab: true  },
+  { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '主檔' },
+  { k: 'users',     t: '業務管理', ico: 'user', tab: false, group: '主檔' },
+  { k: 'suppliers', t: '常用代理商', ico: 'supplier', tab: false, group: '主檔' },
+  { k: 'settings',  t: '設定',     ico: 'settings', tab: false, group: '系統' }
 ];
 
 let route = { k: 'dash', id: null, q: {} };
@@ -2378,6 +2425,7 @@ function render() {
   document.getElementById('stickyTotal').innerHTML = '';
   document.body.classList.toggle('ctx-quote', route.k === 'quote' || route.k === 'quotes');
   document.body.classList.toggle('ctx-delivery', route.k === 'delivery' || route.k === 'deliveries');
+  applyStageColor();
   renderNav();
 
   const v = document.getElementById('view');
@@ -2388,7 +2436,7 @@ function render() {
     suppliers: viewSuppliers, users: viewUsers, settings: viewSettings
   })[route.k];
 
-  if (!fn) { v.innerHTML = `<div class="empty"><div class="e">◌</div><h3>找不到頁面</h3></div>`; return; }
+  if (!fn) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到頁面</h3></div>`; return; }
   try { fn(v); }
   catch (e) {
     console.error(e);
@@ -2396,6 +2444,25 @@ function render() {
       請重新整理，若持續發生請到「設定」匯出備份。</div></div>`;
   }
   window.scrollTo(0, 0);
+}
+
+// 報價/出貨單「詳情頁」依目前所在的步驟給不同底色，且刻意避開跟當下會出現的
+// 動作按鈕（登記下單=青綠／開立出貨單=靛藍／已出貨=橘／已完成=綠）相近的色系，
+// 讓按鈕在畫面上夠明顯，同時每個步驟一眼就能分辨。
+const STAGE_CLASSES = [
+  'st-q-draft', 'st-q-sent', 'st-q-signed', 'st-q-completed', 'st-q-expired', 'st-q-cancelled',
+  'st-d-pending_order', 'st-d-ordered', 'st-d-pending_assembly', 'st-d-assembled',
+  'st-d-pending_delivery', 'st-d-shipped', 'st-d-completed'
+];
+function applyStageColor() {
+  document.body.classList.remove(...STAGE_CLASSES);
+  if (route.k === 'quote') {
+    const q = byId(DB.quotes, route.id);
+    if (q) document.body.classList.add('st-q-' + (q.status === 'partially_shipped' ? 'signed' : q.status));
+  } else if (route.k === 'delivery') {
+    const d = byId(DB.deliveries, route.id);
+    if (d && d.status !== 'cancelled') document.body.classList.add('st-d-' + d.status);
+  }
 }
 
 function renderNav() {
@@ -2411,14 +2478,14 @@ function renderNav() {
     const active = route.k === r.k || (route.k === 'quote' && r.k === 'quotes') || (route.k === 'delivery' && r.k === 'deliveries');
     const cnt = (r.k === 'deliveries' && pend) ? `<span class="count">${pend}</span>` : '';
     html += `<div class="nav-item ${active ? 'active' : ''}" onclick="go('${r.k}')">
-               <span class="ico">${r.ico}</span><span>${r.t}</span>${cnt}</div>`;
+               <span class="ico">${icon(r.ico)}</span><span>${r.t}</span>${cnt}</div>`;
   });
   nav.innerHTML = html;
 
   document.getElementById('tabbar').innerHTML = ROUTES.filter(r => r.tab).map(r => {
     const active = route.k === r.k || (route.k === 'quote' && r.k === 'quotes') || (route.k === 'delivery' && r.k === 'deliveries');
     return `<a class="${active ? 'active' : ''}" onclick="go('${r.k}')">
-              <span class="ico">${r.ico}</span><span>${r.t.replace('管理', '')}</span></a>`;
+              <span class="ico">${icon(r.ico)}</span><span>${r.t.replace('管理', '')}</span></a>`;
   }).join('');
 
   document.getElementById('brandSub').textContent = DB.companies.map(c => c.badge || c.code).join(' · ');
@@ -2511,7 +2578,7 @@ function viewUsers(v) {
     const kw = document.getElementById('us').value.trim().toLowerCase();
     const list = DB.users.filter(u => !kw || (u.name + (u.phone || '') + (u.email || '')).toLowerCase().includes(kw));
     document.getElementById('ulist').innerHTML = !list.length
-      ? `<div class="empty"><div class="e">☺</div><h3>沒有業務</h3>
+      ? `<div class="empty"><div class="e">${icon('user')}</div><h3>沒有業務</h3>
          <button class="btn primary" onclick="editUser(null)">＋ 新增業務</button></div>`
       : `<table class="tbl"><thead><tr>
           <th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th class="c">負責報價</th><th class="c">狀態</th>
@@ -2591,7 +2658,7 @@ function viewSuppliers(v) {
     const kw = document.getElementById('ss').value.trim().toLowerCase();
     const list = DB.suppliers.filter(s => !kw || (s.name + (s.contact_person || '') + (s.phone || '')).toLowerCase().includes(kw));
     document.getElementById('slist').innerHTML = !list.length
-      ? `<div class="empty"><div class="e">◐</div><h3>沒有常用代理商</h3></div>`
+      ? `<div class="empty"><div class="e">${icon('supplier')}</div><h3>沒有常用代理商</h3></div>`
       : `<table class="tbl"><thead><tr><th>名稱</th><th>聯絡人</th><th>電話</th><th>備註</th><th class="c">使用中</th></tr></thead><tbody>
         ${list.map(s => {
           const n = DB.quotes.filter(q => q.items.some(i => i.supplier_name === s.name
@@ -2676,7 +2743,7 @@ const Q_COLS = [
 
 function quoteTable(list, opts) {
   opts = opts || {};
-  if (!list.length) return `<div class="empty"><div class="e">▤</div><h3>沒有報價</h3>
+  if (!list.length) return `<div class="empty"><div class="e">${icon('quote')}</div><h3>沒有報價</h3>
     <p>建立第一張報價單開始使用</p><button class="btn primary" onclick="newQuote()">＋ 新增報價</button></div>`;
   const sorted = opts.noSort ? list : sortRows(list, qSortState, quoteSortValue);
   return `<table class="tbl">
@@ -2801,7 +2868,7 @@ function qEditable(q) {
 
 function viewQuote(v) {
   const q = byId(DB.quotes, route.id);
-  if (!q) { v.innerHTML = `<div class="empty"><div class="e">◌</div><h3>找不到這張報價</h3></div>`; return; }
+  if (!q) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張報價</h3></div>`; return; }
   QE = q;
   const editable = qEditable(q);
   // 「下方預設保留空白商品列」
@@ -3332,7 +3399,7 @@ function drawItems() {
   if (!box) return;
 
   if (!q.items.length) {
-    box.innerHTML = `<div class="empty"><div class="e">◈</div><h3>還沒有商品</h3>
+    box.innerHTML = `<div class="empty"><div class="e">${icon('product')}</div><h3>還沒有商品</h3>
       <p>${editable ? '按「＋ 新增商品列」開始' : '這張報價沒有明細'}</p></div>`;
     drawTotals(); return;
   }
@@ -3816,7 +3883,22 @@ const D_COLS = [
   ['amount', '含稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'], ['note', '備註']
 ];
 
-function toggleDvInvoiced(id, checked) {
+function toggleDvInvoiced(id, el) {
+  const d = byId(DB.deliveries, id);
+  const checked = el.checked;
+  if (d.invoiced && !checked) {
+    // 取消勾選有風險（誤觸會讓已確認的發票狀態不見），先復原勾選、跳確認再真的取消
+    el.checked = true;
+    confirmBox('取消已開發票標記',
+      `確定要取消「${esc(d.delivery_no)}」的已開發票標記嗎？<br>發票日期也會一併清空。`, () => {
+        applyInvoicedChange(id, false);
+        el.checked = false;
+      }, true);
+    return;
+  }
+  applyInvoicedChange(id, checked);
+}
+function applyInvoicedChange(id, checked) {
   const d = byId(DB.deliveries, id);
   d.invoiced = checked;
   if (!d.invoiced) d.invoice_date = '';
@@ -3831,7 +3913,7 @@ function setDvInvoiceDate(id, val) {
 }
 
 function deliveryTable(list) {
-  if (!list.length) return `<div class="empty"><div class="e">▦</div><h3>沒有出貨單</h3>
+  if (!list.length) return `<div class="empty"><div class="e">${icon('delivery')}</div><h3>沒有出貨單</h3>
     <p>出貨單由已下單的報價開立</p><button class="btn" onclick="go('quotes?status=signed')">查看已下單報價</button></div>`;
   const sorted = sortRows(list, dSortState, deliverySortValue);
   const rc = k => ['items', 'amount', 'buy', 'invoiced'].includes(k) ? 'c' : '';
@@ -3859,7 +3941,7 @@ function deliveryTable(list) {
         <td>${badge(DS, d.status)}</td>
         <td class="c inv-cell" onclick="event.stopPropagation()">
           <label class="fi-chk" style="justify-content:center">
-            <input type="checkbox" ${d.invoiced ? 'checked' : ''} onchange="toggleDvInvoiced('${d.id}', this.checked)"></label>
+            <input type="checkbox" ${d.invoiced ? 'checked' : ''} onchange="toggleDvInvoiced('${d.id}', this)"></label>
           <input type="date" class="inp" data-invdate="${d.id}" value="${esc(d.invoice_date || '')}"
             ${d.invoiced ? '' : 'disabled'} onchange="setDvInvoiceDate('${d.id}', this.value)"></td>
         <td class="prod-col muted" title="${esc(d.note || '')}">${esc(d.note || '—')}</td>
@@ -3927,7 +4009,7 @@ function shipAddrOptions(d) {
 
 function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
-  if (!d) { v.innerHTML = `<div class="empty"><div class="e">◌</div><h3>找不到這張出貨單</h3></div>`; return; }
+  if (!d) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張出貨單</h3></div>`; return; }
   DE = d;
   const editable = !['shipped', 'completed', 'cancelled'].includes(d.status);
   const c = d.customer_snapshot || {};
@@ -4837,7 +4919,7 @@ function viewCustomers(v) {
       return (c.sites || []).some(s => (s.label + s.contact_person + s.phone + s.address).toLowerCase().includes(kw));
     });
     document.getElementById('clist').innerHTML = !list.length
-      ? `<div class="empty"><div class="e">◑</div><h3>沒有客戶</h3>
+      ? `<div class="empty"><div class="e">${icon('customer')}</div><h3>沒有客戶</h3>
          <button class="btn primary" onclick="editCustomer(null)">＋ 新增客戶</button></div>`
       : `<table class="tbl"><thead><tr>
           <th>客戶名稱</th><th>統一編號</th><th>聯絡窗口／廠區</th><th>電話</th><th>預設公司</th><th class="c">報價數</th>
@@ -5039,7 +5121,7 @@ function viewProducts(v) {
       (!cat || p.category === cat));
     list.sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) || a.name.localeCompare(b.name));
     document.getElementById('plist').innerHTML = !list.length
-      ? `<div class="empty"><div class="e">◈</div><h3>找不到商品</h3>
+      ? `<div class="empty"><div class="e">${icon('product')}</div><h3>找不到商品</h3>
          <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button></div>`
       : `<table class="tbl"><thead><tr>
           <th style="width:34px">★</th><th>料號</th><th>品名</th><th>品牌</th><th>分類</th><th>進貨廠商</th>
