@@ -377,7 +377,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-no{font-family:var(--mono);font-size:9.5pt;font-weight:700;margin-top:1mm;letter-spacing:.03em}
 .pp-rev{font-size:7.5pt;color:#C2410C;font-weight:700;margin-top:.5mm}
 
-.pp-info{display:flex;gap:5mm;margin-top:3mm;padding:2.5mm 3mm;background:#FAFBFD}
+.pp-info{display:flex;gap:5mm;margin-top:3mm;padding:2.5mm 3mm}
 .pp-info-l{flex:1.4;min-width:0}
 .pp-info-r{flex:1;min-width:0;border-left:.5pt dashed #BBB;padding-left:4mm}
 .pp-row{display:flex;gap:2.5mm;font-size:8.5pt;line-height:1.75}
@@ -441,8 +441,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-no{font-family:var(--mono);font-size:8pt;font-weight:700}
 .dp-internal{margin-top:1mm;font-size:6.5pt;color:#C2410C;font-weight:700;letter-spacing:.06em;display:none} /* 需求：匯出/列印時不呈現，保留類別以防舊快取引用 */
 
-.dp-info{display:flex;flex-wrap:wrap;gap:.8mm 4mm;margin-top:1.2mm;padding:1.4mm 2mm;
-  border:.4pt solid #BBB;border-radius:1mm;background:#FAFBFD}
+.dp-info{display:flex;flex-wrap:wrap;gap:.8mm 4mm;margin-top:1.2mm;padding:1.4mm 2mm}
 .dp-info>div{font-size:7.5pt;display:flex;gap:1.6mm;flex:0 0 calc(50% - 2mm);min-width:0}
 .dp-info>div.wide{flex:0 0 100%}
 .dp-info span{color:#666;flex:0 0 13mm;letter-spacing:.06em}
@@ -473,6 +472,8 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-sum{display:flex;gap:3mm;align-items:stretch}
 .dp-sum-l{flex:1;border:.4pt solid #BBB;border-radius:1mm;padding:1.2mm 1.8mm;min-width:0}
 .dp-kv{display:flex;gap:1.6mm;font-size:7pt;line-height:1.6}
+.dp-kv-row{display:flex;gap:3mm}
+.dp-kv-row .dp-kv.half{flex:1;min-width:0}
 .dp-kv span{color:#666;flex:0 0 13mm}
 .dp-kv b{font-weight:700;min-width:0;word-break:break-word}
 .dp-sum-r{flex:0 0 46mm;border:.4pt solid #7A8AA5;border-radius:1mm;overflow:hidden;align-self:flex-start}
@@ -649,6 +650,7 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 .asm-box-h{font-size:11px;font-weight:700;color:#C2410C;margin-bottom:6px}
 .asm-row{display:flex;gap:5px;align-items:center;padding:5px 0;border-bottom:1px solid #F5E0C4}
 .asm-row:last-child{border-bottom:none}
+.asm-pn{flex:0 0 76px;font-family:var(--mono);font-size:11px!important}
 .asm-name{flex:1.4;min-width:0}
 .asm-qty,.asm-price,.asm-cost{flex:0 0 64px}
 .asm-sup{flex:1;min-width:0}
@@ -1608,7 +1610,7 @@ function safeRerender(changes) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
-const SCHEMA_V = 7;                    // ← 每次改結構就 +1
+const SCHEMA_V = 8;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1873,16 +1875,31 @@ function migrate(db) {
     });
   }
 
+  if (v < 8) {
+    // 報價明細的組裝配件補上料號
+    db.quotes.forEach(q => {
+      (q.items || []).forEach(it => {
+        (it.assembly_items || []).forEach(a => { if (a.part_no == null) a.part_no = ''; });
+      });
+    });
+    // 出貨單：發票備註、交貨單位聯絡人；明細的組裝配件同樣補上料號
+    db.deliveries.forEach(d => {
+      if (d.invoice_note == null) d.invoice_note = '';
+      if (d.delivery_contact == null) d.delivery_contact = '';
+      (d.items || []).forEach(i => {
+        (i.assembly_items || []).forEach(a => { if (a.part_no == null) a.part_no = ''; });
+      });
+    });
+  }
+
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
 }
 
 // 新出貨單備註預設帶入的付款說明（固定文字起點，之後可自行編輯／刪改）
 const DEFAULT_DELIVERY_NOTE =
-  '交貨日期：＿＿＿年＿＿＿月＿＿＿日\n' +
-  '付款說明：收現、匯款、即期支票、附回郵、月結、貨到付款\n' +
-  '誠摯感謝您的訂單，若有任何問題寫於訂單上留白處，或口頭告知。\n' +
-  '來單急件：我已於＿月＿日＿時:＿＿ LINE先通知處理';
+  '請附報價單、廠商訂單等相關資料，任何問題請寫於訂單空白處，勿口頭告知！謝謝～\n' +
+  '本單急件：我已於＿月＿日＿時:＿＿ LINE先通知協理';
 
 // 客戶的預設聯絡窗口／廠區
 function defaultSite(c) {
@@ -3510,7 +3527,7 @@ function addAssemblyItem(id) {
   const it = byId(QE.items, id);
   it.assembly_items = it.assembly_items || [];
   it.assembly_items.push({
-    id: uid('ai'), name: '', qty: 1, unit_price: 0,
+    id: uid('ai'), part_no: '', name: '', qty: 1, unit_price: 0,
     in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex'
   });
   asmOpen[id] = true;
@@ -3533,6 +3550,7 @@ function assemblyBox(it, editable) {
     <div class="asm-box-h">組裝配件（客戶看不到，只印在出貨單）</div>
     ${rows.length ? rows.map(a => `
       <div class="asm-row">
+        <input class="inp asm-pn" data-ai="${it.id}|${a.id}" data-k="part_no" placeholder="料號" value="${esc(a.part_no || '')}" ${D}>
         <input class="inp asm-name" data-ai="${it.id}|${a.id}" data-k="name" placeholder="品名" value="${esc(a.name || '')}" ${D}>
         <input class="inp num asm-qty" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="qty" placeholder="數量" value="${a.qty}" ${D}>
         <input class="inp num asm-price" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="unit_price" placeholder="單價" value="${a.unit_price}" ${D}>
@@ -3728,7 +3746,7 @@ function makeDelivery(q, co, o) {
     cost_tax: 'ex',
     need_assembly: false,
     assembly_items: (it.assembly_items || []).map(a => ({
-      id: uid('ai'), name: a.name, qty: a.qty, unit_price: a.unit_price,
+      id: uid('ai'), part_no: a.part_no || '', name: a.name, qty: a.qty, unit_price: a.unit_price,
       in_stock: a.in_stock, supplier_name: a.supplier_name, cost: a.cost, cost_tax: a.cost_tax || 'ex'
     })),
     is_manual: false,
@@ -3966,12 +3984,12 @@ function viewDelivery(v) {
                 <input class="inp" type="date" data-d="delivery_date" value="${d.delivery_date}" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label>交貨單位</label>
                 <input class="inp" data-d="delivery_target" value="${esc(d.delivery_target || '')}" placeholder="自行輸入" ${editable ? '' : 'disabled'}></div>
+              <div class="field"><label>交貨單位聯絡人</label>
+                <input class="inp" data-d="delivery_contact" value="${esc(d.delivery_contact || '')}" placeholder="例：王小姐 0912-345-678" ${editable ? '' : 'disabled'}></div>
               <div class="field" style="grid-column:span 2"><label>送貨地址</label>
                 <input class="inp" list="shipAddrList" data-d="ship_address" value="${esc(d.ship_address || '')}"
                   placeholder="可從客戶地址挑選，或自行輸入不同送貨地點" ${editable ? '' : 'disabled'}>
                 <datalist id="shipAddrList">${shipAddrOptions(d)}</datalist></div>
-              <div class="field"><label>出貨日期</label>
-                <input class="inp" type="date" data-d="delivery_date" value="${d.delivery_date}" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label>配送方式</label>
                 <select class="inp" data-d="shipping_method" ${editable ? '' : 'disabled'}>
                   ${SHIP_METHODS.map(m => `<option ${m === d.shipping_method ? 'selected' : ''}>${m}</option>`).join('')}
@@ -3984,6 +4002,8 @@ function viewDelivery(v) {
                 <select class="inp" data-d="payment_method" ${editable ? '' : 'disabled'}>
                   ${PAY_METHODS.map(m => `<option ${m === d.payment_method ? 'selected' : ''}>${m}</option>`).join('')}
                 </select></div>
+              <div class="field"><label>發票備註</label>
+                <input class="inp" data-d="invoice_note" value="${esc(d.invoice_note || '')}" placeholder="印在出貨單發票欄位，選填" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label class="fi-chk" style="font-size:13px;color:var(--text-1);font-weight:600;margin-top:22px">
                 <input type="checkbox" data-d="no_invoice" ${d.no_invoice ? 'checked' : ''} ${editable ? '' : 'disabled'}> 不開發票</label></div>
               <div class="field"><label>發票聯數</label>
@@ -4130,10 +4150,13 @@ function drawDvItems() {
             <div style="font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:6px">
               組裝配件（客戶看不到，只印在出貨單）</div>
             <table class="tbl" style="font-size:12px">
-              <thead><tr><th>品名</th><th class="r" style="width:64px">數量</th>
+              <thead><tr><th style="width:84px">料號</th><th>品名</th><th class="r" style="width:64px">數量</th>
                 <th class="r" style="width:72px">單價</th><th style="width:${stockColW}px">是否有庫</th>
                 ${editable ? '<th style="width:30px"></th>' : ''}</tr></thead>
               <tbody>${(i.assembly_items || []).map(a => `<tr style="cursor:default">
+                <td>${editable
+                  ? `<input class="inp" style="height:26px;font-size:11.5px;font-family:var(--mono)" data-da="${i.id}|${a.id}" data-k="part_no" value="${esc(a.part_no || '')}">`
+                  : esc(a.part_no || '—')}</td>
                 <td>${editable
                   ? `<input class="inp" style="height:26px;font-size:11.5px" data-da="${i.id}|${a.id}" data-k="name" value="${esc(a.name || '')}">`
                   : esc(a.name || '')}</td>
@@ -4145,7 +4168,7 @@ function drawDvItems() {
                   : moneyD(a.unit_price)}</td>
                 <td>${stockCell(a, `data-da="${i.id}|${a.id}"`)}</td>
                 ${editable ? `<td><button class="btn sm ghost" onclick="delDvAsmItem('${i.id}','${a.id}')" style="color:var(--red)">×</button></td>` : ''}
-              </tr>`).join('') || `<tr style="cursor:default"><td colspan="${editable ? 5 : 4}" class="muted">還沒有配件</td></tr>`}
+              </tr>`).join('') || `<tr style="cursor:default"><td colspan="${editable ? 6 : 5}" class="muted">還沒有配件</td></tr>`}
               </tbody></table>
             ${editable ? `<button class="btn sm ghost" style="margin-top:8px" onclick="addDvAsmItem('${i.id}')">＋ 新增配件</button>` : ''}
           </div></td></tr>`);
@@ -4200,7 +4223,7 @@ function addDvAsmItem(id) {
   const it = byId(DE.items, id);
   it.assembly_items = it.assembly_items || [];
   it.assembly_items.push({
-    id: uid('ai'), name: '', qty: 1, unit_price: 0,
+    id: uid('ai'), part_no: '', name: '', qty: 1, unit_price: 0,
     in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex'
   });
   dvAsmOpen[id] = true;
@@ -4607,7 +4630,7 @@ function dpItemRowsHtml(i, rowNo, rg) {
   </tr>`).join('') : '';
   const asm = hasAsm ? i.assembly_items.map(a => `<tr class="cmp" data-rg="${rg}">
     <td></td><td></td>
-    <td class="ind">└ <span class="asm-note-tag">⚠ 組裝配件</span> ${esc(a.name)}</td>
+    <td class="ind">└ <span class="asm-note-tag">⚠ 組裝配件</span> ${esc(a.name)}${a.part_no ? ` <span class="mut">(${esc(a.part_no)})</span>` : ''}</td>
     <td class="r">${moneyD(a.unit_price)}</td><td class="r">${moneyD(a.qty)}</td>
     <td class="r">${money(lineAmount(a.qty, a.unit_price))}</td>
     <td class="stockcol">${dpStockCell(a)}</td>
@@ -4662,13 +4685,17 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
     <div class="dp-bottom">
       <div class="dp-sum">
         <div class="dp-sum-l">
-          <div class="dp-kv"><span>出貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
-          <div class="dp-kv"><span>送貨地址</span><b>${esc(d.ship_address || c.address || '')}</b></div>
-          <div class="dp-kv"><span>交貨單位</span><b>${esc(d.delivery_target || '—')}</b></div>
-          <div class="dp-kv"><span>配送方式</span><b>${esc(ship || '')}</b></div>
+          <div class="dp-kv-row">
+            <div class="dp-kv half"><span>交貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
+            <div class="dp-kv half"><span>配送方式</span><b>${esc(ship || '')}</b></div>
+          </div>
+          <div class="dp-kv-row">
+            <div class="dp-kv half"><span>送貨地址</span><b>${esc(d.ship_address || c.address || '')}</b></div>
+            <div class="dp-kv half"><span>交貨單位</span><b>${esc(d.delivery_target || '—')}${d.delivery_contact ? '　聯絡人：' + esc(d.delivery_contact) : ''}</b></div>
+          </div>
           <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method || '')}</b></div>
           <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
-          <div class="dp-kv"><span>發　　票</span><b>${d.invoiced ? '已開立　' + fmtDateShort(d.invoice_date) : '未開立'}</b></div>
+          ${d.invoice_note ? `<div class="dp-kv"><span>發票備註</span><b>${esc(d.invoice_note)}</b></div>` : ''}
           ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
           ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
         </div>
