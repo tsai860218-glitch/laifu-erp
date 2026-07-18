@@ -395,7 +395,7 @@ body.cost-on.mobile .cost-warn{display:flex}
   word-break:break-word}
 .pp-tbl .c{text-align:center}
 .pp-tbl .r{text-align:right;font-family:var(--mono)}
-.pp-tbl .brand{font-size:7.8pt;color:#333}
+.pp-tbl .item-brand{font-size:7.8pt;color:#333}
 .pp-tbl .pn{font-family:var(--mono);font-size:7.5pt;color:#333;word-break:break-all}
 .pp-tbl .sp{font-size:7.5pt;color:#555;margin-top:.4mm;line-height:1.35}
 .pp-tbl tr.blank td{height:7.4mm}
@@ -455,6 +455,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-tbl .c{text-align:center}
 .dp-tbl .r{text-align:right;font-family:var(--mono)}
 .dp-tbl .pn{font-family:var(--mono);font-size:6.5pt;word-break:break-all}
+.dp-tbl .item-brand{font-size:6.8pt;color:#333}
 .dp-tbl .sp{font-size:6.5pt;color:#555;line-height:1.3}
 .dp-tbl .asm-note-tag{font-size:6pt;background:#FFF2E5;color:#C2410C;border-radius:.6mm;padding:0 .8mm;margin-right:.6mm;font-weight:700}
 .dp-tbl .sm{font-size:6.5pt}
@@ -485,9 +486,9 @@ body.cost-on.mobile .cost-warn{display:flex}
 
 /* 總計/簽名區固定貼在紙張底部，不管表格內容多少都不會跟著漂移 */
 .dp-bottom{position:absolute;left:9mm;right:9mm;bottom:7mm}
-.dp-sb{flex:1;border:.4pt solid #999;border-radius:1mm;padding:1mm 1.4mm;min-height:9mm}
-.dp-sb span{font-size:6pt;color:#666;font-weight:700;display:block}
-.dp-sb b{font-size:7.5pt;display:block;margin-top:.6mm}
+.dp-sb{flex:1;min-height:9mm}
+.dp-sb span{font-size:6pt;color:#666;font-weight:700;display:block;padding-bottom:.6mm;border-bottom:.4pt solid #ccc}
+.dp-sb b{font-size:7.5pt;display:block;margin-top:1.5mm}
 .dp-foot{position:absolute;left:9mm;right:9mm;bottom:3.5mm;display:flex;justify-content:space-between;
   font-size:6pt;color:#888;font-family:var(--mono)}
 
@@ -1607,7 +1608,7 @@ function safeRerender(changes) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
-const SCHEMA_V = 6;                    // ← 每次改結構就 +1
+const SCHEMA_V = 7;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1862,6 +1863,13 @@ function migrate(db) {
     db.deliveries.forEach(d => {
       if (d.no_invoice == null) d.no_invoice = false;
       if (d.invoice_copies == null) d.invoice_copies = 3;
+    });
+  }
+
+  if (v < 7) {
+    // 出貨單：送貨地址獨立成可編輯欄位（預設帶客戶地址，可改成不同送貨地點）
+    db.deliveries.forEach(d => {
+      if (d.ship_address == null) d.ship_address = (d.customer_snapshot && d.customer_snapshot.address) || '';
     });
   }
 
@@ -3740,7 +3748,8 @@ function makeDelivery(q, co, o) {
     created_by: o.created_by || '',
     delivery_date: o.delivery_date || today(),
     status: 'pending_order',
-    delivery_target: '', shipping_method: '貨運', shipping_method_other: '',
+    delivery_target: '', ship_address: (q.customer_snapshot && q.customer_snapshot.address) || '',
+    shipping_method: '貨運', shipping_method_other: '',
     invoice_method: '隨貨', payment_method: '月結', attachment: '', note: DEFAULT_DELIVERY_NOTE,
     no_invoice: false, invoice_copies: 3,
     invoiced: false, invoice_date: '',
@@ -3888,6 +3897,16 @@ let DE = null;
 let dBomOpen = {};
 let dvAsmOpen = {};
 
+// 送貨地址候選清單：這張單原本客戶的地址 + 客戶主檔裡其他站點/廠區的地址（如果追得到客戶主檔）
+function shipAddrOptions(d) {
+  const addrs = new Set();
+  if (d.customer_snapshot && d.customer_snapshot.address) addrs.add(d.customer_snapshot.address);
+  const q = d.quote_id ? byId(DB.quotes, d.quote_id) : null;
+  const cust = q && q.customer_id ? byId(DB.customers, q.customer_id) : null;
+  if (cust) (cust.sites || []).forEach(s => { if (s.address) addrs.add(s.address); });
+  return [...addrs].map(a => `<option value="${esc(a)}">`).join('');
+}
+
 function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
   if (!d) { v.innerHTML = `<div class="empty"><div class="e">◌</div><h3>找不到這張出貨單</h3></div>`; return; }
@@ -3947,6 +3966,12 @@ function viewDelivery(v) {
                 <input class="inp" type="date" data-d="delivery_date" value="${d.delivery_date}" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label>交貨單位</label>
                 <input class="inp" data-d="delivery_target" value="${esc(d.delivery_target || '')}" placeholder="自行輸入" ${editable ? '' : 'disabled'}></div>
+              <div class="field" style="grid-column:span 2"><label>送貨地址</label>
+                <input class="inp" list="shipAddrList" data-d="ship_address" value="${esc(d.ship_address || '')}"
+                  placeholder="可從客戶地址挑選，或自行輸入不同送貨地點" ${editable ? '' : 'disabled'}>
+                <datalist id="shipAddrList">${shipAddrOptions(d)}</datalist></div>
+              <div class="field"><label>出貨日期</label>
+                <input class="inp" type="date" data-d="delivery_date" value="${d.delivery_date}" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label>配送方式</label>
                 <select class="inp" data-d="shipping_method" ${editable ? '' : 'disabled'}>
                   ${SHIP_METHODS.map(m => `<option ${m === d.shipping_method ? 'selected' : ''}>${m}</option>`).join('')}
@@ -4498,7 +4523,7 @@ function quotePaper(q) {
             const unitDisp = taxIncluded ? (it.qty ? round0(amt / it.qty * 100) / 100 : 0) : it.unit_price;
             return `<tr>
             <td class="c">${rowStart + n + 1}</td>
-            <td class="brand">${esc(it.brand || '—')}</td>
+            <td class="item-brand">${esc(it.brand || '—')}</td>
             <td><b>${esc(it.name)}</b>${it.spec ? `<div class="sp">${esc(it.spec)}</div>` : ''}${it.part_no ? `<div class="sp">料號：${esc(it.part_no)}</div>` : ''}</td>
             <td class="r">${moneyD(unitDisp)}</td>
             <td class="r">${moneyD(it.qty)}</td>
@@ -4566,7 +4591,7 @@ function dpItemRowsHtml(i, rowNo, rg) {
   const hasAsm = i.assembly_items && i.assembly_items.length;
   const main = `<tr data-rg="${rg}">
     <td class="c">${rowNo}</td>
-    <td class="brand">${esc(i.brand || '—')}</td>
+    <td class="item-brand">${esc(i.brand || '—')}</td>
     <td><b>${esc(i.name)}</b>${i.spec ? `<div class="sp">${esc(i.spec)}</div>` : ''}${i.part_no ? `<div class="sp">料號：${esc(i.part_no)}</div>` : ''}</td>
     <td class="r">${moneyD(i.unit_price)}</td>
     <td class="r">${moneyD(i.qty)}</td>
@@ -4618,8 +4643,6 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
       <div><span>出貨日期</span><b>${fmtDate(d.delivery_date)}</b></div>
       <div><span>聯絡人</span><b>${esc(c.contact_person || '')}　${esc(c.phone || '')}</b></div>
       <div><span>來源報價</span><b>${esc(d.quote_no || '')}</b></div>
-      <div class="wide"><span>送貨地址</span><b>${esc(c.address || '')}</b></div>
-      <div><span>交貨單位</span><b>${esc(d.delivery_target || '—')}</b></div>
     </div>
 
     <table class="dp-tbl">
@@ -4639,6 +4662,9 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
     <div class="dp-bottom">
       <div class="dp-sum">
         <div class="dp-sum-l">
+          <div class="dp-kv"><span>出貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
+          <div class="dp-kv"><span>送貨地址</span><b>${esc(d.ship_address || c.address || '')}</b></div>
+          <div class="dp-kv"><span>交貨單位</span><b>${esc(d.delivery_target || '—')}</b></div>
           <div class="dp-kv"><span>配送方式</span><b>${esc(ship || '')}</b></div>
           <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method || '')}</b></div>
           <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
@@ -4656,9 +4682,9 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
       </div>
 
       <div class="dp-sign">
-        <div class="dp-sb"><span>負責業務</span><b>${esc(userName(d.sales_user_id) || '—')}</b></div>
+        <div class="dp-sb"><span>協理</span><b></b></div>
+        <div class="dp-sb"><span>業務</span><b>${esc(userName(d.sales_user_id) || '—')}</b></div>
         <div class="dp-sb"><span>開單人員</span><b>${esc(d.created_by || '—')}</b></div>
-        <div class="dp-sb"><span>出貨</span><b></b></div>
       </div>
     </div>` : ''}
 
