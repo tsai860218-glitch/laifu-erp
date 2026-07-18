@@ -377,7 +377,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-no{font-family:var(--mono);font-size:9.5pt;font-weight:700;margin-top:1mm;letter-spacing:.03em}
 .pp-rev{font-size:7.5pt;color:#C2410C;font-weight:700;margin-top:.5mm}
 
-.pp-info{display:flex;gap:5mm;margin-top:3mm;padding:2.5mm 3mm;border:.5pt solid #AAA;border-radius:1mm;background:#FAFBFD}
+.pp-info{display:flex;gap:5mm;margin-top:3mm;padding:2.5mm 3mm;background:#FAFBFD}
 .pp-info-l{flex:1.4;min-width:0}
 .pp-info-r{flex:1;min-width:0;border-left:.5pt dashed #BBB;padding-left:4mm}
 .pp-row{display:flex;gap:2.5mm;font-size:8.5pt;line-height:1.75}
@@ -416,9 +416,9 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-sl.total b{color:#1E3A8A;font-size:11pt}
 
 .pp-sign{display:flex;gap:5mm;margin-top:4mm}
-.pp-sbox{flex:1;border:.5pt solid #999;border-radius:1mm;overflow:hidden}
-.pp-slabel{background:#F1F3F7;padding:1.4mm 2.4mm;font-size:8pt;font-weight:700;color:#333;border-bottom:.5pt solid #CCC}
-.pp-sarea{height:24mm;position:relative}
+.pp-sbox{flex:1}
+.pp-slabel{padding:0 0 1mm;font-size:8pt;font-weight:700;color:#333;border-bottom:.5pt solid #CCC}
+.pp-sarea{height:24mm;position:relative;margin-top:2mm}
 .pp-sarea.stamp{display:flex;align-items:center;justify-content:center}
 .pp-stamp{max-height:22mm;max-width:52mm;object-fit:contain}
 
@@ -1871,6 +1871,7 @@ function migrate(db) {
 
 // 新出貨單備註預設帶入的付款說明（固定文字起點，之後可自行編輯／刪改）
 const DEFAULT_DELIVERY_NOTE =
+  '交貨日期：＿＿＿年＿＿＿月＿＿＿日\n' +
   '付款說明：收現、匯款、即期支票、附回郵、月結、貨到付款\n' +
   '誠摯感謝您的訂單，若有任何問題寫於訂單上留白處，或口頭告知。\n' +
   '來單急件：我已於＿月＿日＿時:＿＿ LINE先通知處理';
@@ -4524,7 +4525,7 @@ function quotePaper(q) {
 
         <div class="pp-sign">
           <div class="pp-sbox">
-            <div class="pp-slabel">客戶簽章 / 回簽</div>
+            <div class="pp-slabel">客戶簽章 / 日期</div>
             <div class="pp-sarea"></div>
           </div>
           <div class="pp-sbox">
@@ -4644,7 +4645,6 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
           <div class="dp-kv"><span>發　　票</span><b>${d.invoiced ? '已開立　' + fmtDateShort(d.invoice_date) : '未開立'}</b></div>
           ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
           ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
-          <div class="dp-kv"><span>交貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
         </div>
         <div class="dp-sum-r">
           <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
