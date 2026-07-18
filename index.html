@@ -1569,7 +1569,7 @@ function safeRerender(changes) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
-const SCHEMA_V = 5;                    // ← 每次改結構就 +1
+const SCHEMA_V = 6;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1819,9 +1819,23 @@ function migrate(db) {
     });
   }
 
+  if (v < 6) {
+    // 出貨單：新增「不開發票」勾選與「發票聯數」，印在出貨單上
+    db.deliveries.forEach(d => {
+      if (d.no_invoice == null) d.no_invoice = false;
+      if (d.invoice_copies == null) d.invoice_copies = 3;
+    });
+  }
+
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
 }
+
+// 新出貨單備註預設帶入的付款說明（固定文字起點，之後可自行編輯／刪改）
+const DEFAULT_DELIVERY_NOTE =
+  '付款說明：收現、匯款、即期支票、附回郵、月結、貨到付款\n' +
+  '誠摯感謝您的訂單，若有任何問題寫於訂單上留白處，或口頭告知。\n' +
+  '來單急件：我已於＿月＿日＿時:＿＿ LINE先通知處理';
 
 // 客戶的預設聯絡窗口／廠區
 function defaultSite(c) {
@@ -3688,7 +3702,8 @@ function makeDelivery(q, co, o) {
     delivery_date: o.delivery_date || today(),
     status: 'pending_order',
     delivery_target: '', shipping_method: '貨運', shipping_method_other: '',
-    invoice_method: '隨貨', payment_method: '月結', attachment: '', note: '',
+    invoice_method: '隨貨', payment_method: '月結', attachment: '', note: DEFAULT_DELIVERY_NOTE,
+    no_invoice: false, invoice_copies: 3,
     invoiced: false, invoice_date: '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
@@ -3905,6 +3920,10 @@ function viewDelivery(v) {
                 <select class="inp" data-d="payment_method" ${editable ? '' : 'disabled'}>
                   ${PAY_METHODS.map(m => `<option ${m === d.payment_method ? 'selected' : ''}>${m}</option>`).join('')}
                 </select></div>
+              <div class="field"><label class="fi-chk" style="font-size:13px;color:var(--text-1);font-weight:600;margin-top:22px">
+                <input type="checkbox" data-d="no_invoice" ${d.no_invoice ? 'checked' : ''} ${editable ? '' : 'disabled'}> 不開發票</label></div>
+              <div class="field"><label>發票聯數</label>
+                <input class="inp num" type="number" min="1" max="9" data-d="invoice_copies" value="${d.invoice_copies || 3}" ${editable ? '' : 'disabled'}></div>
             </div>
             <div class="field ${d.shipping_method === '其他' ? '' : 'hide'}" id="shipOther">
               <label>配送方式說明</label>
@@ -3948,7 +3967,8 @@ function viewDelivery(v) {
     ${supDatalist()}`;
 
   v.querySelectorAll('[data-d]').forEach(el => el.addEventListener('change', () => {
-    d[el.dataset.d] = el.value; save();
+    d[el.dataset.d] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? (+el.value || 0) : el.value);
+    save();
     if (el.dataset.d === 'shipping_method')
       document.getElementById('shipOther').classList.toggle('hide', el.value !== '其他');
   }));
@@ -4427,13 +4447,12 @@ function quotePaper(q) {
 
       <table class="pp-tbl">
         <thead><tr>
-          <th style="width:7mm">項次</th>
-          <th style="width:22mm">品牌</th>
-          <th>品名</th>
-          <th style="width:12mm">單位</th>
-          <th style="width:14mm">數量</th>
+          <th style="width:8mm">項次</th>
+          <th style="width:24mm">品牌</th>
+          <th>項目</th>
           <th style="width:22mm">單價${taxIncluded ? '（含稅）' : ''}</th>
-          <th style="width:24mm">金額</th>
+          <th style="width:14mm">數量</th>
+          <th style="width:24mm">小計</th>
         </tr></thead>
         <tbody>
           ${rows.map((it, n) => {
@@ -4443,14 +4462,13 @@ function quotePaper(q) {
             return `<tr>
             <td class="c">${rowStart + n + 1}</td>
             <td class="brand">${esc(it.brand || '—')}</td>
-            <td><b>${esc(it.name)}</b>${it.part_no ? `<div class="sp">料號：${esc(it.part_no)}</div>` : ''}</td>
-            <td class="c">${esc(it.unit || '')}</td>
-            <td class="r">${moneyD(it.qty)}</td>
+            <td><b>${esc(it.name)}</b>${it.spec ? `<div class="sp">${esc(it.spec)}</div>` : ''}${it.part_no ? `<div class="sp">料號：${esc(it.part_no)}</div>` : ''}</td>
             <td class="r">${moneyD(unitDisp)}</td>
+            <td class="r">${moneyD(it.qty)}</td>
             <td class="r">${money(amt)}</td>
           </tr>`;
           }).join('')}
-          ${Array(blanks).fill(`<tr class="blank"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join('')}
+          ${Array(blanks).fill(`<tr class="blank"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('')}
         </tbody>
       </table>
 
@@ -4511,11 +4529,10 @@ function dpItemRowsHtml(i, rowNo, rg) {
   const hasAsm = i.assembly_items && i.assembly_items.length;
   const main = `<tr data-rg="${rg}">
     <td class="c">${rowNo}</td>
-    <td class="pn">${esc(i.part_no || '')}</td>
-    <td><b>${esc(i.brand ? i.brand + ' ' : '')}${esc(i.name)}</b>${i.spec ? `<div class="sp">${esc(i.spec)}</div>` : ''}</td>
-    <td class="c">${esc(i.unit || '')}</td>
-    <td class="r">${moneyD(i.qty)}</td>
+    <td class="brand">${esc(i.brand || '—')}</td>
+    <td><b>${esc(i.name)}</b>${i.spec ? `<div class="sp">${esc(i.spec)}</div>` : ''}${i.part_no ? `<div class="sp">料號：${esc(i.part_no)}</div>` : ''}</td>
     <td class="r">${moneyD(i.unit_price)}</td>
+    <td class="r">${moneyD(i.qty)}</td>
     <td class="r">${money(lineAmount(i.qty, i.unit_price))}</td>
     <td class="stockcol">${hasBom ? '<span class="mut">見下方零件</span>' : dpStockCell(i)}</td>
   </tr>`;
@@ -4523,13 +4540,13 @@ function dpItemRowsHtml(i, rowNo, rg) {
     <td></td><td></td>
     <td class="ind">└ ${esc(x.name)}${x.spec ? ' <span class="mut">' + esc(x.spec) + '</span>' : ''}
       ${x.need_assembly ? '<span class="asm">組裝</span>' : ''}</td>
-    <td></td><td class="r">${moneyD(x.qty)}</td><td></td><td></td>
+    <td></td><td class="r">${moneyD(x.qty)}</td><td></td>
     <td class="stockcol">${dpStockCell(x)}</td>
   </tr>`).join('') : '';
   const asm = hasAsm ? i.assembly_items.map(a => `<tr class="cmp" data-rg="${rg}">
     <td></td><td></td>
     <td class="ind">└ <span class="asm-note-tag">⚠ 組裝配件</span> ${esc(a.name)}</td>
-    <td></td><td class="r">${moneyD(a.qty)}</td><td class="r">${moneyD(a.unit_price)}</td>
+    <td class="r">${moneyD(a.unit_price)}</td><td class="r">${moneyD(a.qty)}</td>
     <td class="r">${money(lineAmount(a.qty, a.unit_price))}</td>
     <td class="stockcol">${dpStockCell(a)}</td>
   </tr>`).join('') : '';
@@ -4564,14 +4581,13 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
 
     <table class="dp-tbl">
       <thead><tr>
-        <th style="width:6mm">#</th>
-        <th style="width:24mm">料號</th>
-        <th>品名 / 規格</th>
-        <th style="width:9mm">單位</th>
+        <th style="width:7mm">項次</th>
+        <th style="width:20mm">品牌</th>
+        <th>項目</th>
+        <th style="width:16mm">單價</th>
         <th style="width:11mm">數量</th>
-        <th style="width:18mm">單價</th>
-        <th style="width:20mm">小計</th>
-        <th style="width:26mm">是否有庫</th>
+        <th style="width:18mm">小計</th>
+        <th style="width:24mm">是否有庫(V)</th>
       </tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table>
@@ -4584,12 +4600,14 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
         <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
         <div class="dp-kv"><span>發　　票</span><b>${d.invoiced ? '已開立　' + fmtDateShort(d.invoice_date) : '未開立'}</b></div>
         ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
-        ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note)}</b></div>` : ''}
+        ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
         <div class="dp-kv"><span>交貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
       </div>
       <div class="dp-sum-r">
         <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
         <div class="dp-sl"><span>稅額 ${(DB.settings.tax_rate * 100).toFixed(0)}%</span><b>${money(t.tax)}</b></div>
+        <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票</span><span></span></div>
+        <div class="dp-sl"><span>${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
         <div class="dp-sl total"><span>總計</span><b>${money(t.total)}</b></div>
       </div>
     </div>
