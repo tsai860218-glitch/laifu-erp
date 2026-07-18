@@ -469,7 +469,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-tbl .stockyes{color:#15803D;font-size:9pt}
 .dp-kv .blank-fill{letter-spacing:.03em;font-weight:600}
 
-.dp-sum{display:flex;gap:3mm;margin-top:1.4mm;align-items:stretch}
+.dp-sum{display:flex;gap:3mm;align-items:stretch}
 .dp-sum-l{flex:1;border:.4pt solid #BBB;border-radius:1mm;padding:1.2mm 1.8mm;min-width:0}
 .dp-kv{display:flex;gap:1.6mm;font-size:7pt;line-height:1.6}
 .dp-kv span{color:#666;flex:0 0 13mm}
@@ -482,6 +482,9 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-sl.total b{color:#1E3A8A;font-size:9pt}
 
 .dp-sign{display:flex;gap:2.5mm;margin-top:1.4mm}
+
+/* 總計/簽名區固定貼在紙張底部，不管表格內容多少都不會跟著漂移 */
+.dp-bottom{position:absolute;left:9mm;right:9mm;bottom:7mm}
 .dp-sb{flex:1;border:.4pt solid #999;border-radius:1mm;padding:1mm 1.4mm;min-height:9mm}
 .dp-sb span{font-size:6pt;color:#666;font-weight:700;display:block}
 .dp-sb b{font-size:7.5pt;display:block;margin-top:.6mm}
@@ -4586,7 +4589,13 @@ function dpItemRowsHtml(i, rowNo, rg) {
   return main + bom + asm;
 }
 
+// 出貨單明細空白列（撐版面用，欄位數要跟表頭對齊）
+function dpBlankRowHtml() {
+  return `<tr class="blank"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+}
+
 // 產生一整頁（表頭資訊 + 表格 + 是否含總計/簽名區）
+// 總計/簽名區固定貼在紙張底部（不管表格內容多少都不會跟著表格漂移）
 function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSummary) {
   return `<div class="paper a5">
     <div class="dp-head">
@@ -4626,29 +4635,31 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
     </table>
 
     ${includeSummary ? `
-    <div class="dp-sum">
-      <div class="dp-sum-l">
-        <div class="dp-kv"><span>配送方式</span><b>${esc(ship || '')}</b></div>
-        <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method || '')}</b></div>
-        <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
-        <div class="dp-kv"><span>發　　票</span><b>${d.invoiced ? '已開立　' + fmtDateShort(d.invoice_date) : '未開立'}</b></div>
-        ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
-        ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
-        <div class="dp-kv"><span>交貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
+    <div class="dp-bottom">
+      <div class="dp-sum">
+        <div class="dp-sum-l">
+          <div class="dp-kv"><span>配送方式</span><b>${esc(ship || '')}</b></div>
+          <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method || '')}</b></div>
+          <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
+          <div class="dp-kv"><span>發　　票</span><b>${d.invoiced ? '已開立　' + fmtDateShort(d.invoice_date) : '未開立'}</b></div>
+          ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
+          ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
+          <div class="dp-kv"><span>交貨日期</span><b class="blank-fill">＿＿＿年＿＿＿月＿＿＿日</b></div>
+        </div>
+        <div class="dp-sum-r">
+          <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
+          <div class="dp-sl"><span>稅額 ${(DB.settings.tax_rate * 100).toFixed(0)}%</span><b>${money(t.tax)}</b></div>
+          <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票</span><span></span></div>
+          <div class="dp-sl"><span>${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
+          <div class="dp-sl total"><span>總計</span><b>${money(t.total)}</b></div>
+        </div>
       </div>
-      <div class="dp-sum-r">
-        <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
-        <div class="dp-sl"><span>稅額 ${(DB.settings.tax_rate * 100).toFixed(0)}%</span><b>${money(t.tax)}</b></div>
-        <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票</span><span></span></div>
-        <div class="dp-sl"><span>${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
-        <div class="dp-sl total"><span>總計</span><b>${money(t.total)}</b></div>
-      </div>
-    </div>
 
-    <div class="dp-sign">
-      <div class="dp-sb"><span>負責業務</span><b>${esc(userName(d.sales_user_id) || '—')}</b></div>
-      <div class="dp-sb"><span>開單人員</span><b>${esc(d.created_by || '—')}</b></div>
-      <div class="dp-sb"><span>出貨</span><b></b></div>
+      <div class="dp-sign">
+        <div class="dp-sb"><span>負責業務</span><b>${esc(userName(d.sales_user_id) || '—')}</b></div>
+        <div class="dp-sb"><span>開單人員</span><b>${esc(d.created_by || '—')}</b></div>
+        <div class="dp-sb"><span>出貨</span><b></b></div>
+      </div>
     </div>` : ''}
 
     <div class="dp-foot">
@@ -4658,30 +4669,30 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
   </div>`;
 }
 
-// 用瀏覽器實際渲染量測每個項目的高度 + 每頁可用高度，回傳分頁結果（項目陣列的陣列）
+// 用瀏覽器實際渲染量測每個項目的高度 + 每頁可用高度，回傳分頁結果
+// 每頁回傳 {items, blanks}：items 是這頁真正的項目、blanks 是這頁還能放幾條空白列撐版面
 // 保證：不管品名多長、BOM 多少項、組裝備註多長，都不會超出 A5 紙張範圍
 function paginateDeliveryItemsMeasured(d, co, c, t, ship) {
   const items = d.items || [];
-  if (!items.length) return [[]];
 
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
   document.body.appendChild(host);
 
-  // ① 空表格（不含總計區）：量出「非末頁」可用高度
-  host.innerHTML = dpPageHtml(d, co, c, t, ship, '', 1, 1, false);
+  // ① 空表格（不含總計區）：量出「非末頁」可用高度，順便量一條空白列的高度
+  host.innerHTML = dpPageHtml(d, co, c, t, ship, dpBlankRowHtml(), 1, 1, false);
   let paper = host.querySelector('.paper.a5');
   const padBottomPx = parseFloat(getComputedStyle(paper).paddingBottom) || 0;
   const safeBottom = paper.getBoundingClientRect().bottom - padBottomPx; // padding-bottom 留給絕對定位頁尾，一般內容不能佔用
   const tbodyTop = paper.querySelector('.dp-tbl tbody').getBoundingClientRect().top;
+  const blankRowHeight = paper.querySelector('.dp-tbl tbody tr').getBoundingClientRect().height || 20;
   const availNonLast = safeBottom - tbodyTop;
 
-  // ② 空表格＋總計/簽名區：量出總計/簽名區本身真正佔用多少高度（從 tbody 頂端量到簽名區底端，
-  //    這樣量出來的區間裡（空）tbody 幾乎是 0 高度，量到的差值就是總計/簽名區實際要吃掉的空間）
+  // ② 空表格＋總計/簽名區：總計/簽名區已經是絕對定位貼底，直接量它自己的高度就好，
+  //    不受表格內容多少影響（貼底位置固定，但仍要幫表格留出對應的淨空）
   host.innerHTML = dpPageHtml(d, co, c, t, ship, '', 1, 1, true);
   paper = host.querySelector('.paper.a5');
-  const summaryOwnHeight = paper.querySelector('.dp-sign').getBoundingClientRect().bottom
-    - paper.querySelector('.dp-tbl tbody').getBoundingClientRect().top;
+  const summaryOwnHeight = paper.querySelector('.dp-bottom').getBoundingClientRect().height;
   const availLast = availNonLast - summaryOwnHeight;
 
   // ③ 全部項目（不含總計區）：量每個項目自己實際佔多高
@@ -4701,6 +4712,11 @@ function paginateDeliveryItemsMeasured(d, co, c, t, ship) {
   const SAFETY = 4; // px 安全緩衝
   const budgetNonLast = availNonLast - SAFETY;
   const budgetLast = availLast - SAFETY;
+  const blankFor = leftover => Math.max(0, Math.floor(leftover / blankRowHeight));
+
+  if (!items.length) {
+    return [{ items: [], blanks: blankFor(budgetLast) }];
+  }
 
   // ① 先用「非末頁」寬鬆預算分頁（此時還不知道哪一頁會是真正的最後一頁）
   const pages = [];
@@ -4725,7 +4741,11 @@ function paginateDeliveryItemsMeasured(d, co, c, t, ship) {
     pages.push({ idxs: [movedIdx], used: itemHeights[movedIdx] });
   }
 
-  return pages.map(p => p.idxs.map(i => items[i]));
+  return pages.map((p, pi) => {
+    const isLast = pi === pages.length - 1;
+    const budget = isLast ? budgetLast : budgetNonLast;
+    return { items: p.idxs.map(i => items[i]), blanks: blankFor(budget - p.used) };
+  });
 }
 
 function deliveryPaper(d) {
@@ -4736,10 +4756,11 @@ function deliveryPaper(d) {
   const pages = paginateDeliveryItemsMeasured(d, co, c, t, ship);
   let rowNo = 0;
 
-  return pages.map((rows, pi) => {
+  return pages.map((pg, pi) => {
     const last = pi === pages.length - 1;
-    const rowsHtml = rows.map(i => { rowNo++; return dpItemRowsHtml(i, rowNo, 'p' + pi + '_' + rowNo); }).join('');
-    return dpPageHtml(d, co, c, t, ship, rowsHtml, pi + 1, pages.length, last);
+    const itemRows = pg.items.map(i => { rowNo++; return dpItemRowsHtml(i, rowNo, 'p' + pi + '_' + rowNo); }).join('');
+    const blankRows = Array(pg.blanks || 0).fill(dpBlankRowHtml()).join('');
+    return dpPageHtml(d, co, c, t, ship, itemRows + blankRows, pi + 1, pages.length, last);
   }).join('');
 }
 
