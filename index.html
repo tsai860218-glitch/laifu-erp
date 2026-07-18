@@ -456,7 +456,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-tbl .r{text-align:right;font-family:var(--mono)}
 .dp-tbl .pn{font-family:var(--mono);font-size:6.5pt;word-break:break-all}
 .dp-tbl .sp{font-size:6.5pt;color:#555;line-height:1.3}
-.dp-tbl .asm-note{font-size:6.3pt;color:#C2410C;font-weight:700;margin-top:.5mm;line-height:1.3}
+.dp-tbl .asm-note-tag{font-size:6pt;background:#FFF2E5;color:#C2410C;border-radius:.6mm;padding:0 .8mm;margin-right:.6mm;font-weight:700}
 .dp-tbl .sm{font-size:6.5pt}
 .dp-tbl .mut{color:#888}
 .dp-tbl tr.cmp td{background:#FCFCFD;border-top:.3pt dotted #CCC}
@@ -499,7 +499,7 @@ body.printing .print-root{
   position:fixed;inset:0;background:#4A4A52;overflow:auto;padding:64px 20px 30px;z-index:150;
 }
 .print-bar{
-  position:fixed;top:0;left:0;right:0;height:52px;background:var(--surface);z-index:151;
+  position:fixed;top:0;left:0;right:0;height:52px;background:#fff;z-index:151;
   display:flex;align-items:center;justify-content:space-between;padding:0 16px;
   border-bottom:1px solid var(--line);box-shadow:0 1px 6px rgba(0,0,0,.2);
 }
@@ -522,7 +522,7 @@ body.printing .print-root{
    ============================================================ */
 /* 浮動自動完成 */
 .ac-float{
-  position:fixed;z-index:180;background:var(--surface);border:1px solid var(--line-2);
+  position:fixed;z-index:180;background:#fff;border:1px solid var(--line-2);
   border-radius:9px;box-shadow:0 8px 26px rgba(0,0,0,.16);max-height:280px;overflow:auto;
 }
 .ac-item{padding:8px 11px;cursor:pointer;display:flex;gap:9px;align-items:center;border-bottom:1px solid var(--line)}
@@ -626,7 +626,7 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 
 .site-pick{display:flex;flex-direction:column;gap:8px}
 .site-opt{display:block;width:100%;text-align:left;border:1px solid var(--line-2);border-radius:9px;
-  padding:10px 13px;background:var(--surface);cursor:pointer;transition:border-color .12s,background .12s}
+  padding:10px 13px;background:#fff;cursor:pointer;transition:border-color .12s,background .12s}
 .site-opt:hover{border-color:var(--primary);background:var(--primary-50)}
 .site-opt .t{font-size:13px;font-weight:700;color:var(--text-1);margin-bottom:3px}
 .site-opt .s{font-size:11.5px;color:var(--text-3);line-height:1.5}
@@ -634,15 +634,33 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 
 /* 出貨明細：組裝備註（畫面端） */
 .dv-tbl .asm-note{color:#C2410C;border-color:#F5C89B}
-.dv-tbl .asm-flag{font-size:10.5px;color:#C2410C;font-weight:600;margin-top:3px;line-height:1.4}
 
 /* 已開發票欄位 */
 .inv-field{border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:var(--bg)}
 
 /* 報價明細：需搭配組裝配件（僅出貨單顯示） */
-.fi-asm{display:flex;flex-direction:column;gap:6px;padding:6px 6px 2px}
-.fi-asm .fi-chk{font-size:11px;color:var(--text-2)}
-.fi-asm .inp{height:28px;font-size:12px}
+/* 組裝配件清單（報價明細內、可展開，客戶看不到只印出貨單） */
+.asm-box{grid-column:1/-1;background:#FFF8F1;border:1px dashed #F5C89B;
+  border-radius:var(--r-sm);padding:10px 12px;margin-top:6px}
+.asm-box-h{font-size:11px;font-weight:700;color:#C2410C;margin-bottom:6px}
+.asm-row{display:flex;gap:5px;align-items:center;padding:5px 0;border-bottom:1px solid #F5E0C4}
+.asm-row:last-child{border-bottom:none}
+.asm-name{flex:1.4;min-width:0}
+.asm-qty,.asm-price,.asm-cost{flex:0 0 64px}
+.asm-sup{flex:1;min-width:0}
+.asm-chk{display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--text-2);
+  white-space:nowrap;cursor:pointer;flex:0 0 auto}
+.asm-stocked{font-size:10.5px;color:var(--green);font-weight:600;flex:0 0 auto}
+.asm-empty{font-size:11px;color:var(--text-3);padding:6px 0}
+.asm-row .inp{height:28px;font-size:12px}
+.asm-row .del{flex:0 0 22px;height:22px;border:none;background:transparent;color:var(--red);
+  font-size:16px;cursor:pointer;border-radius:5px}
+.asm-row .del:hover{background:var(--red-50)}
+
+/* 出貨總覽表：已開發票勾選+日期(內嵌在表格列裡) */
+.inv-cell{white-space:nowrap}
+.inv-cell .fi-chk{justify-content:center;margin-bottom:3px}
+.inv-cell input[type="date"]{height:26px;font-size:11px;width:120px;padding:0 6px}
 
 /* ============================================================
    動作按鈕配色 —— 登記下單／開立出貨單／已出貨／已完成
@@ -1551,7 +1569,7 @@ function safeRerender(changes) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
-const SCHEMA_V = 4;                    // ← 每次改結構就 +1
+const SCHEMA_V = 5;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1763,6 +1781,41 @@ function migrate(db) {
       if (d.invoiced == null) d.invoiced = false;
       if (d.invoice_date == null) d.invoice_date = '';
       (d.items || []).forEach(i => { if (i.assembly_note == null) i.assembly_note = ''; });
+    });
+  }
+
+  if (v < 5) {
+    // 公司：新增「顯示標籤」欄位，畫面上的徽章/下拉改顯示中文（徠富/一心），
+    // 單號編碼（Q-LF-...）維持用原本的公司代碼，不受影響
+    const BADGE_MAP = { LF: '徠富', YX: '一心' };
+    db.companies.forEach(c => {
+      if (c.badge == null) c.badge = BADGE_MAP[c.code] || c.short_name || c.code;
+    });
+
+    // 報價明細：組裝備註從單一文字，改成可新增多筆、各自填數量/單價/庫存/廠商/成本
+    db.quotes.forEach(q => {
+      (q.items || []).forEach(it => {
+        if (!Array.isArray(it.assembly_items)) {
+          it.assembly_items = (it.has_assembly_note && it.assembly_note)
+            ? [{ id: uid('ai'), name: it.assembly_note, qty: 1, unit_price: 0,
+                 in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex' }]
+            : [];
+        }
+        delete it.has_assembly_note; delete it.assembly_note;
+      });
+    });
+
+    // 出貨明細：同步改成列表結構
+    db.deliveries.forEach(d => {
+      (d.items || []).forEach(i => {
+        if (!Array.isArray(i.assembly_items)) {
+          i.assembly_items = i.assembly_note
+            ? [{ id: uid('ai'), name: i.assembly_note, qty: 1, unit_price: 0,
+                 in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex' }]
+            : [];
+        }
+        delete i.assembly_note;
+      });
     });
   }
 
@@ -2089,11 +2142,11 @@ function seed() {
   const c1 = 'co_lf', c2 = 'co_yx';
 
   const companies = [
-    { id: c1, code: 'LF', name: '徠富科技企業有限公司', short_name: '徠富', tax_id: '00000001',
+    { id: c1, code: 'LF', name: '徠富科技企業有限公司', short_name: '徠富', badge: '徠富', tax_id: '00000001',
       address: '台中市西屯區工業區一路 000 號', phone: '04-0000-0000', fax: '04-0000-0001',
       email: '', logo_url: '', stamp_url: '', brand_logos: [],
       filename_pattern: DEFAULT_PATTERN.LF, is_active: true },
-    { id: c2, code: 'YX', name: '一心國際科技有限公司', short_name: '一心國際', tax_id: '00000002',
+    { id: c2, code: 'YX', name: '一心國際科技有限公司', short_name: '一心國際', badge: '一心', tax_id: '00000002',
       address: '台中市南屯區公益路二段 000 號', phone: '04-0000-0002', fax: '04-0000-0003',
       email: '', logo_url: '', stamp_url: '', brand_logos: [],
       filename_pattern: DEFAULT_PATTERN.YX, is_active: true }
@@ -2290,7 +2343,7 @@ function renderNav() {
               <span class="ico">${r.ico}</span><span>${r.t.replace('管理', '')}</span></a>`;
   }).join('');
 
-  document.getElementById('brandSub').textContent = DB.companies.map(c => c.code).join(' · ');
+  document.getElementById('brandSub').textContent = DB.companies.map(c => c.badge || c.code).join(' · ');
   document.getElementById('dbInfo').textContent =
     `報價 ${DB.quotes.length} · 出貨 ${DB.deliveries.length} · 商品 ${DB.products.length}`;
 }
@@ -2526,7 +2579,7 @@ function quoteSortValue(q, key) {
     case 'quote_no': return q.quote_no || '';
     case 'customer': return q.customer_snapshot?.name || '';
     case 'product': return (q.items.find(i => (i.name || '').trim()) || {}).name || '';
-    case 'company': return (byId(DB.companies, q.company_id) || {}).code || '';
+    case 'company': return (byId(DB.companies, q.company_id) || {}).badge || '';
     case 'sales': return userName(q.sales_user_id) || q.sales_name || '';
     case 'quote_date': return q.quote_date || '';
     case 'amount': return t.total;
@@ -2568,7 +2621,7 @@ function quoteTable(list, opts) {
         <td class="no">${esc(q.quote_no)}${q.revision > 1 ? `<span class="bdg gray plain" style="height:16px;font-size:9px;margin-left:4px">版次 ${q.revision}</span>` : ''}</td>
         <td>${esc(q.customer_snapshot?.name || '—')}<div class="muted">${esc((q.customer_snapshot?.site_label ? '(' + q.customer_snapshot.site_label + ') ' : '') + (q.customer_snapshot?.contact_person || ''))}</div></td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
-        <td><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.code || '?')}</span></td>
+        <td><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.badge || co?.code || '?')}</span></td>
         <td>${esc(userName(q.sales_user_id) || q.sales_name || '—')}</td>
         <td>${fmtDateShort(q.quote_date)}${exp ? ' <span class="bdg red" style="height:17px;font-size:10px">將到期</span>' : ''}</td>
         <td class="r money">${money(t.total)}</td>
@@ -2599,7 +2652,7 @@ function viewQuotes(v) {
       </select>
       <select class="inp" id="qco" style="width:120px">
         <option value="">全部公司</option>
-        ${DB.companies.map(c => `<option value="${c.id}" ${f.co === c.id ? 'selected' : ''}>${esc(c.code)}</option>`).join('')}
+        ${DB.companies.map(c => `<option value="${c.id}" ${f.co === c.id ? 'selected' : ''}>${esc(c.badge || c.code)}</option>`).join('')}
       </select>
       <select class="inp" id="qsales" style="width:120px">
         <option value="">全部業務</option>
@@ -2692,7 +2745,7 @@ function viewQuote(v) {
             <div class="grid g2">
               <div class="field"><label class="req">報價公司</label>
                 <select class="inp" id="fco" ${editable ? '' : 'disabled'}>
-                  ${DB.companies.map(c => `<option value="${c.id}" ${c.id === q.company_id ? 'selected' : ''}>${esc(c.name)}（${esc(c.code)}）</option>`).join('')}
+                  ${DB.companies.map(c => `<option value="${c.id}" ${c.id === q.company_id ? 'selected' : ''}>${esc(c.name)}（${esc(c.badge || c.code)}）</option>`).join('')}
                 </select></div>
               <div class="field"><label class="req">客戶</label>
                 <input class="inp" id="fcust" placeholder="輸入客戶名 / 統編 / 聯絡人…" autocomplete="off"
@@ -3133,7 +3186,7 @@ function blankItem() {
     part_no: '', brand: '', name: '', spec: '', unit: '台',
     qty: 1, unit_price: 0, default_cost: 0,
     supplier_name: '', in_stock: true, source: 'stock',
-    assembly_note: '', has_assembly_note: false, shipped_qty: 0, components: []
+    assembly_items: [], shipped_qty: 0, components: []
   };
 }
 
@@ -3193,6 +3246,7 @@ function delItem(id) {
 }
 
 let bomOpen = {};
+let asmOpen = {};
 
 function drawItems() {
   const q = QE, editable = qEditable(q);
@@ -3226,16 +3280,17 @@ function drawItems() {
       if (k === 'in_stock') drawItems();
     });
   });
-  box.querySelectorAll('[data-asmchk]').forEach(el => el.addEventListener('change', e => {
-    const it = byId(q.items, e.target.dataset.fi);
-    it.has_assembly_note = e.target.checked;
-    if (!e.target.checked) it.assembly_note = '';
-    save(); drawItems();
-    if (e.target.checked) setTimeout(() => {
-      const inp = document.querySelector(`[data-fi="${it.id}"][data-k="assembly_note"]`);
-      if (inp) inp.focus();
-    }, 40);
-  }));
+  box.querySelectorAll('[data-ai]').forEach(el => {
+    const ev = el.type === 'checkbox' ? 'change' : (el.dataset.aitax !== undefined ? 'click' : 'input');
+    el.addEventListener(ev, e => {
+      const [iid, aid] = e.target.dataset.ai.split('|');
+      const it = byId(q.items, iid), a = byId(it.assembly_items, aid), k = e.target.dataset.k;
+      if (e.target.dataset.aitax !== undefined) { a.cost_tax = a.cost_tax === 'in' ? 'ex' : 'in'; save(); drawItems(); return; }
+      a[k] = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' ? (+e.target.value || 0) : e.target.value);
+      save();
+      if (k === 'in_stock') drawItems();
+    });
+  });
   box.querySelectorAll('[data-qty]').forEach(el => el.addEventListener('input', e => {
     const it = byId(q.items, e.target.dataset.qty);
     it.qty = Math.max(0, +e.target.value || 0);
@@ -3297,6 +3352,8 @@ function itemRow(it, n, editable) {
         ${itemMeta(it, editable, inMaster)}
         ${hasBom ? `<button class="bom-toggle" onclick="toggleBom('${it.id}')">
           ${open ? '▾' : '▸'} 內部組成 ${it.components.filter(c => c.is_included !== false).length} 項${costOn ? '' : '（成本已隱藏）'}</button>` : ''}
+        ${!hasBom ? `<button class="bom-toggle" onclick="toggleAsm('${it.id}')">
+          ${asmOpen[it.id] ? '▾' : '▸'} 組裝配件 ${(it.assembly_items || []).length} 項（客戶看不到，只印出貨單）</button>` : ''}
       </div>
     </div>
     <div class="qty"><div class="mfield"><label>數量</label>
@@ -3309,6 +3366,7 @@ function itemRow(it, n, editable) {
     <div class="amt" data-amt="${it.id}">${money(amt)}</div>
     ${editable ? `<button class="del" onclick="delItem('${it.id}')" aria-label="刪除">×</button>` : '<span></span>'}
     ${hasBom && open ? bomBox(it, editable) : ''}
+    ${!hasBom && asmOpen[it.id] ? assemblyBox(it, editable) : ''}
   </div>`;
 }
 
@@ -3341,12 +3399,6 @@ function itemMeta(it, editable, inMaster) {
     ${editable && !inMaster && (it.name || '').trim()
       ? `<button class="btn sm ghost" onclick="saveFreeToMaster('${it.id}')" title="下次報價就能直接搜到">＋ 存入主檔</button>`
       : (inMaster ? '<span class="bdg green plain" style="height:20px;font-size:10px">主檔</span>' : '')}
-  </div>
-  <div class="fi-asm">
-    <label class="fi-chk"><input type="checkbox" data-fi="${it.id}" data-asmchk ${it.has_assembly_note ? 'checked' : ''} ${D}>
-      需搭配組裝配件（客戶看不到，只印在出貨單）</label>
-    ${it.has_assembly_note ? `<input class="inp" data-fi="${it.id}" data-k="assembly_note"
-        placeholder="例如：含轉接頭 x1，需另外組裝" value="${esc(it.assembly_note || '')}" ${D}>` : ''}
   </div>`;
 }
 
@@ -3388,6 +3440,51 @@ function toggleOpt(iid, cid, on) {
   const it = byId(QE.items, iid), c = byId(it.components, cid);
   c.is_included = on; save(); drawItems();
   toast(on ? '已加入可選項（僅影響內部成本）' : '已排除可選項（報價金額不變）');
+}
+
+/* 組裝配件（客戶看不到，只印在出貨單）：可新增不只一條，各自填數量/單價/庫存/廠商/成本 */
+function toggleAsm(id) { asmOpen[id] = !asmOpen[id]; drawItems(); }
+
+function addAssemblyItem(id) {
+  const it = byId(QE.items, id);
+  it.assembly_items = it.assembly_items || [];
+  it.assembly_items.push({
+    id: uid('ai'), name: '', qty: 1, unit_price: 0,
+    in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex'
+  });
+  asmOpen[id] = true;
+  save(); drawItems();
+  setTimeout(() => {
+    const inps = document.querySelectorAll(`[data-ai^="${id}|"][data-k="name"]`);
+    if (inps.length) inps[inps.length - 1].focus();
+  }, 40);
+}
+function delAssemblyItem(id, aid) {
+  const it = byId(QE.items, id);
+  it.assembly_items = (it.assembly_items || []).filter(a => a.id !== aid);
+  save(); drawItems();
+}
+
+function assemblyBox(it, editable) {
+  const D = editable ? '' : 'disabled';
+  const rows = it.assembly_items || [];
+  return `<div class="asm-box">
+    <div class="asm-box-h">組裝配件（客戶看不到，只印在出貨單）</div>
+    ${rows.length ? rows.map(a => `
+      <div class="asm-row">
+        <input class="inp asm-name" data-ai="${it.id}|${a.id}" data-k="name" placeholder="品名" value="${esc(a.name || '')}" ${D}>
+        <input class="inp num asm-qty" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="qty" placeholder="數量" value="${a.qty}" ${D}>
+        <input class="inp num asm-price" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="unit_price" placeholder="單價" value="${a.unit_price}" ${D}>
+        <label class="asm-chk"><input type="checkbox" data-ai="${it.id}|${a.id}" data-k="in_stock" ${a.in_stock ? 'checked' : ''} ${D}> 有庫</label>
+        ${a.in_stock
+          ? '<span class="asm-stocked">✓ 庫存</span>'
+          : `<input class="inp asm-sup" list="supList" data-ai="${it.id}|${a.id}" data-k="supplier_name" placeholder="廠商" value="${esc(a.supplier_name || '')}" ${D}>
+             <input class="inp num asm-cost" type="number" data-ai="${it.id}|${a.id}" data-k="cost" placeholder="成本" value="${a.cost || 0}" ${D}>
+             <button class="taxbtn" data-ai="${it.id}|${a.id}" data-aitax ${D}>${COST_TAX[a.cost_tax || 'ex']}</button>`}
+        ${editable ? `<button class="del" onclick="delAssemblyItem('${it.id}','${a.id}')" aria-label="刪除">×</button>` : ''}
+      </div>`).join('') : '<div class="asm-empty">還沒有配件</div>'}
+    ${editable ? `<button class="btn sm ghost" style="margin-top:6px" onclick="addAssemblyItem('${it.id}')">＋ 新增配件</button>` : ''}
+  </div>`;
 }
 
 function refreshAmount(it) {
@@ -3569,7 +3666,10 @@ function makeDelivery(q, co, o) {
     cost: +it.default_cost || 0,
     cost_tax: 'ex',
     need_assembly: false,
-    assembly_note: it.has_assembly_note ? (it.assembly_note || '') : '',
+    assembly_items: (it.assembly_items || []).map(a => ({
+      id: uid('ai'), name: a.name, qty: a.qty, unit_price: a.unit_price,
+      in_stock: a.in_stock, supplier_name: a.supplier_name, cost: a.cost, cost_tax: a.cost_tax || 'ex'
+    })),
     is_manual: false,
     // BOM 零件：供採購展開查看
     components: (it.components || []).filter(c => c.is_included !== false).map((c, m) => ({
@@ -3624,6 +3724,7 @@ function deliverySortValue(d, key) {
     case 'amount': return t.total;
     case 'buy': return allLines(d).filter(i => !i.in_stock).length;
     case 'status': return DS[d.status] ? DS[d.status].label : '';
+    case 'invoiced': return d.invoiced ? 1 : 0;
     case 'note': return d.note || '';
     default: return d.created_at || '';
   }
@@ -3631,14 +3732,28 @@ function deliverySortValue(d, key) {
 const D_COLS = [
   ['delivery_no', '出貨單號'], ['customer', '客戶'], ['product', '商品'], ['quote_no', '來源報價'],
   ['sales', '業務'], ['created_by', '開單人員'], ['delivery_date', '日期'], ['items', '品項'],
-  ['amount', '含稅金額'], ['buy', '待採購'], ['status', '狀態'], ['note', '備註']
+  ['amount', '含稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'], ['note', '備註']
 ];
+
+function toggleDvInvoiced(id, checked) {
+  const d = byId(DB.deliveries, id);
+  d.invoiced = checked;
+  if (!d.invoiced) d.invoice_date = '';
+  else if (!d.invoice_date) d.invoice_date = today();
+  save();
+  const dateEl = document.querySelector(`[data-invdate="${id}"]`);
+  if (dateEl) { dateEl.disabled = !checked; dateEl.value = d.invoice_date || ''; }
+}
+function setDvInvoiceDate(id, val) {
+  const d = byId(DB.deliveries, id);
+  d.invoice_date = val; save();
+}
 
 function deliveryTable(list) {
   if (!list.length) return `<div class="empty"><div class="e">▦</div><h3>沒有出貨單</h3>
     <p>出貨單由已下單的報價開立</p><button class="btn" onclick="go('quotes?status=signed')">查看已下單報價</button></div>`;
   const sorted = sortRows(list, dSortState, deliverySortValue);
-  const rc = k => ['items', 'amount', 'buy'].includes(k) ? 'c' : '';
+  const rc = k => ['items', 'amount', 'buy', 'invoiced'].includes(k) ? 'c' : '';
   return `<table class="tbl"><thead><tr>
       ${D_COLS.map(([k, label]) => `<th class="sortable ${k === 'amount' ? 'r' : rc(k)}" data-sortkey="${k}">${label}${sortArrow(dSortState, k)}</th>`).join('')}
     </tr></thead><tbody>
@@ -3656,11 +3771,16 @@ function deliveryTable(list) {
         <td class="muted" style="font-family:var(--mono);font-size:11px">${esc(d.quote_no || '—')}</td>
         <td>${esc(userName(d.sales_user_id) || '—')}</td>
         <td class="muted">${esc(d.created_by || '—')}</td>
-        <td>${fmtDateShort(d.delivery_date)}${d.invoiced ? ' <span class="bdg green plain" style="height:16px;font-size:9px">已開票</span>' : ''}</td>
+        <td>${fmtDateShort(d.delivery_date)}</td>
         <td class="c">${d.items.length}</td>
         <td class="r money">${money(t.total)}</td>
         <td class="c">${buy ? `<span class="bdg orange plain">${buy}</span>` : '<span class="muted">—</span>'}</td>
         <td>${badge(DS, d.status)}</td>
+        <td class="c inv-cell" onclick="event.stopPropagation()">
+          <label class="fi-chk" style="justify-content:center">
+            <input type="checkbox" ${d.invoiced ? 'checked' : ''} onchange="toggleDvInvoiced('${d.id}', this.checked)"></label>
+          <input type="date" class="inp" data-invdate="${d.id}" value="${esc(d.invoice_date || '')}"
+            ${d.invoiced ? '' : 'disabled'} onchange="setDvInvoiceDate('${d.id}', this.value)"></td>
         <td class="prod-col muted" title="${esc(d.note || '')}">${esc(d.note || '—')}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
@@ -3712,6 +3832,7 @@ function viewDeliveries(v) {
    =========================================================== */
 let DE = null;
 let dBomOpen = {};
+let dvAsmOpen = {};
 
 function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
@@ -3788,12 +3909,6 @@ function viewDelivery(v) {
             <div class="field ${d.shipping_method === '其他' ? '' : 'hide'}" id="shipOther">
               <label>配送方式說明</label>
               <input class="inp" data-d="shipping_method_other" value="${esc(d.shipping_method_other || '')}" ${editable ? '' : 'disabled'}></div>
-            <div class="field inv-field">
-              <label class="fi-chk" style="font-size:13px;color:var(--text-1);font-weight:600">
-                <input type="checkbox" id="invChk" ${d.invoiced ? 'checked' : ''}> 已開發票</label>
-              <input class="inp" type="date" id="invDate" value="${esc(d.invoice_date || '')}"
-                style="margin-top:6px;max-width:200px" ${d.invoiced ? '' : 'disabled'} placeholder="發票日期">
-              <div class="hint">開發票通常在出貨完成後才處理，這欄不受出貨狀態鎖定。</div></div>
             <div class="grid g2">
               <div class="field"><label>附件</label>
                 <textarea class="inp" data-d="attachment" ${editable ? '' : 'disabled'}>${esc(d.attachment || '')}</textarea></div>
@@ -3837,14 +3952,6 @@ function viewDelivery(v) {
     if (el.dataset.d === 'shipping_method')
       document.getElementById('shipOther').classList.toggle('hide', el.value !== '其他');
   }));
-  document.getElementById('invChk').addEventListener('change', e => {
-    d.invoiced = e.target.checked;
-    if (!d.invoiced) d.invoice_date = '';
-    else if (!d.invoice_date) d.invoice_date = today();
-    save(); render();
-  });
-  const invDateEl = document.getElementById('invDate');
-  if (invDateEl) invDateEl.addEventListener('change', e => { d.invoice_date = e.target.value; save(); });
 
   drawDvItems(); drawDvTotals();
 }
@@ -3900,11 +4007,10 @@ function drawDvItems() {
           : `<span class="muted" style="font-family:var(--mono);font-size:11px">${esc(i.part_no || '—')}</span>`}</td>
         <td>${editable
           ? `<input class="inp" style="height:28px" data-di="${i.id}" data-k="name" value="${esc(i.name)}">
-             <input class="inp" style="height:24px;font-size:11px;margin-top:3px" data-di="${i.id}" data-k="spec" placeholder="規格" value="${esc(i.spec || '')}">
-             <input class="inp asm-note" style="height:24px;font-size:11px;margin-top:3px" data-di="${i.id}" data-k="assembly_note" placeholder="組裝備註（只出貨單看得到，選填）" value="${esc(i.assembly_note || '')}">`
-          : `<b>${esc(i.brand ? i.brand + ' ' : '')}${esc(i.name)}</b>${i.spec ? `<div class="muted">${esc(i.spec)}</div>` : ''}
-             ${i.assembly_note ? `<div class="asm-flag">⚠ ${esc(i.assembly_note)}</div>` : ''}`}
-          ${hasBom ? `<button class="bom-toggle" onclick="toggleDvBom('${i.id}')">${open ? '▾' : '▸'} BOM 零件 ${i.components.length} 項（採購用）</button>` : ''}</td>
+             <input class="inp" style="height:24px;font-size:11px;margin-top:3px" data-di="${i.id}" data-k="spec" placeholder="規格" value="${esc(i.spec || '')}">`
+          : `<b>${esc(i.brand ? i.brand + ' ' : '')}${esc(i.name)}</b>${i.spec ? `<div class="muted">${esc(i.spec)}</div>` : ''}`}
+          ${hasBom ? `<button class="bom-toggle" onclick="toggleDvBom('${i.id}')">${open ? '▾' : '▸'} BOM 零件 ${i.components.length} 項（採購用）</button>` : ''}
+          ${!hasBom ? `<button class="bom-toggle asm-note" onclick="toggleDvAsm('${i.id}')">${dvAsmOpen[i.id] ? '▾' : '▸'} ⚠ 組裝配件 ${(i.assembly_items || []).length} 項</button>` : ''}</td>
         <td>${editable ? `<input class="inp" style="height:28px" data-di="${i.id}" data-k="unit" value="${esc(i.unit || '')}">` : esc(i.unit || '')}</td>
         <td class="r">${editable
           ? `<input class="inp num" type="number" step="0.01" min="0" style="height:28px" data-di="${i.id}" data-k="qty" value="${i.qty}">`
@@ -3932,6 +4038,32 @@ function drawDvItems() {
                 <td class="c">${c.need_assembly ? '<span class="bdg orange plain">■</span>' : '<span class="muted">—</span>'}</td>
                 <td>${stockCell(c, `data-dc="${i.id}|${c.id}"`)}</td>
               </tr>`).join('')}</tbody></table>
+          </div></td></tr>`);
+
+      if (!hasBom && dvAsmOpen[i.id]) rows.push(`<tr class="bom-row" style="cursor:default"><td></td>
+        <td colspan="${editable ? 7 : 6}" style="padding:0 12px 10px">
+          <div class="bom-box" style="margin-top:0">
+            <div style="font-size:11px;font-weight:700;color:var(--text-2);margin-bottom:6px">
+              組裝配件（客戶看不到，只印在出貨單）</div>
+            <table class="tbl" style="font-size:12px">
+              <thead><tr><th>品名</th><th class="r" style="width:64px">數量</th>
+                <th class="r" style="width:72px">單價</th><th style="width:${stockColW}px">是否有庫</th>
+                ${editable ? '<th style="width:30px"></th>' : ''}</tr></thead>
+              <tbody>${(i.assembly_items || []).map(a => `<tr style="cursor:default">
+                <td>${editable
+                  ? `<input class="inp" style="height:26px;font-size:11.5px" data-da="${i.id}|${a.id}" data-k="name" value="${esc(a.name || '')}">`
+                  : esc(a.name || '')}</td>
+                <td class="r">${editable
+                  ? `<input class="inp num" type="number" step="0.01" min="0" style="height:26px" data-da="${i.id}|${a.id}" data-k="qty" value="${a.qty}">`
+                  : moneyD(a.qty)}</td>
+                <td class="r">${editable
+                  ? `<input class="inp num" type="number" step="0.01" min="0" style="height:26px" data-da="${i.id}|${a.id}" data-k="unit_price" value="${a.unit_price}">`
+                  : moneyD(a.unit_price)}</td>
+                <td>${stockCell(a, `data-da="${i.id}|${a.id}"`)}</td>
+                ${editable ? `<td><button class="btn sm ghost" onclick="delDvAsmItem('${i.id}','${a.id}')" style="color:var(--red)">×</button></td>` : ''}
+              </tr>`).join('') || `<tr style="cursor:default"><td colspan="${editable ? 5 : 4}" class="muted">還沒有配件</td></tr>`}
+              </tbody></table>
+            ${editable ? `<button class="btn sm ghost" style="margin-top:8px" onclick="addDvAsmItem('${i.id}')">＋ 新增配件</button>` : ''}
           </div></td></tr>`);
       return rows.join('');
     }).join('')}
@@ -3965,9 +4097,36 @@ function drawDvItems() {
       if (k === 'cost') drawDvTotals();
     });
   });
+  document.querySelectorAll('[data-da]').forEach(el => {
+    const ev = el.type === 'checkbox' ? 'change' : (el.dataset.taxbtn !== undefined ? 'click' : 'input');
+    el.addEventListener(ev, () => {
+      const [iid, aid] = el.dataset.da.split('|');
+      const a = byId(byId(d.items, iid).assembly_items, aid), k = el.dataset.k;
+      if (el.dataset.taxbtn !== undefined) { a.cost_tax = a.cost_tax === 'in' ? 'ex' : 'in'; save(); drawDvItems(); return; }
+      a[k] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? (+el.value || 0) : el.value);
+      save();
+      if (k === 'in_stock') drawDvItems();
+    });
+  });
 }
 
 function toggleDvBom(id) { dBomOpen[id] = !dBomOpen[id]; drawDvItems(); }
+function toggleDvAsm(id) { dvAsmOpen[id] = !dvAsmOpen[id]; drawDvItems(); }
+function addDvAsmItem(id) {
+  const it = byId(DE.items, id);
+  it.assembly_items = it.assembly_items || [];
+  it.assembly_items.push({
+    id: uid('ai'), name: '', qty: 1, unit_price: 0,
+    in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex'
+  });
+  dvAsmOpen[id] = true;
+  save(); drawDvItems();
+}
+function delDvAsmItem(id, aid) {
+  const it = byId(DE.items, id);
+  it.assembly_items = (it.assembly_items || []).filter(a => a.id !== aid);
+  save(); drawDvItems();
+}
 
 function drawDvTotals() {
   const d = DE, t = calcDoc(d);
@@ -4006,7 +4165,7 @@ function addDvItem() {
     id: uid('di'), quote_item_id: null, sort_order: DE.items.length,
     part_no: '', brand: '', name: '新增品項', spec: '', unit: '台',
     qty: 1, unit_price: 0, in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex',
-    need_assembly: false, assembly_note: '', is_manual: true, components: []
+    need_assembly: false, assembly_items: [], is_manual: true, components: []
   });
   save(); drawDvItems(); drawDvTotals(); toast('已加一行（不影響報價單）');
 }
@@ -4349,11 +4508,11 @@ function dpStockCell(obj) {
 // 一個項目（主列 + BOM 零件列）的完整列印列，rg 是量測時用來分組的標記
 function dpItemRowsHtml(i, rowNo, rg) {
   const hasBom = i.components && i.components.length;
+  const hasAsm = i.assembly_items && i.assembly_items.length;
   const main = `<tr data-rg="${rg}">
     <td class="c">${rowNo}</td>
     <td class="pn">${esc(i.part_no || '')}</td>
-    <td><b>${esc(i.brand ? i.brand + ' ' : '')}${esc(i.name)}</b>${i.spec ? `<div class="sp">${esc(i.spec)}</div>` : ''}
-      ${i.assembly_note ? `<div class="asm-note">⚠ ${esc(i.assembly_note)}</div>` : ''}</td>
+    <td><b>${esc(i.brand ? i.brand + ' ' : '')}${esc(i.name)}</b>${i.spec ? `<div class="sp">${esc(i.spec)}</div>` : ''}</td>
     <td class="c">${esc(i.unit || '')}</td>
     <td class="r">${moneyD(i.qty)}</td>
     <td class="r">${moneyD(i.unit_price)}</td>
@@ -4367,7 +4526,14 @@ function dpItemRowsHtml(i, rowNo, rg) {
     <td></td><td class="r">${moneyD(x.qty)}</td><td></td><td></td>
     <td class="stockcol">${dpStockCell(x)}</td>
   </tr>`).join('') : '';
-  return main + bom;
+  const asm = hasAsm ? i.assembly_items.map(a => `<tr class="cmp" data-rg="${rg}">
+    <td></td><td></td>
+    <td class="ind">└ <span class="asm-note-tag">⚠ 組裝配件</span> ${esc(a.name)}</td>
+    <td></td><td class="r">${moneyD(a.qty)}</td><td class="r">${moneyD(a.unit_price)}</td>
+    <td class="r">${money(lineAmount(a.qty, a.unit_price))}</td>
+    <td class="stockcol">${dpStockCell(a)}</td>
+  </tr>`).join('') : '';
+  return main + bom + asm;
 }
 
 // 產生一整頁（表頭資訊 + 表格 + 是否含總計/簽名區）
@@ -4562,7 +4728,7 @@ function viewCustomers(v) {
             <td>${esc(d ? (d.label || d.contact_person || '—') : '—')}
               ${extra > 0 ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">+${extra}</span>` : ''}</td>
             <td style="font-family:var(--mono)">${esc(d ? d.phone || '—' : '—')}</td>
-            <td>${co ? `<span class="bdg gray plain">${esc(co.code)}</span>` : '—'}</td>
+            <td>${co ? `<span class="bdg gray plain">${esc(co.badge || co.code)}</span>` : '—'}</td>
             <td class="c">${n || '<span class="muted">—</span>'}</td></tr>`;
         }).join('')}</tbody></table>`;
   };
@@ -5012,7 +5178,7 @@ function viewSettings(v) {
               : '<div style="width:44px;height:38px;border:1px dashed var(--line-2);border-radius:6px;display:grid;place-items:center;color:var(--text-3);font-size:10px">無<br>Logo</div>'}
             <div style="flex:1">
               <b style="font-size:14px">${esc(c.name)}</b>
-              <div class="muted" style="font-size:11px">${esc(c.code)}　簡稱：${esc(c.short_name || '—')}　統編 ${esc(c.tax_id || '—')}</div>
+              <div class="muted" style="font-size:11px">代碼 ${esc(c.code)}　標籤 ${esc(c.badge || '—')}　簡稱 ${esc(c.short_name || '—')}　統編 ${esc(c.tax_id || '—')}</div>
             </div>
             <button class="btn sm" onclick="editCompany('${c.id}')">編輯</button>
           </div>
@@ -5112,12 +5278,16 @@ function editCompany(id) {
     body: `
       <div class="grid g3">
         <div class="field"><label class="req">公司代碼</label><input class="inp" data-f="code" value="${esc(c.code)}" maxlength="4">
-          <div class="hint">用於單號 Q-<b>${esc(c.code)}</b>-202607-001</div></div>
+          <div class="hint">用於單號 Q-<b>${esc(c.code)}</b>-202607-001（既有單號的編碼不會變）</div></div>
+        <div class="field"><label class="req">顯示標籤</label><input class="inp" data-f="badge" value="${esc(c.badge || '')}" maxlength="6">
+          <div class="hint">畫面上的徽章/下拉選單顯示這個，例：徠富、一心</div></div>
         <div class="field"><label class="req">簡稱</label><input class="inp" data-f="short_name" value="${esc(c.short_name || '')}">
           <div class="hint">用於 PDF 檔名</div></div>
+      </div>
+      <div class="grid g2">
+        <div class="field"><label class="req">公司全名</label><input class="inp" data-f="name" value="${esc(c.name)}"></div>
         <div class="field"><label>統一編號</label><input class="inp" data-f="tax_id" value="${esc(c.tax_id)}"></div>
       </div>
-      <div class="field"><label class="req">公司全名</label><input class="inp" data-f="name" value="${esc(c.name)}"></div>
       <div class="field"><label>地址</label><input class="inp" data-f="address" value="${esc(c.address)}"></div>
       <div class="grid g2">
         <div class="field"><label>電話</label><input class="inp" data-f="phone" value="${esc(c.phone)}"></div>
@@ -5197,6 +5367,7 @@ function editCompany(id) {
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         if (!o.name || !o.code) return toast('公司全名與代碼必填', 'err');
         if (!o.short_name) o.short_name = shortenName(o.name);
+        if (!o.badge) o.badge = o.short_name || o.code;
         Object.assign(c, o, { logo_url: logo, stamp_url: stamp, brand_logos: brands });
         save(); close(); render(); toast('已儲存', 'ok');
       };
