@@ -162,6 +162,7 @@ select.inp{padding-right:6px;cursor:pointer}
 .tbl .money{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600}
 .tbl .muted{color:var(--text-3);font-size:12px}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tbl td.nowrap,.tbl th.nowrap{white-space:nowrap}
 
 /* Badges */
 .bdg{
@@ -259,6 +260,9 @@ select.inp{padding-right:6px;cursor:pointer}
 
 /* Toolbar */
 .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.bulk-bar{display:flex;align-items:center;gap:12px;background:var(--primary-050);
+  border:1px solid var(--primary);border-radius:var(--r-sm);padding:8px 14px;margin-bottom:12px;font-size:13px}
+.bulk-bar b{color:var(--primary)}
 .toolbar .grow{flex:1;min-width:180px}
 .sec-title{font-size:12px;font-weight:700;color:var(--text-2);margin:22px 0 10px;letter-spacing:.02em}
 .sec-title:first-child{margin-top:0}
@@ -478,13 +482,13 @@ body.cost-on.mobile .cost-warn{display:flex}
 
 .dp-sum{display:flex;gap:3mm;align-items:stretch}
 .dp-sum-l{flex:1;border:.4pt solid #BBB;border-radius:1mm;padding:1.2mm 1.8mm;min-width:0}
-.dp-kv{display:flex;gap:1.6mm;font-size:7pt;line-height:1.6}
+.dp-kv{display:flex;gap:1.6mm;font-size:7pt;line-height:1.35}
 .dp-kv-row{display:flex;gap:3mm}
 .dp-kv-row .dp-kv.half{flex:1;min-width:0}
 .dp-kv span{color:#666;flex:0 0 13mm}
 .dp-kv b{font-weight:700;min-width:0;word-break:break-word}
 .dp-sum-r{flex:0 0 46mm;border:.4pt solid #7A8AA5;border-radius:1mm;overflow:hidden;align-self:flex-start}
-.dp-sl{display:flex;justify-content:space-between;padding:1mm 1.6mm;font-size:7.5pt;border-bottom:.4pt solid #DDD}
+.dp-sl{display:flex;justify-content:space-between;padding:.7mm 1.6mm;font-size:7.3pt;border-bottom:.4pt solid #DDD}
 .dp-sl span{color:#555}
 .dp-sl b{font-family:var(--mono);font-weight:700}
 .dp-sl.total{background:#E8EDF7;border-bottom:none}
@@ -494,9 +498,9 @@ body.cost-on.mobile .cost-warn{display:flex}
 
 /* 總計/簽名區固定貼在紙張底部，不管表格內容多少都不會跟著漂移 */
 .dp-bottom{position:absolute;left:9mm;right:9mm;bottom:7mm}
-.dp-sb{flex:1;min-height:9mm}
+.dp-sb{flex:1;min-height:6mm}
 .dp-sb span{font-size:6pt;color:#666;font-weight:700;display:block;padding-bottom:.6mm;border-bottom:.4pt solid #ccc}
-.dp-sb b{font-size:7.5pt;display:block;margin-top:1.5mm}
+.dp-sb b{font-size:7.5pt;display:block;margin-top:1mm}
 .dp-foot{position:absolute;left:9mm;right:9mm;bottom:3.5mm;display:flex;justify-content:space-between;
   font-size:6pt;color:#888;font-family:var(--mono)}
 
@@ -524,9 +528,16 @@ body.printing .print-root{
   body.printing .print-root{
     display:block!important;position:static;background:#fff;padding:0;overflow:visible;
   }
-  .paper{box-shadow:none!important;margin:0!important;break-after:page;page-break-after:always}
+  .paper{box-shadow:none!important;margin:0!important;break-after:page;page-break-after:always;
+    -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+  .paper *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
   .paper:last-child{break-after:auto;page-break-after:auto}
-  .pp-tbl th,.dp-tbl th,.pp-sl.total,.dp-sl.total{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+@page print-a4{size:A4 portrait;margin:0}
+@page print-a5{size:A5 landscape;margin:0}
+@media print{
+  .print-root.A4{page:print-a4}
+  .print-root.A5{page:print-a5}
 }
 
 /* ============================================================
@@ -1356,6 +1367,7 @@ const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !==
 const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries'];
 
 let fbAuth = null, fbDb = null, fbUser = null;
+let cloudConnected = false; // 即時狀態：現在是不是真的連上雲端資料庫在跑（不是只看有沒有填設定）
 let _lastSynced = null;   // 最後一次成功同步到雲端的資料快照，用來比對哪些筆記錄有變動
 let _syncTimer = null;
 let _listenersOn = false;
@@ -1401,26 +1413,28 @@ function fbInit() {
         if (user) {
           showAppShell();
           await load();
+          cloudConnected = true;
           initCostDefault();
           wireCoreListeners();
           render();
           firestoreListen();
           promptOperator();
         } else {
+          cloudConnected = false;
           _listenersOn = false;
           showLoginScreen();
         }
       } catch (e) {
         console.error('登入後載入資料失敗，改用本機模式', e);
         toast('連上雲端後載入資料失敗，先用本機資料', 'err');
-        localFallback = true;
+        localFallback = true; cloudConnected = false;
         bootLocalOnly();
       }
     },
     err => {
       console.error('Firebase 登入狀態監聽失敗，改用本機模式', err);
       if (!localFallback) {
-        firstResolved = true; localFallback = true;
+        firstResolved = true; localFallback = true; cloudConnected = false;
         clearTimeout(watchdog);
         bootLocalOnly();
       }
@@ -1430,6 +1444,7 @@ function fbInit() {
 
 // Firebase 還沒設定（仍是預設模板）：行為跟改版前完全一樣，本機儲存、不用登入
 function bootLocalOnly() {
+  cloudConnected = false;
   const ls = document.getElementById('loginScreen');
   if (ls) ls.style.display = 'none';
   document.getElementById('app').style.display = 'flex';
@@ -1616,7 +1631,7 @@ function firestoreListen() {
         else { if (lidx >= 0) larr[lidx] = data; else larr.push(data); }
       });
       try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
-      safeRerender(remoteChanges);
+      safeRerender(remoteChanges, col);
     });
   });
   fbDb.collection('meta').doc('settings').onSnapshot(doc => {
@@ -1627,8 +1642,24 @@ function firestoreListen() {
   });
 }
 
-// 別人剛好在改我正在看的這一筆時，不要整頁重繪打斷輸入，改成提示就好
-function safeRerender(changes) {
+// 這筆變動跟目前畫面有沒有關係：無關的話不用重繪，才不會別人改別的東西也在你螢幕上閃一下
+function relevantToCurrentView(col) {
+  const k = route.k;
+  if (k === 'dash') return ['quotes', 'deliveries', 'customers'].includes(col);
+  if (k === 'quote' || k === 'quotes') return ['quotes', 'customers', 'companies', 'products', 'users'].includes(col);
+  if (k === 'delivery' || k === 'deliveries') return ['deliveries', 'quotes', 'customers', 'companies', 'users'].includes(col);
+  if (k === 'customers') return ['customers', 'companies'].includes(col);
+  if (k === 'products') return ['products', 'categories', 'suppliers'].includes(col);
+  if (k === 'users') return col === 'users';
+  if (k === 'suppliers') return col === 'suppliers';
+  if (k === 'settings') return ['companies', 'users', 'categories', 'suppliers'].includes(col);
+  return true; // 不確定的頁面，保守起見還是重繪
+}
+
+let _renderDebounce = null;
+// 別人剛好在改我正在看的這一筆時，不要整頁重繪打斷輸入，改成提示就好；
+// 跟目前畫面無關的變動不重繪；短時間內多筆變動合併成一次重繪，避免連環閃爍
+function safeRerender(changes, col) {
   const editingId = (route.k === 'quote' && typeof QE !== 'undefined' && QE) ? QE.id
     : (route.k === 'delivery' && typeof DE !== 'undefined' && DE) ? DE.id : null;
   const touchesEditing = editingId && changes.some(c => c.doc.data().id === editingId);
@@ -1636,7 +1667,9 @@ function safeRerender(changes) {
     toast('這筆單據剛被其他人同時修改，畫面可能跟最新狀態不完全一致，建議儲存後重新整理', 'err');
     return;
   }
-  render();
+  if (col && !relevantToCurrentView(col)) return;
+  clearTimeout(_renderDebounce);
+  _renderDebounce = setTimeout(render, 400);
 }
 
 
@@ -2407,6 +2440,19 @@ const ICONS = {
 };
 function icon(name) { return ICONS[name] || ICONS.notfound; }
 
+/* ===========================================================
+   總覽表批次勾選：共用的操作列狀態更新（報價/出貨各自的Set在各自檔案裡）
+   =========================================================== */
+function updateBulkBar(prefix) {
+  const bar = document.getElementById(prefix + 'BulkBar');
+  if (!bar) return;
+  const sel = prefix === 'q' ? qSelected : dSelected;
+  const n = sel.size;
+  bar.style.display = n ? 'flex' : 'none';
+  const cnt = document.getElementById(prefix + 'SelCount');
+  if (cnt) cnt.textContent = n;
+}
+
 
 /* ===========================================================
    種子資料
@@ -2686,21 +2732,6 @@ function markExpired() {
 /* ===========================================================
    §15 Dashboard
    =========================================================== */
-// 近 N 個月的報價/成交數與成交金額（用來畫趨勢圖）
-function monthlyTrend(months) {
-  const now = new Date();
-  const out = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const my = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    const qs = DB.quotes.filter(q => q.quote_date && q.quote_date.slice(0, 7) === my && !isDraftNo(q.quote_no));
-    const deals = qs.filter(q => ['signed', 'partially_shipped', 'completed'].includes(q.status));
-    const amount = deals.reduce((s, q) => s + calcQuote(q).total, 0);
-    out.push({ ym: my, label: `${d.getMonth() + 1}月`, quoteCount: qs.length, dealCount: deals.length, amount });
-  }
-  return out;
-}
-
 // 今年至今，依成交金額排行的客戶（前 5 名）
 function topCustomersThisYear(n) {
   const yr = today().slice(0, 4);
@@ -2712,31 +2743,6 @@ function topCustomersThisYear(n) {
     totals[name] = (totals[name] || 0) + calcQuote(q).total;
   });
   return Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, n || 5);
-}
-
-// 手刻 SVG 長條圖（不依賴外部圖表庫），畫近 N 個月的成交金額
-function trendChartSvg(data) {
-  const w = 640, h = 168, padL = 8, padR = 8, padT = 18, padB = 22;
-  const chartW = w - padL - padR, chartH = h - padT - padB;
-  const maxAmt = Math.max(...data.map(d => d.amount), 1);
-  const gap = chartW / data.length;
-  const barW = Math.min(38, gap * 0.55);
-  const bars = data.map((d, i) => {
-    const barH = maxAmt ? Math.max((d.amount / maxAmt) * chartH, d.amount > 0 ? 2 : 0) : 0;
-    const x = padL + i * gap + (gap - barW) / 2;
-    const y = padT + chartH - barH;
-    const isLast = i === data.length - 1;
-    const label = d.amount >= 10000 ? Math.round(d.amount / 1000) + 'k' : (d.amount || '');
-    return `<g>
-      <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${isLast ? '#1E3A8A' : '#93A9D6'}"/>
-      ${d.amount ? `<text x="${x + barW / 2}" y="${y - 5}" text-anchor="middle" font-size="10" fill="#64748B">${label}</text>` : ''}
-      <text x="${x + barW / 2}" y="${padT + chartH + 16}" text-anchor="middle" font-size="10" fill="#94A3B8">${d.label}</text>
-    </g>`;
-  }).join('');
-  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block" preserveAspectRatio="xMidYMid meet">
-    <line x1="${padL}" y1="${padT + chartH}" x2="${w - padR}" y2="${padT + chartH}" stroke="#E5E9F0" stroke-width="1"/>
-    ${bars}
-  </svg>`;
 }
 
 function viewDash(v) {
@@ -2784,9 +2790,6 @@ function viewDash(v) {
     <div class="stat" style="margin-top:12px">
       <div class="k">本月成交金額（含稅）</div><div class="v">NT$ ${money(dealAmt)}</div>
     </div>
-
-    <div class="sec-title">近 6 個月成交金額趨勢</div>
-    <div class="card"><div class="card-b">${trendChartSvg(monthlyTrend(6))}</div></div>
 
     ${(() => {
       const top = topCustomersThisYear(5);
@@ -2997,13 +3000,20 @@ const Q_COLS = [
   ['status', '狀態'], ['order_method', '下單方式'], ['note', '備註']
 ];
 
+let qSelected = new Set();
+
 function quoteTable(list, opts) {
   opts = opts || {};
   if (!list.length) return `<div class="empty"><div class="e">${icon('quote')}</div><h3>沒有報價</h3>
     <p>建立第一張報價單開始使用</p><button class="btn primary" onclick="newQuote()">＋ 新增報價</button></div>`;
   const sorted = opts.noSort ? list : sortRows(list, qSortState, quoteSortValue);
+  const sel = opts.selectable;
+  const allChecked = sel && sorted.length && sorted.every(q => qSelected.has(q.id));
   return `<table class="tbl">
     <thead><tr>
+      ${sel ? `<th style="width:32px" onclick="event.stopPropagation()">
+        <input type="checkbox" id="qSelAll" ${allChecked ? 'checked' : ''}
+          onclick="toggleQSelAll(this.checked, ${esc(JSON.stringify(sorted.map(q => q.id)))})"></th>` : ''}
       ${Q_COLS.map(([k, label]) => opts.noSort
         ? `<th class="${k === 'amount' ? 'r' : ''}">${label}</th>`
         : `<th class="sortable ${k === 'amount' ? 'r' : ''}" data-sortkey="${k}">${label}${sortArrow(qSortState, k)}</th>`).join('')}
@@ -3019,18 +3029,29 @@ function quoteTable(list, opts) {
         : names.length === 1 ? esc(names[0])
         : `${esc(names[0])} <span class="muted">等${names.length}項</span>`;
       return `<tr class="co-row" style="border-left-color:${cc}" onclick="go('quote/${q.id}')">
-        <td class="no">${esc(q.quote_no)}${q.revision > 1 ? `<span class="bdg gray plain" style="height:16px;font-size:9px;margin-left:4px">版次 ${q.revision}</span>` : ''}</td>
-        <td>${esc(q.customer_snapshot?.name || '—')}<div class="muted">${esc((q.customer_snapshot?.site_label ? '(' + q.customer_snapshot.site_label + ') ' : '') + (q.customer_snapshot?.contact_person || ''))}</div></td>
+        ${sel ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="q-sel" ${qSelected.has(q.id) ? 'checked' : ''} onchange="toggleQSel('${q.id}', this.checked)"></td>` : ''}
+        <td class="no nowrap">${esc(q.quote_no)}${q.revision > 1 ? `<span class="bdg gray plain" style="height:16px;font-size:9px;margin-left:4px">版次 ${q.revision}</span>` : ''}</td>
+        <td class="nowrap">${esc(q.customer_snapshot?.name || '—')}<div class="muted">${esc((q.customer_snapshot?.site_label ? '(' + q.customer_snapshot.site_label + ') ' : '') + (q.customer_snapshot?.contact_person || ''))}</div></td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
-        <td><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.badge || co?.code || '?')}</span></td>
-        <td>${esc(userName(q.sales_user_id) || q.sales_name || '—')}</td>
-        <td>${fmtDateShort(q.quote_date)}${exp ? ' <span class="bdg red" style="height:17px;font-size:10px">將到期</span>' : ''}</td>
-        <td class="r money">${money(t.total)}</td>
-        <td>${badge(QS, q.status)}</td>
-        <td>${om ? `<span class="bdg blue plain">${om.ico} ${om.label}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="nowrap"><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.badge || co?.code || '?')}</span></td>
+        <td class="nowrap">${esc(userName(q.sales_user_id) || q.sales_name || '—')}</td>
+        <td class="nowrap">${fmtDateShort(q.quote_date)}${exp ? ' <span class="bdg red" style="height:17px;font-size:10px">將到期</span>' : ''}</td>
+        <td class="r money nowrap">${money(t.total)}</td>
+        <td class="nowrap">${badge(QS, q.status)}</td>
+        <td class="nowrap">${om ? `<span class="bdg blue plain">${om.ico} ${om.label}</span>` : '<span class="muted">—</span>'}</td>
         <td class="prod-col muted" title="${esc(q.note || '')}">${esc(q.note || '—')}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
+}
+
+function toggleQSel(id, checked) {
+  if (checked) qSelected.add(id); else qSelected.delete(id);
+  updateBulkBar('q');
+}
+function toggleQSelAll(checked, ids) {
+  ids.forEach(id => checked ? qSelected.add(id) : qSelected.delete(id));
+  document.querySelectorAll('#qlist .q-sel').forEach(el => el.checked = checked);
+  updateBulkBar('q');
 }
 
 function bindTableSort(wrapId, stateObj, renderFn) {
@@ -3044,6 +3065,7 @@ function bindTableSort(wrapId, stateObj, renderFn) {
 
 function viewQuotes(v) {
   const f = route.q;
+  qSelected.clear();
   v.innerHTML = `
     <div class="toolbar">
       <div class="grow"><input class="inp" id="qs" placeholder="搜尋單號 / 客戶 / 品名 / 料號 / 業務…" value="${esc(f.kw || '')}"></div>
@@ -3063,6 +3085,11 @@ function viewQuotes(v) {
       <input class="inp" type="date" id="qd2" style="width:150px" value="${esc(f.d2 || '')}">
       <button class="btn" onclick="go('quotes')">清除</button>
       <button class="btn primary" onclick="newQuote()">＋ 新增報價</button>
+    </div>
+    <div class="bulk-bar" id="qBulkBar" style="display:none">
+      <span>已選取 <b id="qSelCount">0</b> 筆</span>
+      <button class="btn sm" onclick="qSelected.clear();document.getElementById('qs').dispatchEvent(new Event('input'))">取消選取</button>
+      <button class="btn sm danger" onclick="bulkDeleteQuotes()">🗑 刪除已選取</button>
     </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="qlist"></div></div></div>`;
 
@@ -3085,12 +3112,30 @@ function viewQuotes(v) {
     if (d1) list = list.filter(q => q.quote_date >= d1);
     if (d2) list = list.filter(q => q.quote_date <= d2);
     list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-    document.getElementById('qlist').innerHTML = quoteTable(list);
+    document.getElementById('qlist').innerHTML = quoteTable(list, { selectable: true });
     bindTableSort('qlist', qSortState, run);
+    updateBulkBar('q');
   };
   ['qs', 'qstatus', 'qco', 'qsales', 'qd1', 'qd2'].forEach(id =>
     document.getElementById(id).addEventListener('input', run));
   run();
+}
+
+function bulkDeleteQuotes() {
+  const ids = [...qSelected];
+  if (!ids.length) return;
+  const blocked = ids.filter(id => DB.deliveries.some(d => d.quote_id === id));
+  const deletable = ids.filter(id => !blocked.includes(id));
+  if (!deletable.length) return toast('選取的報價都已經有出貨單，不能刪除，請先刪除出貨單', 'err');
+  const msg = blocked.length
+    ? `將刪除 ${deletable.length} 張報價單；另外 ${blocked.length} 張因為已經有出貨單，不會被刪除（請先刪除出貨單）。<br><br>不可復原，確定要刪除嗎？`
+    : `將<b>永久刪除</b>選取的 ${deletable.length} 張報價單，不可復原。<br>單號不會回收再利用。<br><br>確定要刪除嗎？`;
+  confirmBox('批次刪除報價單', msg, () => {
+    DB.quotes = DB.quotes.filter(q => !deletable.includes(q.id));
+    qSelected.clear();
+    save(); render();
+    toast(`已刪除 ${deletable.length} 張報價單${blocked.length ? '（' + blocked.length + ' 張因有出貨單略過）' : ''}`, 'ok');
+  }, true);
 }
 
 /* ===========================================================
@@ -4205,12 +4250,20 @@ function setDvInvoiceDate(id, val) {
   d.invoice_date = val; save();
 }
 
-function deliveryTable(list) {
+let dSelected = new Set();
+
+function deliveryTable(list, opts) {
+  opts = opts || {};
   if (!list.length) return `<div class="empty"><div class="e">${icon('delivery')}</div><h3>沒有出貨單</h3>
     <p>出貨單由已下單的報價開立</p><button class="btn" onclick="go('quotes?status=signed')">查看已下單報價</button></div>`;
   const sorted = sortRows(list, dSortState, deliverySortValue);
   const rc = k => ['items', 'amount', 'buy', 'invoiced'].includes(k) ? 'c' : '';
+  const sel = opts.selectable;
+  const allChecked = sel && sorted.length && sorted.every(d => dSelected.has(d.id));
   return `<table class="tbl"><thead><tr>
+      ${sel ? `<th style="width:32px" onclick="event.stopPropagation()">
+        <input type="checkbox" id="dSelAll" ${allChecked ? 'checked' : ''}
+          onclick="toggleDSelAll(this.checked, ${esc(JSON.stringify(sorted.map(d => d.id)))})"></th>` : ''}
       ${D_COLS.map(([k, label]) => `<th class="sortable ${k === 'amount' ? 'r' : rc(k)}" data-sortkey="${k}">${label}${sortArrow(dSortState, k)}</th>`).join('')}
     </tr></thead><tbody>
     ${sorted.map(d => {
@@ -4221,17 +4274,18 @@ function deliveryTable(list) {
         : names.length === 1 ? esc(names[0])
         : `${esc(names[0])} <span class="muted">等${names.length}項</span>`;
       return `<tr onclick="go('delivery/${d.id}')">
-        <td class="no">${esc(d.delivery_no)}${d._legacy ? ' <span class="bdg gray plain" style="height:16px;font-size:9px">舊格式</span>' : ''}</td>
-        <td>${esc(d.customer_snapshot?.name || '—')}</td>
+        ${sel ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="d-sel" ${dSelected.has(d.id) ? 'checked' : ''} onchange="toggleDSel('${d.id}', this.checked)"></td>` : ''}
+        <td class="no nowrap">${esc(d.delivery_no)}${d._legacy ? ' <span class="bdg gray plain" style="height:16px;font-size:9px">舊格式</span>' : ''}</td>
+        <td class="nowrap">${esc(d.customer_snapshot?.name || '—')}</td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
-        <td class="muted" style="font-family:var(--mono);font-size:11px">${esc(d.quote_no || '—')}</td>
-        <td>${esc(userName(d.sales_user_id) || '—')}</td>
-        <td class="muted">${esc(d.created_by || '—')}</td>
-        <td>${fmtDateShort(d.delivery_date)}</td>
+        <td class="muted nowrap" style="font-family:var(--mono);font-size:11px">${esc(d.quote_no || '—')}</td>
+        <td class="nowrap">${esc(userName(d.sales_user_id) || '—')}</td>
+        <td class="muted nowrap">${esc(d.created_by || '—')}</td>
+        <td class="nowrap">${fmtDateShort(d.delivery_date)}</td>
         <td class="c">${d.items.length}</td>
-        <td class="r money">${money(t.total)}</td>
+        <td class="r money nowrap">${money(t.total)}</td>
         <td class="c">${buy ? `<span class="bdg orange plain">${buy}</span>` : '<span class="muted">—</span>'}</td>
-        <td>${badge(DS, d.status)}</td>
+        <td class="nowrap">${badge(DS, d.status)}</td>
         <td class="c inv-cell" onclick="event.stopPropagation()">
           <label class="fi-chk" style="justify-content:center">
             <input type="checkbox" ${d.invoiced ? 'checked' : ''} onchange="toggleDvInvoiced('${d.id}', this)"></label>
@@ -4242,8 +4296,19 @@ function deliveryTable(list) {
     }).join('')}</tbody></table>`;
 }
 
+function toggleDSel(id, checked) {
+  if (checked) dSelected.add(id); else dSelected.delete(id);
+  updateBulkBar('d');
+}
+function toggleDSelAll(checked, ids) {
+  ids.forEach(id => checked ? dSelected.add(id) : dSelected.delete(id));
+  document.querySelectorAll('#dlist .d-sel').forEach(el => el.checked = checked);
+  updateBulkBar('d');
+}
+
 function viewDeliveries(v) {
   const f = route.q;
+  dSelected.clear();
   v.innerHTML = `
     <div class="toolbar">
       <div class="grow"><input class="inp" id="ds" placeholder="搜尋出貨單號 / 報價單號 / 客戶 / 品名 / 料號…" value="${esc(f.kw || '')}"></div>
@@ -4258,6 +4323,11 @@ function viewDeliveries(v) {
       <input class="inp" type="date" id="dd1" style="width:150px">
       <input class="inp" type="date" id="dd2" style="width:150px">
       <button class="btn" onclick="go('deliveries')">清除</button>
+    </div>
+    <div class="bulk-bar" id="dBulkBar" style="display:none">
+      <span>已選取 <b id="dSelCount">0</b> 筆</span>
+      <button class="btn sm" onclick="dSelected.clear();document.getElementById('ds').dispatchEvent(new Event('input'))">取消選取</button>
+      <button class="btn sm danger" onclick="bulkDeleteDeliveries()">🗑 刪除已選取</button>
     </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="dlist"></div></div></div>`;
 
@@ -4276,11 +4346,26 @@ function viewDeliveries(v) {
     if (d1) list = list.filter(d => d.delivery_date >= d1);
     if (d2) list = list.filter(d => d.delivery_date <= d2);
 
-    document.getElementById('dlist').innerHTML = deliveryTable(list);
+    document.getElementById('dlist').innerHTML = deliveryTable(list, { selectable: true });
     bindTableSort('dlist', dSortState, run);
+    updateBulkBar('d');
   };
   ['ds', 'dstatus', 'dsales', 'dd1', 'dd2'].forEach(id => document.getElementById(id).addEventListener('input', run));
   run();
+}
+
+function bulkDeleteDeliveries() {
+  const ids = [...dSelected];
+  if (!ids.length) return;
+  confirmBox('批次刪除出貨單',
+    `將<b>永久刪除</b>選取的 ${ids.length} 張出貨單，不可復原。<br>來源報價會回到「已下單」，可重新開立。<br><br>確定要刪除嗎？`, () => {
+      const qids = new Set(ids.map(id => byId(DB.deliveries, id)?.quote_id).filter(Boolean));
+      DB.deliveries = DB.deliveries.filter(d => !ids.includes(d.id));
+      qids.forEach(qid => { const q = byId(DB.quotes, qid); if (q) syncQuoteStatus(q); });
+      dSelected.clear();
+      save(); render();
+      toast(`已刪除 ${ids.length} 張出貨單`, 'ok');
+    }, true);
 }
 
 /* ===========================================================
@@ -4471,9 +4556,9 @@ function drawDvItems() {
       <th style="width:104px">料號</th>
       <th>品名 / 規格</th>
       <th style="width:60px">單位</th>
-      <th class="r" style="width:64px">數量</th>
-      <th class="r" style="width:82px">單價</th>
-      <th class="r" style="width:86px">小計</th>
+      <th class="r" style="width:78px">數量</th>
+      <th class="r" style="width:100px">單價</th>
+      <th class="r" style="width:96px">小計</th>
       <th style="width:${stockColW}px">是否有庫</th>
       ${editable ? '<th style="width:30px"></th>' : ''}
     </tr></thead><tbody>
@@ -5079,8 +5164,7 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
         <div class="dp-sum-r">
           <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
           <div class="dp-sl"><span>稅額 ${(DB.settings.tax_rate * 100).toFixed(0)}%</span><b>${money(t.tax)}</b></div>
-          <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票</span><span></span></div>
-          <div class="dp-sl"><span>${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
+          <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票　${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
           <div class="dp-sl total"><span>總計</span><b>${money(t.total)}</b></div>
         </div>
       </div>
@@ -5749,9 +5833,9 @@ function viewSettings(v) {
     <div class="sec-title">資料</div>
     <div class="card"><div class="card-b">
       <div class="banner info"><span class="bi">ℹ</span><div>
-        ${FIREBASE_ENABLED
+        ${cloudConnected
           ? '資料會同步到雲端資料庫，換裝置、換瀏覽器登入一樣看得到；本機也會留一份備援，離線時還能繼續使用。'
-          : '目前資料存在<b>這台裝置的瀏覽器</b>裡，換裝置或清瀏覽器資料會不見，請定期匯出備份。'}
+          : '目前<b>連不上雲端資料庫，正在用本機備援資料</b>。你的編輯還是會存在這台裝置上，但要等連線恢復才會同步給其他人；建議定期匯出備份。'}
         （結構版本 v${DB._schema}）</div></div>
       <div class="btn-row">
         <button class="btn primary" onclick="exportJSON()">⬇ 匯出備份 JSON</button>
