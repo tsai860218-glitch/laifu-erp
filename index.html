@@ -1746,7 +1746,7 @@ function promptOperator(force) {
         ${names.map(n => `<button class="chip ${n === currentOperator() ? 'on' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}
       </div>` : ''}
       <div class="field"><label>或直接輸入名字</label>
-        <input class="inp" id="opName" placeholder="例如：Celia" value="${esc(currentOperator())}"></div>`,
+        <input class="inp" id="opName" placeholder="名字" value="${esc(currentOperator())}"></div>`,
     footer: `<button class="btn primary" style="width:100%" data-ok>確定</button>`,
     onMount(el, close) {
       el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
@@ -2008,7 +2008,7 @@ function migrate(db) {
       if (p.note == null) p.note = '';
     });
 
-    // 報價：新增「只顯示含稅價格」模式（例如學校客戶）
+    // 報價：新增「只顯示含稅價格」模式（例如政府標案）
     db.quotes.forEach(q => {
       if (q.price_display == null) q.price_display = 'breakdown';
       (q.items || []).forEach(it => { if (it.assembly_note == null) it.assembly_note = ''; });
@@ -2686,8 +2686,8 @@ function seed() {
   ];
 
   const users = [
-    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
+    { id: 'u_1', name: '趙先生', phone: '', email: '', role: '業務', is_active: true },
+    { id: 'u_2', name: '行政', phone: '', email: '', role: '行政', is_active: true }
   ];
 
   const suppliers = [
