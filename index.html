@@ -88,6 +88,7 @@ a{color:var(--primary-600);text-decoration:none}
 }
 .topbar h1{font-size:16px;font-weight:700;margin:0;letter-spacing:.01em}
 .topbar .crumb{font-size:12px;color:var(--text-3)}
+.op-trail{color:var(--text-3);opacity:.75;font-size:11px}
 .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
 .netdot{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
 .netdot i{width:7px;height:7px;border-radius:50%;background:var(--green);display:block}
@@ -450,7 +451,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-info{display:flex;flex-wrap:wrap;gap:.8mm 4mm;margin-top:1.2mm;padding:1.4mm 2mm}
 .dp-info>div{font-size:7.5pt;display:flex;gap:1.6mm;flex:0 0 calc(50% - 2mm);min-width:0}
 .dp-info>div.wide{flex:0 0 100%}
-.dp-info span{color:#666;flex:0 0 13mm;letter-spacing:.06em}
+.dp-info span{color:#666;flex:0 0 16mm;letter-spacing:.06em;white-space:nowrap}
 .dp-info b{font-weight:700;min-width:0;word-break:break-all}
 
 .dp-tbl{width:100%;border-collapse:collapse;margin-top:1.4mm;font-size:7.5pt;table-layout:fixed}
@@ -877,6 +878,8 @@ body.mobile.has-sticky .sticky-total{display:flex}
       </div>
       <div class="topbar-actions">
         <span class="netdot" id="netDot"><i></i><span>已連線</span></span>
+        <button class="btn sm ghost" id="operatorBtn" onclick="promptOperator(true)" title="切換操作者名字">
+          👤 <span id="operatorTag">—</span></button>
         <button class="btn sm ghost" id="costBtn" title="顯示/隱藏內部成本">🔒 成本</button>
         <button class="btn sm ghost" id="signOutBtn" onclick="fbSignOut()" style="display:none">登出</button>
       </div>
@@ -1402,6 +1405,7 @@ function fbInit() {
           wireCoreListeners();
           render();
           firestoreListen();
+          promptOperator();
         } else {
           _listenersOn = false;
           showLoginScreen();
@@ -1433,6 +1437,7 @@ function bootLocalOnly() {
   initCostDefault();
   wireCoreListeners();
   render();
+  promptOperator();
 }
 
 function showAppShell() {
@@ -1483,6 +1488,8 @@ function wireCoreListeners() {
   }
   const soBtn = document.getElementById('signOutBtn');
   if (soBtn) soBtn.style.display = FIREBASE_ENABLED ? '' : 'none';
+  const opTag = document.getElementById('operatorTag');
+  if (opTag) opTag.textContent = currentOperator() || '設定名字';
   if (!window._coreListenersWired) {
     window._coreListenersWired = true;
     window.addEventListener('hashchange', render);
@@ -1640,7 +1647,7 @@ function safeRerender(changes) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
-const SCHEMA_V = 8;                    // ← 每次改結構就 +1
+const SCHEMA_V = 9;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1654,7 +1661,61 @@ const DEFAULT_SETTINGS = {
 
 function uid(p) { return (p || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
+// 剛編輯過哪張報價、什麼時候編輯的——離開頁面時用來判斷要不要跳出確認
+let _quoteDirty = { id: null, at: 0 };
+const QUOTE_DIRTY_WINDOW = 4000; // 4 秒內離開才算「剛改過、可能是不小心的」
+
+/* ===========================================================
+   操作者身分 —— 多人共用同一組密碼登入時，用這個分辨「這是誰做的」
+   跟裝置綁定（存在這台瀏覽器的 localStorage），不是帳號密碼，只是個名字標籤
+   =========================================================== */
+const OPERATOR_KEY = 'erp_operator_name';
+function currentOperator() { return localStorage.getItem(OPERATOR_KEY) || ''; }
+function setOperator(name) { try { localStorage.setItem(OPERATOR_KEY, name); } catch (e) {} }
+
+function promptOperator(force) {
+  if (!force && currentOperator()) return;
+  const names = (DB.users || []).filter(u => u.is_active).map(u => u.name);
+  openModal({
+    title: '你是誰？',
+    body: `
+      <div class="banner info" style="margin-bottom:14px"><span class="bi">ℹ</span><div>
+        這台裝置目前跟誰登入無關，只是想知道操作紀錄要標記成誰的名字，
+        方便之後追蹤是誰改了哪張單。之後想換人可以再點一次自己的名字切換。</div></div>
+      ${names.length ? `<div class="chips" style="margin-bottom:10px">
+        ${names.map(n => `<button class="chip ${n === currentOperator() ? 'on' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}
+      </div>` : ''}
+      <div class="field"><label>或直接輸入名字</label>
+        <input class="inp" id="opName" placeholder="例如：Celia" value="${esc(currentOperator())}"></div>`,
+    footer: `<button class="btn primary" style="width:100%" data-ok>確定</button>`,
+    onMount(el, close) {
+      el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+        el.querySelector('#opName').value = b.dataset.pick;
+      });
+      el.querySelector('[data-ok]').onclick = () => {
+        const name = el.querySelector('#opName').value.trim();
+        if (!name) return toast('請輸入名字', 'err');
+        setOperator(name);
+        close();
+        const tag = document.getElementById('operatorTag');
+        if (tag) tag.textContent = name;
+        toast(`目前操作者：${name}`, 'ok');
+      };
+    }
+  });
+}
+
 function save() {
+  // 標記目前正在看的這張單是誰、什麼時候動的（多人共用同一組密碼登入時，用這個分辨誰做的）
+  if (typeof QE !== 'undefined' && QE && route.k === 'quote') {
+    QE.last_modified_by = currentOperator();
+    QE.last_modified_at = new Date().toISOString();
+    _quoteDirty = { id: QE.id, at: Date.now() };
+  }
+  if (typeof DE !== 'undefined' && DE && route.k === 'delivery') {
+    DE.last_modified_by = currentOperator();
+    DE.last_modified_at = new Date().toISOString();
+  }
   try { localStorage.setItem(KEY, JSON.stringify(DB)); }
   catch (e) {
     toast('本機儲存失敗：瀏覽器空間已滿。請到「設定」匯出備份後清理舊資料。', 'err');
@@ -1715,6 +1776,52 @@ const SHORT_NAME_MAP = { YX: '一心國際', LF: '徠富' };
 
 function shortenName(name) {
   return String(name || '').replace(/股份有限公司|有限公司|企業|科技|國際|實業/g, '').trim() || name;
+}
+
+/* ===========================================================
+   簡易重複偵測 —— 客戶／商品快速新增時，提醒可能已經有相似的資料
+   （去除常見公司字號後比對是否完全相同、互相包含，或字元重疊度很高）
+   =========================================================== */
+function nameSimilarity(a, b) {
+  const na = shortenName(a).replace(/\s+/g, ''), nb = shortenName(b).replace(/\s+/g, '');
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.length >= 2 && nb.length >= 2 && (na.includes(nb) || nb.includes(na))) return 0.85;
+  const setA = new Set(na), setB = new Set(nb);
+  let inter = 0;
+  setA.forEach(c => { if (setB.has(c)) inter++; });
+  const union = new Set([...setA, ...setB]).size;
+  return union ? inter / union : 0;
+}
+function findSimilar(list, name, threshold) {
+  return list
+    .map(item => ({ item, score: nameSimilarity(item.name, name) }))
+    .filter(x => x.score >= (threshold || 0.6))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(x => x.item);
+}
+
+// 建立前檢查有沒有相似資料；有的話跳出提醒讓使用者選「用既有的」或「仍要新增」
+function confirmNotDuplicate(list, name, kind, onCreateNew, onUseExisting) {
+  const similar = findSimilar(list, name);
+  if (!similar.length) return onCreateNew();
+  openModal({
+    title: `系統裡已經有相似的${kind}`,
+    body: `<div class="banner info" style="margin-bottom:12px"><span class="bi">ℹ</span><div>
+      你輸入的「${esc(name)}」跟下面既有的${kind}很像，確定要新增這筆新的，還是這個就是你要找的？</div></div>
+      <div class="chips" style="flex-direction:column;align-items:stretch;gap:6px">
+        ${similar.map(x => `<button class="btn ghost" style="justify-content:flex-start" data-use="${x.id}">用「${esc(x.name)}」</button>`).join('')}
+      </div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-yes>仍要新增「${esc(name)}」</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = () => { close(); onCreateNew(); };
+      el.querySelectorAll('[data-use]').forEach(b => b.onclick = () => {
+        close(); (onUseExisting || onCreateNew)(byId(list, b.dataset.use));
+      });
+    }
+  });
 }
 
 // 一心：YYYYMMDD-一心國際正式報價單-產品名稱(客戶)
@@ -1922,6 +2029,20 @@ function migrate(db) {
     });
   }
 
+  if (v < 9) {
+    // 報價／出貨單新增「最後修改人／時間」與「建立人」，供多人共用同一組密碼登入時追蹤是誰動的
+    db.quotes.forEach(q => {
+      if (q.created_by_op == null) q.created_by_op = '';
+      if (q.last_modified_by == null) q.last_modified_by = '';
+      if (q.last_modified_at == null) q.last_modified_at = '';
+    });
+    db.deliveries.forEach(d => {
+      if (d.created_by_op == null) d.created_by_op = '';
+      if (d.last_modified_by == null) d.last_modified_by = '';
+      if (d.last_modified_at == null) d.last_modified_at = '';
+    });
+  }
+
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
 }
@@ -2111,6 +2232,33 @@ function fmtDateShort(iso) {
   return DB.settings.date_format === 'roc' ? `${y - 1911}/${m}/${d}` : `${y}/${m}/${d}`;
 }
 const ymd = iso => (iso || today()).replace(/-/g, '');
+
+// 相對時間（用在「最後修改」這類操作紀錄顯示上）
+function relTime(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0 || isNaN(diff)) return '';
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '剛剛';
+  if (min < 60) return `${min}分鐘前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}小時前`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}天前`;
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// 建立/最後修改的操作紀錄小字（供報價/出貨單詳情頁顯示）
+function opTrail(rec) {
+  const parts = [];
+  if (rec.created_by_op) parts.push(`建立：${esc(rec.created_by_op)}`);
+  if (rec.last_modified_by) {
+    const t = relTime(rec.last_modified_at);
+    parts.push(`最後修改：${esc(rec.last_modified_by)}${t ? '（' + t + '）' : ''}`);
+  }
+  return parts.length ? `<span class="op-trail">${parts.join('　·　')}</span>` : '';
+}
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2386,6 +2534,20 @@ function seed() {
   };
 }
 
+// 「清空所有資料」用：只留公司設定（LF/YX，系統要靠這個才能開報價單），
+// 客戶／商品／分類／業務／常用代理商全部變真的空的，不是示範資料
+function emptyDB() {
+  const s = seed();
+  return {
+    _schema: SCHEMA_V,
+    companies: s.companies,
+    users: [], suppliers: [], customers: [], products: [], categories: [],
+    quotes: [], deliveries: [], counters: {},
+    settings: Object.assign({}, DEFAULT_SETTINGS),
+    _created: new Date().toISOString()
+  };
+}
+
 
 /* ===========================================================
    路由
@@ -2413,8 +2575,28 @@ function parseHash() {
 }
 function go(h) { location.hash = h; }
 
+let _lastRoute = null;
+
 function render() {
+  const prevRoute = _lastRoute;
   route = parseHash();
+
+  // 剛改過的報價單，要離開到別的地方去之前先跳出來確認一下
+  if (prevRoute && prevRoute.k === 'quote' &&
+      _quoteDirty.id === prevRoute.id && _quoteDirty.at && (Date.now() - _quoteDirty.at) < QUOTE_DIRTY_WINDOW &&
+      !(route.k === 'quote' && route.id === prevRoute.id)) {
+    const targetHash = location.hash;
+    location.hash = '#quote/' + prevRoute.id; // 先擋回原本那頁，等使用者確認要不要真的離開
+    setTimeout(() => {
+      confirmBox('剛剛修改過這張報價單', '確定要離開嗎？（改的內容已經自動存檔，這裡只是提醒你再檢查一次）', () => {
+        _quoteDirty = { id: null, at: 0 };
+        location.hash = targetHash;
+      });
+    }, 30);
+    return;
+  }
+  _lastRoute = route;
+
   const def = ROUTES.find(r => r.k === route.k) || ROUTES[0];
   closeFloatAC();
   if (isMobile() && costOn) setCost(false);
@@ -2504,6 +2686,59 @@ function markExpired() {
 /* ===========================================================
    §15 Dashboard
    =========================================================== */
+// 近 N 個月的報價/成交數與成交金額（用來畫趨勢圖）
+function monthlyTrend(months) {
+  const now = new Date();
+  const out = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const my = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    const qs = DB.quotes.filter(q => q.quote_date && q.quote_date.slice(0, 7) === my && !isDraftNo(q.quote_no));
+    const deals = qs.filter(q => ['signed', 'partially_shipped', 'completed'].includes(q.status));
+    const amount = deals.reduce((s, q) => s + calcQuote(q).total, 0);
+    out.push({ ym: my, label: `${d.getMonth() + 1}月`, quoteCount: qs.length, dealCount: deals.length, amount });
+  }
+  return out;
+}
+
+// 今年至今，依成交金額排行的客戶（前 5 名）
+function topCustomersThisYear(n) {
+  const yr = today().slice(0, 4);
+  const totals = {};
+  DB.quotes.forEach(q => {
+    if (!q.quote_date || q.quote_date.slice(0, 4) !== yr) return;
+    if (!['signed', 'partially_shipped', 'completed'].includes(q.status)) return;
+    const name = q.customer_snapshot?.name || '—';
+    totals[name] = (totals[name] || 0) + calcQuote(q).total;
+  });
+  return Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, n || 5);
+}
+
+// 手刻 SVG 長條圖（不依賴外部圖表庫），畫近 N 個月的成交金額
+function trendChartSvg(data) {
+  const w = 640, h = 168, padL = 8, padR = 8, padT = 18, padB = 22;
+  const chartW = w - padL - padR, chartH = h - padT - padB;
+  const maxAmt = Math.max(...data.map(d => d.amount), 1);
+  const gap = chartW / data.length;
+  const barW = Math.min(38, gap * 0.55);
+  const bars = data.map((d, i) => {
+    const barH = maxAmt ? Math.max((d.amount / maxAmt) * chartH, d.amount > 0 ? 2 : 0) : 0;
+    const x = padL + i * gap + (gap - barW) / 2;
+    const y = padT + chartH - barH;
+    const isLast = i === data.length - 1;
+    const label = d.amount >= 10000 ? Math.round(d.amount / 1000) + 'k' : (d.amount || '');
+    return `<g>
+      <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="${isLast ? '#1E3A8A' : '#93A9D6'}"/>
+      ${d.amount ? `<text x="${x + barW / 2}" y="${y - 5}" text-anchor="middle" font-size="10" fill="#64748B">${label}</text>` : ''}
+      <text x="${x + barW / 2}" y="${padT + chartH + 16}" text-anchor="middle" font-size="10" fill="#94A3B8">${d.label}</text>
+    </g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block" preserveAspectRatio="xMidYMid meet">
+    <line x1="${padL}" y1="${padT + chartH}" x2="${w - padR}" y2="${padT + chartH}" stroke="#E5E9F0" stroke-width="1"/>
+    ${bars}
+  </svg>`;
+}
+
 function viewDash(v) {
   const td = today(), ym = td.slice(0, 7);
   const todayQuotes = DB.quotes.filter(q => q.quote_date === td && !isDraftNo(q.quote_no)).length;
@@ -2549,6 +2784,27 @@ function viewDash(v) {
     <div class="stat" style="margin-top:12px">
       <div class="k">本月成交金額（含稅）</div><div class="v">NT$ ${money(dealAmt)}</div>
     </div>
+
+    <div class="sec-title">近 6 個月成交金額趨勢</div>
+    <div class="card"><div class="card-b">${trendChartSvg(monthlyTrend(6))}</div></div>
+
+    ${(() => {
+      const top = topCustomersThisYear(5);
+      if (!top.length) return '';
+      const maxV = top[0][1];
+      return `<div class="sec-title">今年客戶排行（依成交金額）</div>
+        <div class="card"><div class="card-b">
+          ${top.map(([name, amt], i) => `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:${i === top.length - 1 ? 0 : 10}px">
+              <span style="flex:0 0 16px;font-size:11px;color:var(--text-3);font-weight:700">${i + 1}</span>
+              <span style="flex:0 0 120px;font-size:12.5px;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
+              <div style="flex:1;background:var(--line);border-radius:4px;height:8px;overflow:hidden">
+                <div style="width:${maxV ? (amt / maxV * 100) : 0}%;height:100%;background:var(--primary);border-radius:4px"></div>
+              </div>
+              <span style="flex:0 0 auto;font-size:12px;color:var(--text-2);font-family:var(--mono)">NT$ ${money(amt)}</span>
+            </div>`).join('')}
+        </div></div>`;
+    })()}
 
     <div class="sec-title">快速操作</div>
     <div class="btn-row">
@@ -2851,6 +3107,7 @@ function newQuote() {
     status: 'draft', revision: 1, unlocked: false,
     order_method: null, order_note: '', signed_back_at: null, signed_back_file: null,
     price_display: 'breakdown',
+    created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     note: '', items: [], created_at: new Date().toISOString()
   };
   DB.quotes.push(q); save();
@@ -2875,8 +3132,9 @@ function viewQuote(v) {
   if (editable && !q.items.length) { addBlankRow(true); }
 
   document.getElementById('pageTitle').textContent = isDraftNo(q.quote_no) ? '新報價' : q.quote_no;
-  document.getElementById('pageCrumb').textContent =
-    (q.customer_snapshot?.name || '尚未選擇客戶') + (q.revision > 1 ? `　版次 ${q.revision}` : '');
+  document.getElementById('pageCrumb').innerHTML =
+    esc((q.customer_snapshot?.name || '尚未選擇客戶') + (q.revision > 1 ? `　版次 ${q.revision}` : '')) +
+    (opTrail(q) ? '　　' + opTrail(q) : '');
 
   v.innerHTML = `
     ${qFlow(q)}
@@ -2912,7 +3170,7 @@ function viewQuote(v) {
             </div>
             <label class="fi-chk" style="margin-top:10px;font-size:12.5px">
               <input type="checkbox" id="fpriceIncl" ${q.price_display === 'tax_included' ? 'checked' : ''} ${editable ? '' : 'disabled'}>
-              此單只顯示含稅價格（例如：學校客戶，不能列未稅+稅分開）</label>
+              此單只顯示含稅價格</label>
           </div>
         </div>
 
@@ -3208,7 +3466,9 @@ function deleteQuote(id) {
     `將<b>永久刪除</b> ${esc(q.quote_no)}（${esc(q.customer_snapshot?.name || '')}），不可復原。<br>
      單號不會回收再利用。<br><br>確定刪除？`, () => {
       DB.quotes = DB.quotes.filter(x => x.id !== id);
-      save(); go('quotes'); toast('已刪除報價單');
+      save();
+      _quoteDirty = { id: null, at: 0 };
+      go('quotes'); toast('已刪除報價單');
     }, true);
 }
 
@@ -3240,7 +3500,9 @@ function cloneQuote(id) {
     i.id = uid('qi');
     (i.components || []).forEach(c => c.id = uid('qc'));
   });
-  DB.quotes.push(q); save(); go('quote/' + q.id);
+  DB.quotes.push(q); save();
+  _quoteDirty = { id: null, at: 0 };
+  go('quote/' + q.id);
   toast('已複製為新草稿');
 }
 
@@ -3358,7 +3620,7 @@ function fillFromProduct(it, p) {
   it.name = p.name;
   it.spec = p.spec || '';
   it.unit = p.unit || '台';
-  it.unit_price = p.list_price || 0;
+  it.unit_price = 0; // 價格留空，不自動帶牌價；牌價只在輸入框用提示文字給業務參考
   it.default_cost = p.default_cost || 0;
   it.components = (p.components || []).map((c, n) => ({
     id: uid('qc'), sort_order: n, name: c.name, brand: c.brand, spec: c.spec,
@@ -3479,6 +3741,8 @@ function itemRow(it, n, editable) {
   const open = bomOpen[it.id];
   const priceEditable = editable && (DB.settings.allow_price_edit || !it.product_id);
   const inMaster = !!it.product_id;
+  const refProduct = it.product_id ? byId(DB.products, it.product_id) : null;
+  const refPrice = refProduct ? refProduct.list_price : 0;
 
   return `<div class="irow">
     <span class="idx">${n + 1}</span>
@@ -3506,8 +3770,10 @@ function itemRow(it, n, editable) {
         data-qty="${it.id}" value="${it.qty}" ${D}></div></div>
     <div class="up"><div class="mfield"><label>單價</label>
       <input class="inp num" type="number" inputmode="decimal" step="0.01" min="0"
-        data-up="${it.id}" value="${it.unit_price}" ${priceEditable ? '' : 'disabled'}
-        title="${priceEditable ? '' : '依設定，業務不可修改單價'}"></div></div>
+        data-up="${it.id}" value="${it.unit_price || ''}" ${priceEditable ? '' : 'disabled'}
+        placeholder="${refPrice ? '牌價 ' + moneyD(refPrice) : ''}"
+        title="${priceEditable ? (refPrice ? `牌價參考：${moneyD(refPrice)}（不會自動帶入，也不會列印）` : '') : '依設定，業務不可修改單價'}"></div>
+      ${refPrice && !it.unit_price ? `<div class="hint" style="margin-top:2px">牌價 ${moneyD(refPrice)} 參考用</div>` : ''}</div>
     <div class="amt" data-amt="${it.id}">${money(amt)}</div>
     ${editable ? `<button class="del" onclick="delItem('${it.id}')" aria-label="刪除">×</button>` : '<span></span>'}
     ${hasBom && open ? bomBox(it, editable) : ''}
@@ -3691,7 +3957,31 @@ function saveFreeToMaster(id) {
   const dup = DB.products.find(p =>
     p.name.trim() === it.name.trim() && (p.brand || '').trim() === (it.brand || '').trim());
   if (dup) return toast(`商品主檔已有「${dup.brand ? dup.brand + ' ' : ''}${dup.name}」`, 'err');
+  const similar = findSimilar(DB.products, it.name);
+  if (similar.length) {
+    return openModal({
+      title: '主檔裡已經有相似的商品',
+      body: `<div class="banner info" style="margin-bottom:12px"><span class="bi">ℹ</span><div>
+        你輸入的「${esc(it.name)}」跟下面既有的商品很像，確定要另外存一筆新的，還是這個就是你要找的？</div></div>
+        <div class="chips" style="flex-direction:column;align-items:stretch;gap:6px">
+          ${similar.map(p => `<button class="btn ghost" style="justify-content:flex-start" data-use="${p.id}">用「${p.brand ? esc(p.brand) + ' ' : ''}${esc(p.name)}」</button>`).join('')}
+        </div>`,
+      footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-yes>仍要另存新商品</button>`,
+      onMount(el, close) {
+        el.querySelector('[data-no]').onclick = close;
+        el.querySelector('[data-yes]').onclick = () => { close(); openSaveFreeToMasterModal(id); };
+        el.querySelectorAll('[data-use]').forEach(b => b.onclick = () => {
+          it.product_id = b.dataset.use; save(); close(); drawItems();
+          toast('已連結到既有商品', 'ok');
+        });
+      }
+    });
+  }
+  openSaveFreeToMasterModal(id);
+}
 
+function openSaveFreeToMasterModal(id) {
+  const it = byId(QE.items, id);
   openModal({
     title: '存入商品主檔',
     body: `
@@ -3837,12 +4127,15 @@ function makeDelivery(q, co, o) {
     shipping_method: '貨運', shipping_method_other: '',
     invoice_method: '隨貨', payment_method: '月結', attachment: '', note: DEFAULT_DELIVERY_NOTE,
     no_invoice: false, invoice_copies: 3,
+    created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     invoiced: false, invoice_date: '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
   dv.status = dsFirst(dv);
   DB.deliveries.push(dv);
-  save(); go('delivery/' + dv.id);
+  save();
+  _quoteDirty = { id: null, at: 0 }; // 這是剛確認過的動作，不是不小心離開，不要再跳一次確認
+  go('delivery/' + dv.id);
   toast(`已開立 ${dv.delivery_no}`, 'ok');
 }
 
@@ -4018,7 +4311,8 @@ function viewDelivery(v) {
   const si = flow.indexOf(d.status);
 
   document.getElementById('pageTitle').textContent = d.delivery_no;
-  document.getElementById('pageCrumb').textContent = `${c.name || ''}　來源 ${d.quote_no || '—'}`;
+  document.getElementById('pageCrumb').innerHTML =
+    esc(`${c.name || ''}　來源 ${d.quote_no || '—'}`) + (opTrail(d) ? '　　' + opTrail(d) : '');
 
   v.innerHTML = `
     <div class="flow">
@@ -4745,6 +5039,7 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
 
     <div class="dp-info">
       <div><span>客戶</span><b>${esc(c.name || '')}${c.site_label ? `（${esc(c.site_label)}）` : ''}</b></div>
+      <div><span>統一編號</span><b>${esc(c.tax_id || '—')}</b></div>
       <div><span>出貨日期</span><b>${fmtDate(d.delivery_date)}</b></div>
       <div><span>聯絡人</span><b>${esc(c.contact_person || '')}　${esc(c.phone || '')}</b></div>
       <div><span>來源報價</span><b>${esc(d.quote_no || '')}</b></div>
@@ -5016,12 +5311,19 @@ function editCustomer(id) {
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         if (!o.name) return toast('請填客戶名稱', 'err');
         if (o.tax_id && !/^\d{8}$/.test(o.tax_id)) return toast('統一編號需為 8 位數字', 'err');
-        if (sites.some(s => !s.is_default) === false && sites.length) {} // no-op guard
         if (!sites.some(s => s.is_default)) sites[0].is_default = true;
         o.sites = sites;
-        if (id) Object.assign(c, o);
-        else DB.customers.push(Object.assign({ id: uid('cu'), is_active: true }, o));
-        save(); close(); render(); toast('已儲存', 'ok');
+        const doSave = () => {
+          if (id) Object.assign(c, o);
+          else DB.customers.push(Object.assign({ id: uid('cu'), is_active: true }, o));
+          save(); render(); toast('已儲存', 'ok');
+        };
+        if (id) { doSave(); close(); return; }
+        close();
+        confirmNotDuplicate(DB.customers, o.name, '客戶', doSave, existing => {
+          go('customers'); editCustomer(existing.id);
+          toast(`已經有這筆客戶了，帶你去看「${esc(existing.name)}」`, 'ok');
+        });
       };
       const d = el.querySelector('[data-del]');
       if (d) d.onclick = () => {
@@ -5086,13 +5388,17 @@ function quickCustomer(preset, cb) {
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         if (!o.name) return toast('請填客戶名稱', 'err');
         if (o.tax_id && !/^\d{8}$/.test(o.tax_id)) return toast('統一編號需為 8 位數字', 'err');
-        const c = {
-          id: uid('cu'), name: o.name, tax_id: o.tax_id || '', note: '',
-          default_company_id: DB.companies[0].id, is_active: true,
-          sites: [{ id: uid('cs'), label: '', contact_person: o.contact_person || '',
-            phone: o.phone || '', fax: '', address: o.address || '', email: '', note: '', is_default: true }]
+        const doCreate = () => {
+          const c = {
+            id: uid('cu'), name: o.name, tax_id: o.tax_id || '', note: '',
+            default_company_id: DB.companies[0].id, is_active: true,
+            sites: [{ id: uid('cs'), label: '', contact_person: o.contact_person || '',
+              phone: o.phone || '', fax: '', address: o.address || '', email: '', note: '', is_default: true }]
+          };
+          DB.customers.push(c); save(); cb(c);
         };
-        DB.customers.push(c); save(); close(); cb(c);
+        close();
+        confirmNotDuplicate(DB.customers, o.name, '客戶', doCreate, existing => cb(existing));
       };
     }
   });
@@ -5125,7 +5431,7 @@ function viewProducts(v) {
          <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button></div>`
       : `<table class="tbl"><thead><tr>
           <th style="width:34px">★</th><th>料號</th><th>品名</th><th>品牌</th><th>分類</th><th>進貨廠商</th>
-          <th class="r">牌價</th><th class="r cost-col">成本</th><th class="c">BOM</th>
+          <th class="r cost-col">成本</th><th class="r">牌價</th><th class="c">BOM</th><th>備註</th>
         </tr></thead><tbody>
         ${list.map(p => `<tr>
           <td onclick="event.stopPropagation();toggleFav('${p.id}')" style="cursor:pointer;text-align:center;font-size:15px;color:${p.is_favorite ? 'var(--orange)' : 'var(--line-2)'}">★</td>
@@ -5135,10 +5441,11 @@ function viewProducts(v) {
           <td onclick="editProduct('${p.id}')">${esc(p.brand || '—')}</td>
           <td onclick="editProduct('${p.id}')"><span class="bdg gray plain">${esc(p.category || '—')}</span></td>
           <td onclick="editProduct('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
+          <td onclick="editProduct('${p.id}')" class="r money cost-col">${p.has_bom ? '<span class="muted">組合</span>' : money(p.default_cost)}</td>
           <td onclick="editProduct('${p.id}')" class="r money">${money(p.list_price)}
             ${p.price_ref_date ? `<div class="muted" style="font-size:10px">${esc(p.price_ref_source || '')} ${fmtDateShort(p.price_ref_date)}</div>` : ''}</td>
-          <td onclick="editProduct('${p.id}')" class="r money cost-col">${p.has_bom ? '<span class="muted">組合</span>' : money(p.default_cost)}</td>
           <td onclick="editProduct('${p.id}')" class="c">${p.has_bom ? `<span class="bdg blue plain">${(p.components || []).length} 項</span>` : '<span class="muted">—</span>'}</td>
+          <td onclick="editProduct('${p.id}')" class="muted prod-col" title="${esc(p.note || '')}">${esc(p.note || '—')}</td>
         </tr>`).join('')}</tbody></table>`;
   };
   ['ps', 'pcat'].forEach(id => document.getElementById(id).addEventListener('input', run));
@@ -5243,14 +5550,14 @@ function editProduct(id) {
       <div class="field"><label>規格</label><input class="inp" data-f="spec" value="${esc(p.spec)}"></div>
       <div class="grid g3">
         <div class="field"><label>單位</label><input class="inp" data-f="unit" value="${esc(p.unit)}"></div>
-        <div class="field"><label class="req">牌價（未稅）</label><input class="inp num" type="number" data-f="list_price" value="${p.list_price}"></div>
-        <div class="field cost-col"><label>預設成本</label>
+        <div class="field"><label>進貨廠商</label>
+          <input class="inp" list="supList" data-f="default_supplier" value="${esc(p.default_supplier || '')}" placeholder="可打字／選常用"></div>
+        <div class="field cost-col"><label>預設成本（未稅）</label>
           <input class="inp num" type="number" data-f="default_cost" value="${p.default_cost}" ${p.has_bom ? 'disabled' : ''}>
           <div class="hint">組合商品由組成加總</div></div>
       </div>
       <div class="grid g3">
-        <div class="field"><label>進貨廠商</label>
-          <input class="inp" list="supList" data-f="default_supplier" value="${esc(p.default_supplier || '')}" placeholder="可打字／選常用"></div>
+        <div class="field"><label class="req">牌價（未稅）</label><input class="inp num" type="number" data-f="list_price" value="${p.list_price}"></div>
         <div class="field"><label>牌價查詢日期</label><input class="inp" type="date" data-f="price_ref_date" value="${esc(p.price_ref_date || '')}"></div>
         <div class="field"><label>牌價出處</label><input class="inp" data-f="price_ref_source" value="${esc(p.price_ref_source || '')}" placeholder="例：PChome／原廠官網"></div>
       </div>
@@ -5352,9 +5659,17 @@ function editProduct(id) {
         if (p.has_bom) p.default_cost = p.components.filter(c => !c.is_optional)
           .reduce((s, c) => s + (+c.cost || 0) * (+c.qty || 0), 0);
         else p.components = [];
-        if (id) { const t = byId(DB.products, id); Object.assign(t, p); }
-        else { p.id = uid('p'); p.is_active = true; DB.products.push(p); }
-        save(); close(); render(); toast('已儲存', 'ok');
+        const doSave = () => {
+          if (id) { const t = byId(DB.products, id); Object.assign(t, p); }
+          else { p.id = uid('p'); p.is_active = true; DB.products.push(p); }
+          save(); render(); toast('已儲存', 'ok');
+        };
+        if (id) { doSave(); close(); return; }
+        close();
+        confirmNotDuplicate(DB.products, o.name, '商品', doSave, existing => {
+          go('products'); editProduct(existing.id);
+          toast(`已經有這筆商品了，帶你去看「${esc(existing.name)}」`, 'ok');
+        });
       };
       const d = el.querySelector('[data-del]');
       if (d) d.onclick = () => {
@@ -5434,8 +5749,10 @@ function viewSettings(v) {
     <div class="sec-title">資料</div>
     <div class="card"><div class="card-b">
       <div class="banner info"><span class="bi">ℹ</span><div>
-        目前資料存在<b>這台裝置的瀏覽器</b>裡（結構版本 v${DB._schema}）。
-        換裝置或清瀏覽器資料會不見，請定期匯出備份。</div></div>
+        ${FIREBASE_ENABLED
+          ? '資料會同步到雲端資料庫，換裝置、換瀏覽器登入一樣看得到；本機也會留一份備援，離線時還能繼續使用。'
+          : '目前資料存在<b>這台裝置的瀏覽器</b>裡，換裝置或清瀏覽器資料會不見，請定期匯出備份。'}
+        （結構版本 v${DB._schema}）</div></div>
       <div class="btn-row">
         <button class="btn primary" onclick="exportJSON()">⬇ 匯出備份 JSON</button>
         <button class="btn" onclick="document.getElementById('impFile').click()">⬆ 匯入備份</button>
@@ -5611,7 +5928,7 @@ function importJSON(file) {
 
 function wipe() {
   confirmBox('清空所有資料', '所有報價、出貨單、客戶、商品都會消失，<b>無法復原</b>。<br>建議先匯出備份。<br><br>確定？', () => {
-    localStorage.removeItem(KEY); DB = seed(); save(); go('dash'); render(); toast('已重置');
+    localStorage.removeItem(KEY); DB = emptyDB(); save(); go('dash'); render(); toast('已清空');
   }, true);
 }
 
