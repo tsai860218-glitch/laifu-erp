@@ -2470,10 +2470,27 @@ function icon(name) { return ICONS[name] || ICONS.notfound; }
 /* ===========================================================
    總覽表批次勾選：共用的操作列狀態更新（報價/出貨各自的Set在各自檔案裡）
    =========================================================== */
+// 共用的批次勾選：prefix 對應各頁面自己的 Set 變數（c=客戶／p=商品／u=業務／s=常用代理商）
+function getSelSet(prefix) {
+  return { q: typeof qSelected !== 'undefined' && qSelected, d: typeof dSelected !== 'undefined' && dSelected,
+    c: cSelected, p: pSelected, u: uSelected, s: sSelected }[prefix];
+}
+function toggleSel(prefix, id, checked) {
+  const sel = getSelSet(prefix);
+  if (checked) sel.add(id); else sel.delete(id);
+  updateBulkBar(prefix);
+}
+function toggleSelAll(prefix, checked, ids) {
+  const sel = getSelSet(prefix);
+  ids.forEach(id => checked ? sel.add(id) : sel.delete(id));
+  document.querySelectorAll(`#${prefix}list tbody input[type="checkbox"]`).forEach(el => el.checked = checked);
+  updateBulkBar(prefix);
+}
+
 function updateBulkBar(prefix) {
   const bar = document.getElementById(prefix + 'BulkBar');
   if (!bar) return;
-  const sel = prefix === 'q' ? qSelected : dSelected;
+  const sel = getSelSet(prefix);
   const n = sel.size;
   bar.style.display = n ? 'flex' : 'none';
   const cnt = document.getElementById(prefix + 'SelCount');
@@ -3023,25 +3040,38 @@ function viewDash(v) {
 /* ===========================================================
    業務管理（新增／編輯／刪除）
    =========================================================== */
+let uSelected = new Set();
+
 function viewUsers(v) {
+  uSelected.clear();
   v.innerHTML = `
     <div class="toolbar">
       <div class="grow"><input class="inp" id="us" placeholder="搜尋業務姓名 / 電話…"></div>
       <button class="btn primary" onclick="editUser(null)">＋ 新增業務</button>
     </div>
+    <div class="bulk-bar" id="uBulkBar" style="display:none">
+      <span>已選取 <b id="uSelCount">0</b> 筆</span>
+      <button class="btn sm" onclick="uSelected.clear();document.getElementById('us').dispatchEvent(new Event('input'))">取消選取</button>
+      <button class="btn sm danger" onclick="bulkDeleteUsers()">🗑 刪除已選取</button>
+    </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="ulist"></div></div></div>`;
   const run = () => {
     const kw = document.getElementById('us').value.trim().toLowerCase();
     const list = DB.users.filter(u => !kw || (u.name + (u.phone || '') + (u.email || '')).toLowerCase().includes(kw));
+    const allChecked = list.length && list.every(u => uSelected.has(u.id));
     document.getElementById('ulist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('user')}</div><h3>沒有業務</h3>
          <button class="btn primary" onclick="editUser(null)">＋ 新增業務</button></div>`
       : `<table class="tbl"><thead><tr>
+          <th style="width:32px" onclick="event.stopPropagation()">
+            <input type="checkbox" ${allChecked ? 'checked' : ''}
+              onclick="toggleSelAll('u', this.checked, ${esc(JSON.stringify(list.map(u => u.id)))})"></th>
           <th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th class="c">負責報價</th><th class="c">狀態</th>
         </tr></thead><tbody>
         ${list.map(u => {
           const n = DB.quotes.filter(q => q.sales_user_id === u.id).length;
           return `<tr onclick="editUser('${u.id}')">
+            <td onclick="event.stopPropagation()"><input type="checkbox" ${uSelected.has(u.id) ? 'checked' : ''} onchange="toggleSel('u','${u.id}', this.checked)"></td>
             <td><b>${esc(u.name)}</b></td>
             <td style="font-family:var(--mono)">${esc(u.phone || '—')}</td>
             <td class="muted">${esc(u.email || '—')}</td>
@@ -3050,9 +3080,27 @@ function viewUsers(v) {
             <td class="c">${u.is_active ? '<span class="bdg green">啟用</span>' : '<span class="bdg gray">停用</span>'}</td>
           </tr>`;
         }).join('')}</tbody></table>`;
+    updateBulkBar('u');
   };
   document.getElementById('us').addEventListener('input', run);
   run();
+}
+
+function bulkDeleteUsers() {
+  const ids = [...uSelected];
+  if (!ids.length) return;
+  const blocked = ids.filter(id => DB.quotes.some(q => q.sales_user_id === id) || DB.deliveries.some(d => d.sales_user_id === id));
+  const deletable = ids.filter(id => !blocked.includes(id));
+  if (!deletable.length) return toast('選取的業務都有單據紀錄，不能刪除，請改為「停用」', 'err');
+  const msg = blocked.length
+    ? `將刪除 ${deletable.length} 位業務；另外 ${blocked.length} 位因為有單據紀錄，不會被刪除（請改為停用）。<br><br>確定要刪除嗎？`
+    : `將<b>永久刪除</b>選取的 ${deletable.length} 位業務，不可復原。<br><br>確定要刪除嗎？`;
+  confirmBox('批次刪除業務', msg, () => {
+    DB.users = DB.users.filter(u => !deletable.includes(u.id));
+    uSelected.clear();
+    save(); render();
+    toast(`已刪除 ${deletable.length} 位業務${blocked.length ? '（' + blocked.length + ' 位因有單據略過）' : ''}`, 'ok');
+  }, true);
 }
 
 function editUser(id, cb) {
@@ -3102,31 +3150,58 @@ function editUser(id, cb) {
 /* ===========================================================
    常用代理商
    =========================================================== */
+let sSelected = new Set();
+
 function viewSuppliers(v) {
+  sSelected.clear();
   v.innerHTML = `
     <div class="banner info"><span class="bi">ℹ</span><div>
       這裡管的是<b>常用代理商</b>。報價／出貨單上的代理商欄位可以自由打字，
       這份清單只是讓你打字時能<b>搜尋帶入</b>，不限制你只能選這幾家。</div></div>
     <div class="toolbar"><div class="grow"><input class="inp" id="ss" placeholder="搜尋代理商…"></div>
       <button class="btn primary" onclick="editSupplier(null)">＋ 新增常用代理商</button></div>
+    <div class="bulk-bar" id="sBulkBar" style="display:none">
+      <span>已選取 <b id="sSelCount">0</b> 筆</span>
+      <button class="btn sm" onclick="sSelected.clear();document.getElementById('ss').dispatchEvent(new Event('input'))">取消選取</button>
+      <button class="btn sm danger" onclick="bulkDeleteSuppliers()">🗑 刪除已選取</button>
+    </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="slist"></div></div></div>`;
   const run = () => {
     const kw = document.getElementById('ss').value.trim().toLowerCase();
     const list = DB.suppliers.filter(s => !kw || (s.name + (s.contact_person || '') + (s.phone || '')).toLowerCase().includes(kw));
+    const allChecked = list.length && list.every(s => sSelected.has(s.id));
     document.getElementById('slist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('supplier')}</div><h3>沒有常用代理商</h3></div>`
-      : `<table class="tbl"><thead><tr><th>名稱</th><th>聯絡人</th><th>電話</th><th>備註</th><th class="c">使用中</th></tr></thead><tbody>
+      : `<table class="tbl"><thead><tr>
+          <th style="width:32px" onclick="event.stopPropagation()">
+            <input type="checkbox" ${allChecked ? 'checked' : ''}
+              onclick="toggleSelAll('s', this.checked, ${esc(JSON.stringify(list.map(s => s.id)))})"></th>
+          <th>名稱</th><th>聯絡人</th><th>電話</th><th>備註</th><th class="c">使用中</th></tr></thead><tbody>
         ${list.map(s => {
           const n = DB.quotes.filter(q => q.items.some(i => i.supplier_name === s.name
             || (i.components || []).some(c => c.supplier_name === s.name))).length;
           return `<tr onclick="editSupplier('${s.id}')">
+            <td onclick="event.stopPropagation()"><input type="checkbox" ${sSelected.has(s.id) ? 'checked' : ''} onchange="toggleSel('s','${s.id}', this.checked)"></td>
             <td><b>${esc(s.name)}</b></td><td>${esc(s.contact_person || '—')}</td>
             <td style="font-family:var(--mono)">${esc(s.phone || '—')}</td>
             <td class="muted">${esc(s.note || '')}</td><td class="c">${n || '—'}</td></tr>`;
         }).join('')}</tbody></table>`;
+    updateBulkBar('s');
   };
   document.getElementById('ss').addEventListener('input', run);
   run();
+}
+
+function bulkDeleteSuppliers() {
+  const ids = [...sSelected];
+  if (!ids.length) return;
+  confirmBox('批次刪除常用代理商',
+    `將<b>永久刪除</b>選取的 ${ids.length} 家常用代理商，不可復原。<br>已經打在單據上的名稱不會被動到。<br><br>確定要刪除嗎？`, () => {
+      DB.suppliers = DB.suppliers.filter(s => !ids.includes(s.id));
+      sSelected.clear();
+      save(); render();
+      toast(`已刪除 ${ids.length} 家常用代理商`, 'ok');
+    }, true);
 }
 
 function editSupplier(id, presetName, cb) {
@@ -5579,11 +5654,20 @@ function deliveryPaper(d) {
    §17 客戶管理 —— 一個客戶可有多個聯絡窗口／廠區（例如不同產品線
    找不同聯絡人，或同統編不同廠區地址）
    =========================================================== */
+let cSelected = new Set();
+let cFilteredList = [];
+
 function viewCustomers(v) {
+  cSelected.clear();
   v.innerHTML = `
     <div class="toolbar">
       <div class="grow"><input class="inp" id="cs" placeholder="搜尋客戶名 / 統編 / 聯絡人 / 電話 / 廠區…"></div>
       <button class="btn primary" onclick="editCustomer(null)">＋ 新增客戶</button>
+    </div>
+    <div class="bulk-bar" id="cBulkBar" style="display:none">
+      <span>已選取 <b id="cSelCount">0</b> 筆</span>
+      <button class="btn sm" onclick="cSelected.clear();document.getElementById('cs').dispatchEvent(new Event('input'))">取消選取</button>
+      <button class="btn sm danger" onclick="bulkDeleteCustomers()">🗑 刪除已選取</button>
     </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="clist"></div></div></div>`;
   const run = () => {
@@ -5593,10 +5677,15 @@ function viewCustomers(v) {
       if ((c.name + c.tax_id).toLowerCase().includes(kw)) return true;
       return (c.sites || []).some(s => (s.label + s.contact_person + s.phone + s.address).toLowerCase().includes(kw));
     });
+    cFilteredList = list;
+    const allChecked = list.length && list.every(c => cSelected.has(c.id));
     document.getElementById('clist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('customer')}</div><h3>沒有客戶</h3>
          <button class="btn primary" onclick="editCustomer(null)">＋ 新增客戶</button></div>`
       : `<table class="tbl"><thead><tr>
+          <th style="width:32px" onclick="event.stopPropagation()">
+            <input type="checkbox" ${allChecked ? 'checked' : ''}
+              onclick="toggleSelAll('c', this.checked, ${esc(JSON.stringify(list.map(c => c.id)))})"></th>
           <th>客戶名稱</th><th>統一編號</th><th>聯絡窗口／廠區</th><th>電話</th><th>預設公司</th><th class="c">報價數</th>
         </tr></thead><tbody>
         ${list.map(c => {
@@ -5605,6 +5694,7 @@ function viewCustomers(v) {
           const d = defaultSite(c);
           const extra = (c.sites || []).length - 1;
           return `<tr onclick="editCustomer('${c.id}')">
+            <td onclick="event.stopPropagation()"><input type="checkbox" ${cSelected.has(c.id) ? 'checked' : ''} onchange="toggleSel('c','${c.id}', this.checked)"></td>
             <td><b>${esc(c.name)}</b>${c.note ? `<div class="muted">${esc(c.note)}</div>` : ''}</td>
             <td style="font-family:var(--mono)">${esc(c.tax_id || '—')}</td>
             <td>${esc(d ? (d.label || d.contact_person || '—') : '—')}
@@ -5613,9 +5703,27 @@ function viewCustomers(v) {
             <td>${co ? `<span class="bdg gray plain">${esc(co.badge || co.code)}</span>` : '—'}</td>
             <td class="c">${n || '<span class="muted">—</span>'}</td></tr>`;
         }).join('')}</tbody></table>`;
+    updateBulkBar('c');
   };
   document.getElementById('cs').addEventListener('input', run);
   run();
+}
+
+function bulkDeleteCustomers() {
+  const ids = [...cSelected];
+  if (!ids.length) return;
+  const blocked = ids.filter(id => DB.quotes.some(q => q.customer_id === id));
+  const deletable = ids.filter(id => !blocked.includes(id));
+  if (!deletable.length) return toast('選取的客戶都有報價紀錄，不能刪除', 'err');
+  const msg = blocked.length
+    ? `將刪除 ${deletable.length} 位客戶；另外 ${blocked.length} 位因為有報價紀錄，不會被刪除。<br><br>確定要刪除嗎？`
+    : `將<b>永久刪除</b>選取的 ${deletable.length} 位客戶，不可復原。<br><br>確定要刪除嗎？`;
+  confirmBox('批次刪除客戶', msg, () => {
+    DB.customers = DB.customers.filter(c => !deletable.includes(c.id));
+    cSelected.clear();
+    save(); render();
+    toast(`已刪除 ${deletable.length} 位客戶${blocked.length ? '（' + blocked.length + ' 位因有報價紀錄略過）' : ''}`, 'ok');
+  }, true);
 }
 
 function editCustomer(id) {
@@ -5787,7 +5895,10 @@ function quickCustomer(preset, cb) {
 /* ===========================================================
    §18 商品管理（含料號）
    =========================================================== */
+let pSelected = new Set();
+
 function viewProducts(v) {
+  pSelected.clear();
   const cats = DB.categories || [];
   v.innerHTML = `
     <div class="toolbar">
@@ -5798,6 +5909,11 @@ function viewProducts(v) {
       <button class="btn ghost" onclick="manageCategories()">管理分類</button>
       <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button>
     </div>
+    <div class="bulk-bar" id="pBulkBar" style="display:none">
+      <span>已選取 <b id="pSelCount">0</b> 筆</span>
+      <button class="btn sm" onclick="pSelected.clear();document.getElementById('ps').dispatchEvent(new Event('input'))">取消選取</button>
+      <button class="btn sm danger" onclick="bulkDeleteProducts()">🗑 刪除已選取</button>
+    </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="plist"></div></div></div>`;
   const run = () => {
     const kw = document.getElementById('ps').value.trim().toLowerCase();
@@ -5806,14 +5922,19 @@ function viewProducts(v) {
       (!kw || (p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(kw)) &&
       (!cat || p.category === cat));
     list.sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) || a.name.localeCompare(b.name));
+    const allChecked = list.length && list.every(p => pSelected.has(p.id));
     document.getElementById('plist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('product')}</div><h3>找不到商品</h3>
          <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button></div>`
       : `<table class="tbl"><thead><tr>
+          <th style="width:32px" onclick="event.stopPropagation()">
+            <input type="checkbox" ${allChecked ? 'checked' : ''}
+              onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(list.map(p => p.id)))})"></th>
           <th style="width:34px">★</th><th>料號</th><th>品名</th><th>品牌</th><th>分類</th><th>進貨廠商</th>
           <th class="r cost-col">成本</th><th class="r">牌價</th><th class="c">BOM</th><th>備註</th>
         </tr></thead><tbody>
         ${list.map(p => `<tr>
+          <td onclick="event.stopPropagation()"><input type="checkbox" ${pSelected.has(p.id) ? 'checked' : ''} onchange="toggleSel('p','${p.id}', this.checked)"></td>
           <td onclick="event.stopPropagation();toggleFav('${p.id}')" style="cursor:pointer;text-align:center;font-size:15px;color:${p.is_favorite ? 'var(--orange)' : 'var(--line-2)'}">★</td>
           <td onclick="editProduct('${p.id}')" style="font-family:var(--mono);font-size:11.5px">${esc(p.part_no || '—')}</td>
           <td onclick="editProduct('${p.id}')"><b>${esc(p.name)}</b>
@@ -5827,9 +5948,27 @@ function viewProducts(v) {
           <td onclick="editProduct('${p.id}')" class="c">${p.has_bom ? `<span class="bdg blue plain">${(p.components || []).length} 項</span>` : '<span class="muted">—</span>'}</td>
           <td onclick="editProduct('${p.id}')" class="muted prod-col" title="${esc(p.note || '')}">${esc(p.note || '—')}</td>
         </tr>`).join('')}</tbody></table>`;
+    updateBulkBar('p');
   };
   ['ps', 'pcat'].forEach(id => document.getElementById(id).addEventListener('input', run));
   run();
+}
+
+function bulkDeleteProducts() {
+  const ids = [...pSelected];
+  if (!ids.length) return;
+  const blocked = ids.filter(id => DB.quotes.some(q => q.items.some(i => i.product_id === id)));
+  const deletable = ids.filter(id => !blocked.includes(id));
+  if (!deletable.length) return toast('選取的商品都被報價使用中，不能刪除', 'err');
+  const msg = blocked.length
+    ? `將刪除 ${deletable.length} 項商品；另外 ${blocked.length} 項因為被報價使用中，不會被刪除。<br><br>確定要刪除嗎？`
+    : `將<b>永久刪除</b>選取的 ${deletable.length} 項商品，不可復原。<br><br>確定要刪除嗎？`;
+  confirmBox('批次刪除商品', msg, () => {
+    DB.products = DB.products.filter(p => !deletable.includes(p.id));
+    pSelected.clear();
+    save(); render();
+    toast(`已刪除 ${deletable.length} 項商品${blocked.length ? '（' + blocked.length + ' 項因使用中略過）' : ''}`, 'ok');
+  }, true);
 }
 
 /* ===========================================================
