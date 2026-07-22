@@ -89,11 +89,19 @@ a{color:var(--primary-600);text-decoration:none}
 .topbar h1{font-size:16px;font-weight:700;margin:0;letter-spacing:.01em}
 .topbar .crumb{font-size:12px;color:var(--text-3)}
 .op-trail{color:var(--text-3);opacity:.75;font-size:11px}
+.op-trail-link{color:var(--primary);opacity:1;text-decoration:none;font-weight:600}
+.op-trail-link:hover{text-decoration:underline}
+.editlog-list{display:flex;flex-direction:column;gap:2px;max-height:50vh;overflow-y:auto}
+.editlog-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line)}
+.editlog-row:last-child{border-bottom:none}
+.editlog-who{font-weight:700;font-size:13px;min-width:64px}
+.editlog-action{flex:1;font-size:13px;color:var(--text-2)}
+.editlog-at{font-size:12px;font-family:var(--mono)}
 .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
 .netdot{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
 .netdot i{width:7px;height:7px;border-radius:50%;background:var(--green);display:block}
 .netdot.off i{background:var(--red)}
-.content{padding:20px;flex:1;max-width:1360px;width:100%}
+.content{padding:20px;flex:1;max-width:1640px;width:100%}
 .tabbar{display:none}
 
 /* ============================================================
@@ -150,7 +158,16 @@ select.inp{padding-right:6px;cursor:pointer}
   text-align:left;font-weight:600;font-size:11px;color:var(--text-2);
   padding:9px 12px;border-bottom:1px solid var(--line);background:var(--bg);
   position:sticky;top:0;white-space:nowrap;letter-spacing:.03em;
+  overflow:hidden;text-overflow:ellipsis;
 }
+.col-resizer{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:col-resize;
+  z-index:2;touch-action:none}
+.col-resizer:hover,.col-resizing .col-resizer{background:var(--primary-050)}
+.col-resizer::after{content:'';position:absolute;right:3px;top:15%;bottom:15%;width:2px;
+  background:var(--line-2);border-radius:1px}
+.col-resizer:hover::after{background:var(--primary)}
+body.col-resizing{cursor:col-resize!important;user-select:none}
+body.col-resizing *{cursor:col-resize!important}
 .tbl th.r,.tbl td.r{text-align:right}
 .tbl th.c,.tbl td.c{text-align:center}
 .tbl td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -196,6 +213,12 @@ select.inp{padding-right:6px;cursor:pointer}
   max-height:290px;overflow-y:auto;z-index:60;display:none;
 }
 .ac-list.open{display:block}
+.ac-float{
+  position:fixed;background:#fff;border:1px solid var(--line-2);border-radius:var(--r);
+  box-shadow:var(--sh-lg);z-index:200;overflow-y:auto;overscroll-behavior:contain;
+}
+.ac-float-hd{position:sticky;top:0;background:#fff;padding:7px 12px;font-size:11px;color:var(--text-3);
+  border-bottom:1px solid var(--line);z-index:1}
 .ac-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
 .ac-item:last-child{border-bottom:none}
 .ac-item:hover,.ac-item.sel{background:var(--primary-050)}
@@ -263,6 +286,12 @@ select.inp{padding-right:6px;cursor:pointer}
 .bulk-bar{display:flex;align-items:center;gap:12px;background:var(--primary-050);
   border:1px solid var(--primary);border-radius:var(--r-sm);padding:8px 14px;margin-bottom:12px;font-size:13px}
 .bulk-bar b{color:var(--primary)}
+.period-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.period-tabs{display:flex;gap:4px;background:var(--bg-2);padding:3px;border-radius:var(--r-sm)}
+.period-tab{border:none;background:transparent;padding:6px 14px;font-size:12.5px;font-weight:600;
+  color:var(--text-2);border-radius:6px;cursor:pointer}
+.period-tab.active{background:var(--card);color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.period-input{display:flex;align-items:center;gap:6px}
 .dsum-bar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
 .dsum-item{background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);
   padding:9px 16px;display:flex;flex-direction:column;gap:2px;min-width:110px}
@@ -272,6 +301,11 @@ select.inp{padding-right:6px;cursor:pointer}
 .dsum-item b.warn{color:var(--orange)}
 .dsum-item b.neg{color:var(--red)}
 .dsum-item.muted{justify-content:center;color:var(--text-3);font-size:12px;min-width:auto}
+.pagesize-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;
+  padding:9px 4px 2px;font-size:12.5px;color:var(--text-2)}
+.pagesize-l,.pagesize-r{display:flex;align-items:center;gap:8px}
+.pagesize-l .inp.sm{height:28px;font-size:12.5px;padding:0 6px}
+.pagesize-r .btn.sm{height:26px;padding:0 10px;font-size:12px}
 .toolbar .grow{flex:1;min-width:180px}
 .sec-title{font-size:12px;font-weight:700;color:var(--text-2);margin:22px 0 10px;letter-spacing:.02em}
 .sec-title:first-child{margin-top:0}
@@ -443,8 +477,8 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-stamp{max-height:22mm;max-width:52mm;object-fit:contain}
 
 .pp-foot{position:absolute;left:15mm;right:15mm;bottom:7mm}
-.pp-brands{display:flex;gap:3mm;align-items:center;flex-wrap:wrap;justify-content:center;
-  padding-bottom:1.6mm;margin-bottom:1.4mm;border-bottom:.4pt solid #DDD}
+.pp-brands{display:flex;gap:3mm;align-items:center;flex-wrap:wrap;justify-content:space-between;
+  padding-bottom:1.6mm;margin-bottom:1.4mm;border-bottom:.4pt solid #DDD;width:100%}
 .pp-brands img{height:8mm;max-width:26mm;object-fit:contain}
 .pp-foot-l,.pp-foot-r{font-size:7pt;color:#888;display:inline-block}
 .pp-foot-l{float:left}
@@ -871,7 +905,8 @@ body.mobile.has-sticky .sticky-total{display:flex}
   <form id="loginForm" class="login-card">
     <div class="login-logo">▤</div>
     <h1>報價與出貨管理系統</h1>
-    <p class="login-sub">請輸入共用密碼登入</p>
+    <p class="login-sub">用你自己的帳號登入；還沒有個人帳號的話，Email 留空、輸入共用密碼即可</p>
+    <input type="email" id="loginEmail" class="inp" placeholder="Email（沒有個人帳號可留空）" autocomplete="username">
     <input type="password" id="loginPwd" class="inp" placeholder="密碼" autocomplete="current-password" required>
     <div id="loginErr" class="login-err"></div>
     <button type="submit" id="loginBtn" class="btn primary lg" style="width:100%">登入</button>
@@ -898,6 +933,7 @@ body.mobile.has-sticky .sticky-total{display:flex}
       </div>
       <div class="topbar-actions">
         <span class="netdot" id="netDot"><i></i><span>已連線</span></span>
+        <span id="roleTag"></span>
         <button class="btn sm ghost" id="operatorBtn" onclick="promptOperator(true)" title="切換操作者名字">
           👤 <span id="operatorTag">—</span></button>
         <button class="btn sm ghost" id="costBtn" title="顯示/隱藏內部成本">🔒 成本</button>
@@ -1390,7 +1426,7 @@ const FIREBASE_CONFIG = {
 const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 
 const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY');
-const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries'];
+const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts'];
 
 let fbAuth = null, fbDb = null, fbUser = null;
 let cloudConnected = false; // 即時狀態：現在是不是真的連上雲端資料庫在跑（不是只看有沒有填設定）
@@ -1498,18 +1534,57 @@ function wireLoginForm() {
   form._wired = true;
   form.addEventListener('submit', async e => {
     e.preventDefault();
+    const email = document.getElementById('loginEmail').value.trim();
     const pwd = document.getElementById('loginPwd').value;
     const errEl = document.getElementById('loginErr');
     const btn = document.getElementById('loginBtn');
     errEl.textContent = ''; btn.disabled = true; btn.textContent = '登入中…';
     try {
-      await fbAuth.signInWithEmailAndPassword(FIREBASE_LOGIN_EMAIL, pwd);
+      await fbAuth.signInWithEmailAndPassword(email || FIREBASE_LOGIN_EMAIL, pwd);
     } catch (err) {
-      errEl.textContent = '密碼不對，再試一次';
+      errEl.textContent = email ? '帳號或密碼不對，再試一次' : '密碼不對，再試一次';
     }
     btn.disabled = false; btn.textContent = '登入';
   });
 }
+
+// 用第二個獨立的 Firebase App 實例建立新帳號，不會影響目前登入中的管理員 session
+// （Firebase Auth 的client SDK預設建立帳號會直接登入那個新帳號，這是官方建議的繞過方式）
+async function createAccountAuth(email, password) {
+  const secondaryName = 'secondary-' + Date.now();
+  const secondaryApp = firebase.initializeApp(FIREBASE_CONFIG, secondaryName);
+  try {
+    const cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, password);
+    const uid = cred.user.uid;
+    try { await secondaryApp.auth().signOut(); } catch (e) {}
+    await secondaryApp.delete();
+    return uid;
+  } catch (e) {
+    try { await secondaryApp.delete(); } catch (e2) {}
+    throw e;
+  }
+}
+
+/* ===========================================================
+   帳號權限：管理員 / 編輯 / 唯讀
+   =========================================================== */
+function currentAccount() {
+  if (!fbUser) return null;
+  return (DB.accounts || []).find(a => a.uid === fbUser.uid) || null;
+}
+// 目前登入者的權限等級：本機模式(沒接雲端)不受限制；共用密碼登入視為管理員(相容舊的登入方式)；
+// 個人帳號則照帳號設定的角色；找不到對應帳號或帳號已停用，保守當唯讀
+function currentRole() {
+  if (!FIREBASE_ENABLED || !cloudConnected) return 'admin';
+  if (!fbUser) return 'viewer';
+  if (fbUser.email === FIREBASE_LOGIN_EMAIL) return 'admin';
+  const acc = currentAccount();
+  if (!acc || !acc.is_active) return 'viewer';
+  return acc.role || 'viewer';
+}
+function canEdit() { return currentRole() !== 'viewer'; }
+function isAdmin() { return currentRole() === 'admin'; }
+const ROLE_LABEL = { admin: '管理員', editor: '編輯', viewer: '唯讀' };
 
 function fbSignOut() {
   if (!fbAuth) return;
@@ -1517,7 +1592,7 @@ function fbSignOut() {
 }
 
 function wireCoreListeners() {
-  restoreBackupFolder();
+  restoreBackupFolders();
   const costBtn = document.getElementById('costBtn');
   if (costBtn && !costBtn._wired) {
     costBtn._wired = true;
@@ -1673,8 +1748,13 @@ function firestoreListen() {
 function relevantToCurrentView(col) {
   const k = route.k;
   if (k === 'dash') return ['quotes', 'deliveries', 'customers'].includes(col);
-  if (k === 'quote' || k === 'quotes') return ['quotes', 'customers', 'companies', 'products', 'users'].includes(col);
-  if (k === 'delivery' || k === 'deliveries') return ['deliveries', 'quotes', 'customers', 'companies', 'users'].includes(col);
+  // 單一報價／出貨的詳情頁：只有「支援資料」（客戶/公司/商品/業務）變動才需要重繪。
+  // 別人建立或修改的是別張報價/出貨單，跟目前這頁完全無關，不能因此打斷正在輸入的人
+  // （同一張單被改到的情況，上面已經用touchesEditing擋掉、改成提示而不是重繪）
+  if (k === 'quote') return ['customers', 'companies', 'products', 'users'].includes(col);
+  if (k === 'delivery') return ['customers', 'companies', 'users'].includes(col);
+  if (k === 'quotes') return ['quotes', 'customers', 'companies', 'products', 'users'].includes(col);
+  if (k === 'deliveries') return ['deliveries', 'quotes', 'customers', 'companies', 'users'].includes(col);
   if (k === 'customers') return ['customers', 'companies'].includes(col);
   if (k === 'products') return ['products', 'categories', 'suppliers'].includes(col);
   if (k === 'users') return col === 'users';
@@ -1707,7 +1787,7 @@ function safeRerender(changes, col) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
-const SCHEMA_V = 9;                    // ← 每次改結構就 +1
+const SCHEMA_V = 13;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1716,7 +1796,8 @@ const DEFAULT_SETTINGS = {
   a5_rows: 8,
   a4_rows: 12,
   date_format: 'roc',
-  allow_price_edit: true
+  allow_price_edit: true,
+  auto_backup_interval: 'off' // off | daily | weekly
 };
 
 function uid(p) { return (p || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -1746,7 +1827,7 @@ function promptOperator(force) {
         ${names.map(n => `<button class="chip ${n === currentOperator() ? 'on' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}
       </div>` : ''}
       <div class="field"><label>或直接輸入名字</label>
-        <input class="inp" id="opName" placeholder="例如：Celia" value="${esc(currentOperator())}"></div>`,
+        <input class="inp" id="opName" placeholder="輸入名字" value="${esc(currentOperator())}"></div>`,
     footer: `<button class="btn primary" style="width:100%" data-ok>確定</button>`,
     onMount(el, close) {
       el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
@@ -1766,15 +1847,21 @@ function promptOperator(force) {
 }
 
 function save() {
+  if (!canEdit()) {
+    toast('目前是唯讀權限，沒辦法儲存修改', 'err');
+    return false;
+  }
   // 標記目前正在看的這張單是誰、什麼時候動的（多人共用同一組密碼登入時，用這個分辨誰做的）
   if (typeof QE !== 'undefined' && QE && route.k === 'quote') {
     QE.last_modified_by = currentOperator();
     QE.last_modified_at = new Date().toISOString();
+    appendEditLog(QE, '編輯');
     _quoteDirty = { id: QE.id, at: Date.now() };
   }
   if (typeof DE !== 'undefined' && DE && route.k === 'delivery') {
     DE.last_modified_by = currentOperator();
     DE.last_modified_at = new Date().toISOString();
+    appendEditLog(DE, '編輯');
   }
   try { localStorage.setItem(KEY, JSON.stringify(DB)); }
   catch (e) {
@@ -1783,6 +1870,20 @@ function save() {
   }
   scheduleFirestoreSync();
   return true;
+}
+
+// 完整異動紀錄：同一人的例行編輯只更新最後一筆的時間，不重複新增一行；
+// 換了不同的人、或遇到送出/登記下單這類重要節點，才會獨立記一筆。
+// 這樣才能真的看出「A建立草稿 → B接續編輯 → B送出」這種接力過程，而不是被大量重複的編輯紀錄洗版。
+function appendEditLog(rec, action) {
+  rec.edit_log = rec.edit_log || [];
+  const who = currentOperator() || '（未設定名字）';
+  const last = rec.edit_log[rec.edit_log.length - 1];
+  if (last && last.by === who && action === '編輯') {
+    last.at = new Date().toISOString();
+    return;
+  }
+  rec.edit_log.push({ by: who, at: new Date().toISOString(), action });
 }
 
 async function load() {
@@ -2008,7 +2109,7 @@ function migrate(db) {
       if (p.note == null) p.note = '';
     });
 
-    // 報價：新增「只顯示含稅價格」模式（例如學校客戶）
+    // 報價：新增「只顯示含稅價格」模式（例如政府標案）
     db.quotes.forEach(q => {
       if (q.price_display == null) q.price_display = 'breakdown';
       (q.items || []).forEach(it => { if (it.assembly_note == null) it.assembly_note = ''; });
@@ -2103,6 +2204,46 @@ function migrate(db) {
     });
   }
 
+  if (v < 10) {
+    // 出貨單：發票號碼、客戶PO單號（已開發票後才填寫）
+    db.deliveries.forEach(d => {
+      if (d.invoice_no == null) d.invoice_no = '';
+      if (d.customer_po == null) d.customer_po = '';
+    });
+  }
+
+  if (v < 11) {
+    // 完整異動紀錄（誰建立、誰接續編輯、誰送出），取代原本只看得到「最後修改人」的單一欄位
+    db.quotes.forEach(q => {
+      if (q.edit_log == null) {
+        q.edit_log = [];
+        if (q.created_by_op) q.edit_log.push({ by: q.created_by_op, at: q.created_at || '', action: '建立草稿' });
+        if (q.last_modified_by && q.last_modified_by !== q.created_by_op)
+          q.edit_log.push({ by: q.last_modified_by, at: q.last_modified_at || '', action: '編輯' });
+      }
+    });
+    db.deliveries.forEach(d => {
+      if (d.edit_log == null) {
+        d.edit_log = [];
+        if (d.created_by_op) d.edit_log.push({ by: d.created_by_op, at: d.created_at || '', action: '開立出貨單' });
+        if (d.last_modified_by && d.last_modified_by !== d.created_by_op)
+          d.edit_log.push({ by: d.last_modified_by, at: d.last_modified_at || '', action: '編輯' });
+      }
+    });
+  }
+
+  if (v < 12) {
+    // 帳號密碼權限系統：帳號清單欄位（舊資料沒有任何個人帳號，全部走共用密碼登入，等於維持原本的管理員權限）
+    db.accounts = db.accounts || [];
+  }
+
+  if (v < 13) {
+    // 商品BOM組件加上料號欄位，讓報價明細選商品時可以用組件的料號搜尋到整個商品
+    db.products.forEach(p => {
+      (p.components || []).forEach(c => { if (c.part_no == null) c.part_no = ''; });
+    });
+  }
+
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
 }
@@ -2127,6 +2268,13 @@ const COST_TAX = { ex: '未', in: '含' };
 
 // 公司色（依 DB.companies 順序固定配色，供列表快速辨識用）
 const COMPANY_PALETTE = ['#2563EB', '#D97706', '#059669', '#DB2777', '#7C3AED', '#0891B2'];
+// 商品分類配色：跟公司顏色用同一個概念，依分類在DB.categories裡的順序輪流上色，同一個分類永遠同一個顏色
+const CATEGORY_PALETTE = ['#0891B2', '#D97706', '#7C3AED', '#059669', '#DB2777', '#2563EB', '#65A30D', '#DC2626'];
+function categoryColor(name) {
+  if (!name) return '#94A3B8';
+  const i = (DB.categories || []).findIndex(c => c.name === name);
+  return CATEGORY_PALETTE[(i < 0 ? 0 : i) % CATEGORY_PALETTE.length];
+}
 function companyColor(co) {
   if (!co) return '#94A3B8';
   const i = DB.companies.findIndex(x => x.id === co.id);
@@ -2293,6 +2441,14 @@ function fmtDateShort(iso) {
 }
 const ymd = iso => (iso || today()).replace(/-/g, '');
 
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // 相對時間（用在「最後修改」這類操作紀錄顯示上）
 function relTime(iso) {
   if (!iso) return '';
@@ -2317,7 +2473,28 @@ function opTrail(rec) {
     const t = relTime(rec.last_modified_at);
     parts.push(`最後修改：${esc(rec.last_modified_by)}${t ? '（' + t + '）' : ''}`);
   }
-  return parts.length ? `<span class="op-trail">${parts.join('　·　')}</span>` : '';
+  if (!parts.length) return '';
+  const logBtn = (rec.edit_log && rec.edit_log.length > 1)
+    ? ` <a href="javascript:void(0)" class="op-trail-link" onclick="event.stopPropagation();showEditLog('${rec.id}')">查看完整紀錄</a>` : '';
+  return `<span class="op-trail">${parts.join('　·　')}${logBtn}</span>`;
+}
+
+// 完整異動紀錄視窗：誰建立、誰接續編輯、誰送出，依時間順序列出（不管是報價單還是出貨單都能用）
+function showEditLog(id) {
+  const rec = byId(DB.quotes, id) || byId(DB.deliveries, id);
+  if (!rec || !rec.edit_log) return;
+  const rows = rec.edit_log.map(l => `
+    <div class="editlog-row">
+      <span class="editlog-who">${esc(l.by || '（未設定名字）')}</span>
+      <span class="editlog-action">${esc(l.action)}</span>
+      <span class="editlog-at muted">${l.at ? fmtDateTime(l.at) : ''}</span>
+    </div>`).join('');
+  openModal({
+    title: '完整異動紀錄',
+    body: `<div class="editlog-list">${rows || '<p class="muted">目前沒有紀錄</p>'}</div>`,
+    footer: `<button class="btn primary" data-close>關閉</button>`,
+    onMount(el, close) { el.querySelector('[data-close]').onclick = close; }
+  });
 }
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -2423,16 +2600,33 @@ function floatAC(input, searchFn, pickFn) {
       acHost.className = 'ac-float';
       document.body.appendChild(acHost);
     }
-    acHost.innerHTML = rows.map((r, i) =>
-      `<div class="ac-item ${i === acSel ? 'sel' : ''}" data-i="${i}">${r.html}</div>`).join('');
+    acHost.innerHTML =
+      (rows.length > 8 ? `<div class="ac-float-hd">共 ${rows.length} 筆，↑↓ 鍵或滑鼠捲動選擇</div>` : '') +
+      rows.map((r, i) => `<div class="ac-item ${i === acSel ? 'sel' : ''}" data-i="${i}">${r.html}</div>`).join('');
+
+    // 面板固定寬度、盡量開在輸入框右側（側邊視窗，不會被少少幾行高度限制住）；
+    // 右邊放不下就改左邊，都放不下才退回輸入框正下方。高度依畫面剩餘空間動態決定，絕對不會超出可視範圍。
     const b = input.getBoundingClientRect();
-    acHost.style.left = b.left + 'px';
-    acHost.style.top = (b.bottom + 4) + 'px';
-    acHost.style.width = Math.max(b.width, 280) + 'px';
+    const PW = 360, MARGIN = 10;
+    let left;
+    if (b.right + MARGIN + PW <= window.innerWidth) left = b.right + MARGIN;
+    else if (b.left - MARGIN - PW >= 0) left = b.left - MARGIN - PW;
+    else left = Math.max(MARGIN, Math.min(b.left, window.innerWidth - PW - MARGIN));
+    const sideMode = (b.right + MARGIN + PW <= window.innerWidth) || (b.left - MARGIN - PW >= 0);
+    const top = sideMode ? Math.max(MARGIN, Math.min(b.top, window.innerHeight - MARGIN)) : b.bottom + 4;
+    const maxH = Math.max(160, window.innerHeight - top - MARGIN);
+    acHost.style.left = left + 'px';
+    acHost.style.top = top + 'px';
+    acHost.style.width = PW + 'px';
+    acHost.style.maxHeight = maxH + 'px';
     acHost.querySelectorAll('.ac-item').forEach(el => el.onmousedown = ev => {
       ev.preventDefault();
       pickFn(rows[+el.dataset.i]); closeFloatAC();
     });
+    if (acSel >= 0) {
+      const selEl = acHost.querySelector('.ac-item.sel');
+      if (selEl) selEl.scrollIntoView({ block: 'nearest' });
+    }
   };
   input.addEventListener('focus', () => { acSel = -1; open(); });
   input.addEventListener('input', () => { acSel = -1; open(); });
@@ -2447,7 +2641,11 @@ function floatAC(input, searchFn, pickFn) {
     else if (e.key === 'Escape') closeFloatAC();
   });
 }
-window.addEventListener('scroll', closeFloatAC, true);
+// 捲動頁面（不是面板內部捲動）才關閉候選視窗，避免使用者在面板裡捲動找選項時視窗突然消失
+window.addEventListener('scroll', e => {
+  if (acHost && (e.target === acHost || (e.target.contains && e.target.contains(acHost)))) return;
+  closeFloatAC();
+}, true);
 window.addEventListener('resize', closeFloatAC);
 
 /* ===========================================================
@@ -2463,7 +2661,8 @@ const ICONS = {
   supplier: '<svg viewBox="0 0 24 24"><path d="M4 21V9l8-5 8 5v12"/><path d="M4 21h16M9 21v-6h6v6M9 12h.01M15 12h.01M12 12h.01"/></svg>',
   settings: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.8-1.4-1.7-2.9-2.1.7a7.4 7.4 0 0 0-2.6-1.5L14.4 3H9.6l-.4 2.4a7.4 7.4 0 0 0-2.6 1.5l-2.1-.7-1.7 2.9 1.8 1.4a7.6 7.6 0 0 0 0 3l-1.8 1.4 1.7 2.9 2.1-.7a7.4 7.4 0 0 0 2.6 1.5l.4 2.4h4.8l.4-2.4a7.4 7.4 0 0 0 2.6-1.5l2.1.7 1.7-2.9z"/></svg>',
   logo: '<svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg>',
-  notfound: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5"/></svg>'
+  notfound: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5"/></svg>',
+  accounts: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="12" r="2.2"/><path d="M6.5 16.5c0-1.8 1.3-3 2.5-3s2.5 1.2 2.5 3"/><path d="M15 10h4M15 14h3"/></svg>'
 };
 function icon(name) { return ICONS[name] || ICONS.notfound; }
 
@@ -2519,13 +2718,27 @@ function exportExcelRows(rows, sheetName, filename) {
 }
 
 /* ===========================================================
-   自訂備份資料夾（電腦版 Chrome/Edge）
-   選一次資料夾記住，之後每次備份/匯出直接存進去，不用每次跳存檔視窗。
+   自訂存檔資料夾（電腦版 Chrome/Edge）—— 三個各自獨立：
+   備份／Excel、報價單PDF、出貨單PDF，各自選一次資料夾記住，
+   之後對應的匯出/另存直接存進去，不用每次跳存檔視窗。
    手機版與不支援的瀏覽器（Safari 等）自動退回原本的下載方式。
    =========================================================== */
 const supportsFSAccess = typeof window.showDirectoryPicker === 'function';
-let backupDirHandle = null;
-let backupDirNeedsPermission = false;
+// 備份/Excel維持共用一個資料夾；報價單/出貨單PDF依公司分開，每家公司各自獨立設定路徑
+function folderTypesList() {
+  const types = { backup: { label: '備份／Excel', desc: '「匯出備份 JSON」「匯出 Excel」、自動備份都存這裡' } };
+  DB.companies.forEach(co => {
+    const nm = co.short_name || co.badge || co.code;
+    types['quotePdf_' + co.id] = { label: `${nm}報價單 PDF`, desc: `${nm}的報價單「另存成 PDF」存這裡` };
+  });
+  DB.companies.forEach(co => {
+    const nm = co.short_name || co.badge || co.code;
+    types['deliveryPdf_' + co.id] = { label: `${nm}出貨單 PDF`, desc: `${nm}的出貨單「另存成 PDF」存這裡` };
+  });
+  return types;
+}
+let folderHandles = {};
+let folderNeedsPermission = {};
 
 function fsIdbOpen() {
   return new Promise((resolve, reject) => {
@@ -2535,136 +2748,326 @@ function fsIdbOpen() {
     req.onerror = () => reject(req.error);
   });
 }
-async function fsIdbSave(handle) {
+async function fsIdbSaveHandle(key, handle) {
   try {
     const db = await fsIdbOpen();
     await new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readwrite');
-      tx.objectStore('handles').put(handle, 'backupDir');
+      tx.objectStore('handles').put(handle, key);
       tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
     });
   } catch (e) { console.warn('資料夾控點儲存失敗', e); }
 }
-async function fsIdbLoad() {
+async function fsIdbLoadHandle(key) {
   try {
     const db = await fsIdbOpen();
     return await new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readonly');
-      const req = tx.objectStore('handles').get('backupDir');
+      const req = tx.objectStore('handles').get(key);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
   } catch (e) { return null; }
 }
-async function fsIdbClear() {
+async function fsIdbClearHandle(key) {
   try {
     const db = await fsIdbOpen();
     await new Promise((resolve, reject) => {
       const tx = db.transaction('handles', 'readwrite');
-      tx.objectStore('handles').delete('backupDir');
+      tx.objectStore('handles').delete(key);
       tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
     });
   } catch (e) {}
 }
 
-// 開機時嘗試還原上次選的資料夾（權限可能需要使用者手動點一下才會重新生效，瀏覽器安全機制）
-async function restoreBackupFolder() {
+// 開機時嘗試還原三個資料夾各自的授權狀態（權限可能需要使用者手動點一下才會重新生效，瀏覽器安全機制）
+async function restoreBackupFolders() {
   if (!supportsFSAccess) return;
-  const handle = await fsIdbLoad();
-  if (!handle) return;
-  try {
-    const perm = await handle.queryPermission({ mode: 'readwrite' });
-    backupDirHandle = handle;
-    backupDirNeedsPermission = perm !== 'granted';
-  } catch (e) { backupDirHandle = null; }
+  for (const key of Object.keys(folderTypesList())) {
+    const handle = await fsIdbLoadHandle(key);
+    if (!handle) continue;
+    try {
+      const perm = await handle.queryPermission({ mode: 'readwrite' });
+      folderHandles[key] = handle;
+      folderNeedsPermission[key] = perm !== 'granted';
+    } catch (e) { folderHandles[key] = null; }
+  }
   refreshBackupFolderUI();
+  checkAutoBackup();
 }
 
-async function pickBackupFolder() {
+async function pickBackupFolder(key) {
   if (!supportsFSAccess) return toast('這個瀏覽器不支援選擇資料夾，電腦版 Chrome / Edge 才有支援', 'err');
   try {
     const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-    backupDirHandle = handle;
-    backupDirNeedsPermission = false;
-    await fsIdbSave(handle);
-    toast(`已記住備份資料夾：${handle.name}`, 'ok');
+    folderHandles[key] = handle;
+    folderNeedsPermission[key] = false;
+    await fsIdbSaveHandle(key, handle);
+    toast(`已記住「${folderTypesList()[key].label}」資料夾：${handle.name}`, 'ok');
     refreshBackupFolderUI();
   } catch (e) {
     if (e.name !== 'AbortError') toast('選擇資料夾失敗', 'err');
   }
 }
 
-async function reauthBackupFolder() {
-  if (!backupDirHandle) return;
+async function reauthBackupFolder(key) {
+  const handle = folderHandles[key];
+  if (!handle) return;
   try {
-    const perm = await backupDirHandle.requestPermission({ mode: 'readwrite' });
-    backupDirNeedsPermission = perm !== 'granted';
+    const perm = await handle.requestPermission({ mode: 'readwrite' });
+    folderNeedsPermission[key] = perm !== 'granted';
     if (perm === 'granted') toast('已重新授權', 'ok');
     refreshBackupFolderUI();
   } catch (e) { toast('授權失敗', 'err'); }
 }
 
-function clearBackupFolder() {
-  backupDirHandle = null;
-  backupDirNeedsPermission = false;
-  fsIdbClear();
-  toast('已取消記住的備份資料夾，之後改用瀏覽器下載', 'ok');
+function clearBackupFolder(key) {
+  folderHandles[key] = null;
+  folderNeedsPermission[key] = false;
+  fsIdbClearHandle(key);
+  toast(`已取消記住的「${folderTypesList()[key].label}」資料夾，之後改用瀏覽器下載`, 'ok');
   refreshBackupFolderUI();
 }
 
 function refreshBackupFolderUI() {
-  const el = document.getElementById('backupFolderStatus');
-  if (el) el.outerHTML = backupFolderStatusHtml();
+  Object.keys(folderTypesList()).forEach(key => {
+    const el = document.getElementById('backupFolderStatus_' + key);
+    if (el) el.outerHTML = backupFolderStatusHtml(key);
+  });
+  const hint = document.getElementById('autoBackupHint');
+  if (hint && typeof autoBackupHintHtml === 'function') hint.innerHTML = autoBackupHintHtml();
 }
 
-function backupFolderStatusHtml() {
+function backupFolderStatusHtml(key) {
+  const id = 'backupFolderStatus_' + key;
   if (!supportsFSAccess) {
-    return `<div id="backupFolderStatus" class="hint">這個瀏覽器不支援指定資料夾（手機版、Safari 皆同），會照瀏覽器預設下載。</div>`;
+    return `<div id="${id}" class="hint">這個瀏覽器不支援指定資料夾（手機版、Safari 皆同），會照瀏覽器預設下載。</div>`;
   }
-  if (!backupDirHandle) {
-    return `<div id="backupFolderStatus" class="btn-row">
-      <button class="btn sm" onclick="pickBackupFolder()">📁 選擇備份資料夾</button></div>`;
+  const handle = folderHandles[key];
+  if (!handle) {
+    return `<div id="${id}" class="btn-row">
+      <button class="btn sm" onclick="pickBackupFolder('${key}')">📁 選擇資料夾</button></div>`;
   }
-  if (backupDirNeedsPermission) {
-    return `<div id="backupFolderStatus" class="btn-row" style="align-items:center">
+  if (folderNeedsPermission[key]) {
+    return `<div id="${id}" class="btn-row" style="align-items:center">
       <span class="bdg orange plain">需要重新授權</span>
-      <span style="font-size:12.5px;color:var(--text-2)">${esc(backupDirHandle.name)}</span>
-      <button class="btn sm" onclick="reauthBackupFolder()">重新授權</button>
-      <button class="btn sm ghost" onclick="clearBackupFolder()">取消</button></div>`;
+      <span style="font-size:12.5px;color:var(--text-2)">${esc(handle.name)}</span>
+      <button class="btn sm" onclick="reauthBackupFolder('${key}')">重新授權</button>
+      <button class="btn sm ghost" onclick="clearBackupFolder('${key}')">取消</button></div>`;
   }
-  return `<div id="backupFolderStatus" class="btn-row" style="align-items:center">
+  return `<div id="${id}" class="btn-row" style="align-items:center">
     <span class="bdg green plain">已設定</span>
-    <span style="font-size:12.5px;color:var(--text-2)">📁 ${esc(backupDirHandle.name)}</span>
-    <button class="btn sm ghost" onclick="pickBackupFolder()">換一個</button>
-    <button class="btn sm ghost" onclick="clearBackupFolder()">取消</button></div>`;
+    <span style="font-size:12.5px;color:var(--text-2)">📁 ${esc(handle.name)}</span>
+    <button class="btn sm ghost" onclick="pickBackupFolder('${key}')">換一個</button>
+    <button class="btn sm ghost" onclick="clearBackupFolder('${key}')">取消</button></div>`;
 }
 
-// 統一的「存檔」入口：有設定備份資料夾且權限OK就直接寫進去，否則照舊用瀏覽器下載
-async function saveFileSmart(filename, contentFn, mimeType, countForToast) {
-  if (backupDirHandle && !backupDirNeedsPermission) {
+// Promise版的是否確認（跟confirmBox不同，取消也會resolve，用在saveFileSmart這種需要await結果的地方）
+function confirmYesNo(title, msg) {
+  return new Promise(resolve => {
+    openModal({
+      title,
+      body: `<p style="margin:0;line-height:1.7;color:var(--text-2)">${msg}</p>`,
+      footer: `<button class="btn" data-no>取消</button>
+               <button class="btn primary" data-yes>覆蓋</button>`,
+      onMount(el, close) {
+        el.querySelector('[data-no]').onclick = () => { close(); resolve(false); };
+        el.querySelector('[data-yes]').onclick = () => { close(); resolve(true); };
+      }
+    });
+  });
+}
+
+// 統一的「存檔」入口：folderKey指定要用哪一個資料夾(backup/quotePdf/deliveryPdf，預設backup)。
+// 有設定且權限OK就直接寫進去（檔名重複會先問是否覆蓋，不會自動變成(1)(2)），否則照舊用瀏覽器下載。
+// contentFn 可以是同步或非同步函式（PDF產生是非同步的），回傳字串或Blob都可以。
+async function saveFileSmart(filename, contentFn, mimeType, countForToast, folderKey) {
+  folderKey = folderKey || 'backup';
+  const handle = folderHandles[folderKey];
+  if (handle && !folderNeedsPermission[folderKey]) {
     try {
-      const perm = await backupDirHandle.queryPermission({ mode: 'readwrite' });
+      const perm = await handle.queryPermission({ mode: 'readwrite' });
       if (perm === 'granted') {
-        const fileHandle = await backupDirHandle.getFileHandle(filename, { create: true });
+        let exists = false;
+        try { await handle.getFileHandle(filename, { create: false }); exists = true; } catch (e) { exists = false; }
+        if (exists) {
+          const proceed = await confirmYesNo('檔案已存在',
+            `「${esc(filename)}」在「${esc(handle.name)}」這個資料夾已經有一份了。<br>要覆蓋原檔嗎？`);
+          if (!proceed) { toast('已取消，沒有存檔', 'err'); return; }
+        }
+        const content = await contentFn();
+        const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+        const fileHandle = await handle.getFileHandle(filename, { create: true });
         const writable = await fileHandle.createWritable();
-        await writable.write(new Blob([contentFn()], { type: mimeType }));
+        await writable.write(blob);
         await writable.close();
-        toast(`已存到「${backupDirHandle.name}」：${filename}` + (countForToast ? `（${countForToast} 筆）` : ''), 'ok');
+        toast(`已存到「${handle.name}」：${filename}` + (countForToast ? `（${countForToast} 筆）` : ''), 'ok');
         return;
       }
-      backupDirNeedsPermission = true;
+      folderNeedsPermission[folderKey] = true;
       refreshBackupFolderUI();
     } catch (e) {
-      console.error('寫入備份資料夾失敗，改用瀏覽器下載', e);
+      console.error('寫入資料夾失敗，改用瀏覽器下載', e);
     }
   }
   // 沒設定資料夾、沒有權限、或寫入失敗 → 照舊走瀏覽器下載
-  const blob = new Blob([contentFn()], { type: mimeType });
+  const content = await contentFn();
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
   const a = document.createElement('a');
+
   a.href = URL.createObjectURL(blob);
   a.download = filename;
   a.click(); URL.revokeObjectURL(a.href);
   toast(`已匯出 ${filename}` + (countForToast ? `（${countForToast} 筆）` : ''), 'ok');
+}
+
+/* ===========================================================
+   總覽表「每頁顯示筆數」——依目前操作者各自記住設定，
+   換筆數/翻頁時保留原本的搜尋條件，重新整理或下次登入沿用上次選擇
+   =========================================================== */
+const PAGE_SIZES = [10, 20, 50, 100, 'all'];
+const PAGESIZE_KEY = 'erp_pagesize_prefs';
+let pageState = {};   // { listKey: 目前頁碼 } —— 畫面暫存狀態，不用持久化
+let pageRunners = {}; // { listKey: 該頁面的 run() 重新查詢函式 }
+
+function getPageSizePrefs() {
+  try { return JSON.parse(localStorage.getItem(PAGESIZE_KEY) || '{}'); } catch (e) { return {}; }
+}
+function getPageSize(listKey) {
+  const prefs = getPageSizePrefs();
+  const op = currentOperator() || '_default';
+  const v = prefs[op] && prefs[op][listKey];
+  return v == null ? 20 : v; // 預設每頁20筆
+}
+function setPageSizePref(listKey, size) {
+  const prefs = getPageSizePrefs();
+  const op = currentOperator() || '_default';
+  prefs[op] = prefs[op] || {};
+  prefs[op][listKey] = size;
+  try { localStorage.setItem(PAGESIZE_KEY, JSON.stringify(prefs)); } catch (e) {}
+}
+
+function registerPageRunner(listKey, runFn) { pageRunners[listKey] = runFn; }
+
+function changePageSize(listKey, val) {
+  const size = val === 'all' ? 'all' : (+val || 20);
+  setPageSizePref(listKey, size);
+  pageState[listKey] = 1;
+  if (pageRunners[listKey]) pageRunners[listKey]();
+}
+function changePage(listKey, page) {
+  pageState[listKey] = page;
+  if (pageRunners[listKey]) pageRunners[listKey]();
+}
+
+// 依目前筆數設定把清單切成一頁；resetPage=true 表示搜尋條件剛變過，頁碼要跳回第1頁
+function paginateList(listKey, fullList, resetPage) {
+  const size = getPageSize(listKey);
+  const total = fullList.length;
+  const pageSize = size === 'all' ? Math.max(total, 1) : size;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (resetPage || !pageState[listKey] || pageState[listKey] > totalPages) pageState[listKey] = 1;
+  const cur = pageState[listKey];
+  const start = (cur - 1) * pageSize;
+  const pageItems = size === 'all' ? fullList : fullList.slice(start, start + pageSize);
+  return { pageItems, total, totalPages, cur, pageSize: size };
+}
+
+function pageBarHtml(listKey, info) {
+  return `<div class="pagesize-bar">
+    <div class="pagesize-l">
+      <span>每頁顯示</span>
+      <select class="inp sm" style="width:74px" onchange="changePageSize('${listKey}', this.value)">
+        ${PAGE_SIZES.map(s => `<option value="${s}" ${String(info.pageSize) === String(s) ? 'selected' : ''}>${s === 'all' ? '全部' : s}</option>`).join('')}
+      </select>
+      <span class="muted">共 ${info.total} 筆</span>
+    </div>
+    ${info.totalPages > 1 ? `<div class="pagesize-r">
+      <button class="btn sm ghost" ${info.cur <= 1 ? 'disabled' : ''} onclick="changePage('${listKey}', ${info.cur - 1})">‹ 上一頁</button>
+      <span>第 ${info.cur} / ${info.totalPages} 頁</span>
+      <button class="btn sm ghost" ${info.cur >= info.totalPages ? 'disabled' : ''} onclick="changePage('${listKey}', ${info.cur + 1})">下一頁 ›</button>
+    </div>` : ''}
+  </div>`;
+}
+
+/* ===========================================================
+   總覽表欄位寬度可調整：拖曳表頭右邊界改變欄寬，依目前操作者+表格分開記住設定
+   =========================================================== */
+const COLWIDTH_KEY = 'erp_col_widths';
+
+function getColWidths(storageKey) {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(COLWIDTH_KEY) || '{}');
+    const op = currentOperator() || '_default';
+    return (prefs[op] && prefs[op][storageKey]) || null;
+  } catch (e) { return null; }
+}
+function saveColWidths(storageKey, widths) {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(COLWIDTH_KEY) || '{}');
+    const op = currentOperator() || '_default';
+    prefs[op] = prefs[op] || {};
+    prefs[op][storageKey] = widths;
+    localStorage.setItem(COLWIDTH_KEY, JSON.stringify(prefs));
+  } catch (e) {}
+}
+
+// 各總覽表在使用者還沒手動調整過欄寬時的預設值（依欄位實際內容需要的空間給，不是均分）；
+// null表示這一欄已經有自己的inline width了（例如勾選框、★），不需要另外給預設值
+const DEFAULT_COL_WIDTHS = {
+  quotes:     [null, 112, 180, 220, 68, 78, 96, 100, 88, 96, 160, 88, 92],
+  deliveries: [null, 130, 150, 200, 120, 70, 84, 90, 62, 100, 76, 88, 68, 108, 108, 160, 92],
+  customers:  [null, 190, 116, 168, 128, 96, 96, 68],
+  products:   [null, null, 100, 220, 92, 92, 116, 88, 88, 60, 170],
+  users:      [null, 104, 116, 168, 88, 84, 76],
+  suppliers:  [null, 150, 104, 118, 220, 76]
+};
+
+// 幫指定容器裡的表格加上可拖曳調整欄寬的功能；每次重繪表格後呼叫一次即可（會自動跳過已經加過手把的表頭）
+function makeColumnsResizable(containerId, storageKey) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const table = container.querySelector('table.tbl');
+  if (!table) return;
+  const ths = [...table.querySelectorAll('thead th')];
+  if (ths.length < 2) return;
+
+  const saved = getColWidths(storageKey);
+  const defaults = DEFAULT_COL_WIDTHS[storageKey];
+  ths.forEach((th, i) => {
+    if (saved && saved[i]) th.style.width = saved[i] + 'px';
+    else if (!th.style.width && defaults && defaults[i]) th.style.width = defaults[i] + 'px';
+  });
+  table.style.tableLayout = 'fixed';
+
+  ths.forEach((th, i) => {
+    if (i === ths.length - 1) return; // 最後一欄留給它自動撐滿剩餘空間，不用手把
+    if (th.querySelector('.col-resizer')) return;
+    th.style.position = 'relative';
+    const handle = document.createElement('span');
+    handle.className = 'col-resizer';
+    handle.onclick = e => e.stopPropagation(); // 避免誤觸表頭本身的排序click
+    th.appendChild(handle);
+
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      const startX = e.clientX;
+      const startWidth = th.offsetWidth;
+      document.body.classList.add('col-resizing');
+      const onMove = e2 => {
+        const newWidth = Math.max(36, startWidth + (e2.clientX - startX));
+        th.style.width = newWidth + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.classList.remove('col-resizing');
+        saveColWidths(storageKey, ths.map(t => t.offsetWidth));
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
 }
 
 
@@ -2802,7 +3205,7 @@ function emptyDB() {
     _schema: SCHEMA_V,
     companies: s.companies,
     users: [], suppliers: [], customers: [], products: [], categories: [],
-    quotes: [], deliveries: [], counters: {},
+    quotes: [], deliveries: [], counters: {}, accounts: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
     _created: new Date().toISOString()
   };
@@ -2820,6 +3223,7 @@ const ROUTES = [
   { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '主檔' },
   { k: 'users',     t: '業務管理', ico: 'user', tab: false, group: '主檔' },
   { k: 'suppliers', t: '常用代理商', ico: 'supplier', tab: false, group: '主檔' },
+  { k: 'accounts',  t: '帳號管理', ico: 'accounts', tab: false, group: '系統', adminOnly: true },
   { k: 'settings',  t: '設定',     ico: 'settings', tab: false, group: '系統' }
 ];
 
@@ -2837,23 +3241,65 @@ function go(h) { location.hash = h; }
 
 let _lastRoute = null;
 
+// 離開一張還沒送出、但已經填了東西的草稿報價單時，跳出三選一：繼續編輯／直接離開（維持草稿）／現在就送出
+function draftLeaveConfirm(q, targetHash) {
+  openModal({
+    title: '這張報價還是草稿',
+    body: `<p style="margin:0;line-height:1.7;color:var(--text-2)">
+      目前還沒有送出、沒有正式單號，只有你自己看得到。<br>
+      要直接離開（維持草稿，之後可以再回來繼續），還是現在就送出？</p>`,
+    footer: `<button class="btn" data-stay>繼續編輯</button>
+             <button class="btn" data-leave>直接離開</button>
+             <button class="btn primary" data-send>送出報價</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-stay]').onclick = close;
+      el.querySelector('[data-leave]').onclick = () => {
+        _quoteDirty = { id: null, at: 0 };
+        _draftLeaveAcked = q.id;
+        close();
+        location.hash = targetHash;
+      };
+      el.querySelector('[data-send]').onclick = () => {
+        close();
+        sendQuote(q.id, () => {
+          _draftLeaveAcked = q.id;
+          location.hash = targetHash; // 送出成功後，接著去原本要去的地方，而不是留在報價頁
+        });
+      };
+    }
+  });
+}
+
+let _draftLeaveAcked = null; // 剛選過「直接離開」的那張單ID，消耗一次用，避免自己觸發的hash變化又被攔一次
+
 function render() {
   const prevRoute = _lastRoute;
   route = parseHash();
 
-  // 剛改過的報價單，要離開到別的地方去之前先跳出來確認一下
-  if (prevRoute && prevRoute.k === 'quote' &&
-      _quoteDirty.id === prevRoute.id && _quoteDirty.at && (Date.now() - _quoteDirty.at) < QUOTE_DIRTY_WINDOW &&
-      !(route.k === 'quote' && route.id === prevRoute.id)) {
+  if (prevRoute && prevRoute.k === 'quote' && !(route.k === 'quote' && route.id === prevRoute.id)) {
+    const q = byId(DB.quotes, prevRoute.id);
     const targetHash = location.hash;
-    location.hash = '#quote/' + prevRoute.id; // 先擋回原本那頁，等使用者確認要不要真的離開
-    setTimeout(() => {
-      confirmBox('剛剛修改過這張報價單', '確定要離開嗎？（改的內容已經自動存檔，這裡只是提醒你再檢查一次）', () => {
-        _quoteDirty = { id: null, at: 0 };
-        location.hash = targetHash;
-      });
-    }, 30);
-    return;
+    const bypass = _draftLeaveAcked === prevRoute.id;
+    if (bypass) _draftLeaveAcked = null; // 消耗掉，下次離開要重新判斷
+
+    // 離開時這張單還是草稿、而且有填東西了 → 三選一提醒，避免忘記送出一直卡在草稿
+    // （唯讀權限的人沒有能力送出，不用問他）
+    if (!bypass && canEdit() && q && isDraftNo(q.quote_no) && q.customer_snapshot && q.items.some(i => (i.name || '').trim())) {
+      location.hash = '#quote/' + prevRoute.id; // 先擋回原本那頁，等使用者選好要幹嘛
+      setTimeout(() => draftLeaveConfirm(q, targetHash), 30);
+      return;
+    }
+    // 剛改過的非草稿報價單（例如解鎖編輯已送出的單），離開前先跳出來確認一下
+    if (!bypass && _quoteDirty.id === prevRoute.id && _quoteDirty.at && (Date.now() - _quoteDirty.at) < QUOTE_DIRTY_WINDOW) {
+      location.hash = '#quote/' + prevRoute.id;
+      setTimeout(() => {
+        confirmBox('剛剛修改過這張報價單', '確定要離開嗎？（改的內容已經自動存檔，這裡只是提醒你再檢查一次）', () => {
+          _quoteDirty = { id: null, at: 0 };
+          location.hash = targetHash;
+        });
+      }, 30);
+      return;
+    }
   }
   _lastRoute = route;
 
@@ -2875,17 +3321,26 @@ function render() {
     dash: viewDash, quotes: viewQuotes, quote: viewQuote,
     deliveries: viewDeliveries, delivery: viewDelivery,
     customers: viewCustomers, products: viewProducts,
-    suppliers: viewSuppliers, users: viewUsers, settings: viewSettings
+    suppliers: viewSuppliers, users: viewUsers, settings: viewSettings,
+    accounts: viewAccounts
   })[route.k];
 
   if (!fn) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到頁面</h3></div>`; return; }
+  if (route.k === 'accounts' && !isAdmin()) {
+    document.getElementById('pageTitle').textContent = '沒有權限';
+    v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>沒有權限</h3><p>只有管理員能查看帳號管理</p></div>`;
+    return;
+  }
+  // 只有真的換到不同頁面才捲回頂部；同一頁的重繪（不管是遠端同步觸發、還是儲存後的重繪）
+  // 不該打斷使用者當下正在看／正在打字的位置，不然會變成「別人動了什麼，我這邊莫名其妙跳到最上面」
+  const isNavigation = !(prevRoute && prevRoute.k === route.k && prevRoute.id === route.id);
   try { fn(v); }
   catch (e) {
     console.error(e);
     v.innerHTML = `<div class="banner warn"><span class="bi">⚠</span><div>畫面載入失敗：${esc(e.message)}<br>
       請重新整理，若持續發生請到「設定」匯出備份。</div></div>`;
   }
-  window.scrollTo(0, 0);
+  if (isNavigation) window.scrollTo(0, 0);
 }
 
 // 報價/出貨單「詳情頁」依目前所在的步驟給不同底色，且刻意避開跟當下會出現的
@@ -2912,7 +3367,7 @@ function renderNav() {
   const pend = DB.deliveries.filter(d => d.status === 'pending_order').length;
   const nav = document.getElementById('nav');
   let html = '', lastGroup = null;
-  ROUTES.forEach(r => {
+  ROUTES.filter(r => !r.adminOnly || isAdmin()).forEach(r => {
     if (r.group && r.group !== lastGroup) {
       html += `<div class="nav-group"><div class="nav-label">${r.group}</div></div>`;
       lastGroup = r.group;
@@ -2933,6 +3388,13 @@ function renderNav() {
   document.getElementById('brandSub').textContent = DB.companies.map(c => c.badge || c.code).join(' · ');
   document.getElementById('dbInfo').textContent =
     `報價 ${DB.quotes.length} · 出貨 ${DB.deliveries.length} · 商品 ${DB.products.length}`;
+  const roleTag = document.getElementById('roleTag');
+  if (roleTag) {
+    const role = currentRole();
+    roleTag.innerHTML = role === 'viewer'
+      ? `<span class="bdg orange plain" title="唯讀權限，沒辦法新增或修改資料">🔒 唯讀模式</span>`
+      : (currentAccount() ? `<span class="bdg gray plain" title="目前登入身分">${esc(ROLE_LABEL[role])}</span>` : '');
+  }
 }
 
 function markExpired() {
@@ -3054,21 +3516,23 @@ function viewUsers(v) {
       <button class="btn sm" onclick="uSelected.clear();document.getElementById('us').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteUsers()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="ulist"></div></div></div>`;
-  const run = () => {
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="ulist"></div><div id="uPageBar"></div></div></div>`;
+  const run = (resetPage) => {
     const kw = document.getElementById('us').value.trim().toLowerCase();
     const list = DB.users.filter(u => !kw || (u.name + (u.phone || '') + (u.email || '')).toLowerCase().includes(kw));
-    const allChecked = list.length && list.every(u => uSelected.has(u.id));
+    const info = paginateList('users', list, resetPage);
+    const page = info.pageItems;
+    const allChecked = page.length && page.every(u => uSelected.has(u.id));
     document.getElementById('ulist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('user')}</div><h3>沒有業務</h3>
          <button class="btn primary" onclick="editUser(null)">＋ 新增業務</button></div>`
       : `<table class="tbl"><thead><tr>
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
-              onclick="toggleSelAll('u', this.checked, ${esc(JSON.stringify(list.map(u => u.id)))})"></th>
+              onclick="toggleSelAll('u', this.checked, ${esc(JSON.stringify(page.map(u => u.id)))})"></th>
           <th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th class="c">負責報價</th><th class="c">狀態</th>
         </tr></thead><tbody>
-        ${list.map(u => {
+        ${page.map(u => {
           const n = DB.quotes.filter(q => q.sales_user_id === u.id).length;
           return `<tr onclick="editUser('${u.id}')">
             <td onclick="event.stopPropagation()"><input type="checkbox" ${uSelected.has(u.id) ? 'checked' : ''} onchange="toggleSel('u','${u.id}', this.checked)"></td>
@@ -3080,9 +3544,12 @@ function viewUsers(v) {
             <td class="c">${u.is_active ? '<span class="bdg green">啟用</span>' : '<span class="bdg gray">停用</span>'}</td>
           </tr>`;
         }).join('')}</tbody></table>`;
+    document.getElementById('uPageBar').innerHTML = list.length ? pageBarHtml('users', info) : '';
+    makeColumnsResizable('ulist', 'users');
     updateBulkBar('u');
   };
-  document.getElementById('us').addEventListener('input', run);
+  registerPageRunner('users', run);
+  document.getElementById('us').addEventListener('input', () => run(true));
   run();
 }
 
@@ -3165,19 +3632,21 @@ function viewSuppliers(v) {
       <button class="btn sm" onclick="sSelected.clear();document.getElementById('ss').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteSuppliers()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="slist"></div></div></div>`;
-  const run = () => {
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="slist"></div><div id="sPageBar"></div></div></div>`;
+  const run = (resetPage) => {
     const kw = document.getElementById('ss').value.trim().toLowerCase();
     const list = DB.suppliers.filter(s => !kw || (s.name + (s.contact_person || '') + (s.phone || '')).toLowerCase().includes(kw));
-    const allChecked = list.length && list.every(s => sSelected.has(s.id));
+    const info = paginateList('suppliers', list, resetPage);
+    const page = info.pageItems;
+    const allChecked = page.length && page.every(s => sSelected.has(s.id));
     document.getElementById('slist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('supplier')}</div><h3>沒有常用代理商</h3></div>`
       : `<table class="tbl"><thead><tr>
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
-              onclick="toggleSelAll('s', this.checked, ${esc(JSON.stringify(list.map(s => s.id)))})"></th>
+              onclick="toggleSelAll('s', this.checked, ${esc(JSON.stringify(page.map(s => s.id)))})"></th>
           <th>名稱</th><th>聯絡人</th><th>電話</th><th>備註</th><th class="c">使用中</th></tr></thead><tbody>
-        ${list.map(s => {
+        ${page.map(s => {
           const n = DB.quotes.filter(q => q.items.some(i => i.supplier_name === s.name
             || (i.components || []).some(c => c.supplier_name === s.name))).length;
           return `<tr onclick="editSupplier('${s.id}')">
@@ -3186,9 +3655,12 @@ function viewSuppliers(v) {
             <td style="font-family:var(--mono)">${esc(s.phone || '—')}</td>
             <td class="muted">${esc(s.note || '')}</td><td class="c">${n || '—'}</td></tr>`;
         }).join('')}</tbody></table>`;
+    document.getElementById('sPageBar').innerHTML = list.length ? pageBarHtml('suppliers', info) : '';
+    makeColumnsResizable('slist', 'suppliers');
     updateBulkBar('s');
   };
-  document.getElementById('ss').addEventListener('input', run);
+  registerPageRunner('suppliers', run);
+  document.getElementById('ss').addEventListener('input', () => run(true));
   run();
 }
 
@@ -3262,6 +3734,8 @@ function quoteSortValue(q, key) {
     case 'status': return QS[q.status] ? QS[q.status].label : '';
     case 'order_method': return q.order_method ? ORDER_METHODS[q.order_method].label : '';
     case 'note': return q.note || '';
+    case 'created_by': return q.created_by_op || '';
+    case 'edit_log': return (q.edit_log || []).length;
     default: return q.created_at || '';
   }
 }
@@ -3269,7 +3743,8 @@ function quoteSortValue(q, key) {
 const Q_COLS = [
   ['quote_no', '單號'], ['customer', '客戶'], ['product', '商品'], ['company', '公司'],
   ['sales', '業務'], ['quote_date', '報價日期'], ['amount', '含稅金額'],
-  ['status', '狀態'], ['order_method', '下單方式'], ['note', '備註']
+  ['status', '狀態'], ['order_method', '下單方式'], ['note', '備註'],
+  ['created_by', '建立人員'], ['edit_log', '異動紀錄']
 ];
 
 let qSelected = new Set();
@@ -3279,7 +3754,7 @@ function quoteTable(list, opts) {
   opts = opts || {};
   if (!list.length) return `<div class="empty"><div class="e">${icon('quote')}</div><h3>沒有報價</h3>
     <p>建立第一張報價單開始使用</p><button class="btn primary" onclick="newQuote()">＋ 新增報價</button></div>`;
-  const sorted = opts.noSort ? list : sortRows(list, qSortState, quoteSortValue);
+  const sorted = (opts.noSort || opts.preSorted) ? list : sortRows(list, qSortState, quoteSortValue);
   const sel = opts.selectable;
   const allChecked = sel && sorted.length && sorted.every(q => qSelected.has(q.id));
   return `<table class="tbl">
@@ -3313,6 +3788,9 @@ function quoteTable(list, opts) {
         <td class="nowrap">${badge(QS, q.status)}</td>
         <td class="nowrap">${om ? `<span class="bdg blue plain">${om.ico} ${om.label}</span>` : '<span class="muted">—</span>'}</td>
         <td class="prod-col muted" title="${esc(q.note || '')}">${esc(q.note || '—')}</td>
+        <td class="nowrap muted">${esc(q.created_by_op || '—')}</td>
+        <td class="c nowrap" onclick="event.stopPropagation()">
+          ${(q.edit_log && q.edit_log.length) ? `<a href="javascript:void(0)" class="op-trail-link" onclick="showEditLog('${q.id}')">查看（${q.edit_log.length}）</a>` : '<span class="muted">—</span>'}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -3358,6 +3836,9 @@ function viewQuotes(v) {
       <input class="inp" type="date" id="qd2" style="width:150px" value="${esc(f.d2 || '')}">
       <button class="btn" onclick="go('quotes')">清除</button>
       <button class="btn" onclick="exportQuotesExcel()">⬇ 匯出 Excel</button>
+      <button class="btn" onclick="document.getElementById('qImpFile').click()">⬆ 匯入 Excel</button>
+      <a href="javascript:void(0)" onclick="downloadQuoteImportTemplate()" style="font-size:12px;color:var(--text-3);white-space:nowrap">下載範本</a>
+      <input type="file" id="qImpFile" accept=".xlsx,.xls" class="hide">
       <button class="btn primary" onclick="newQuote()">＋ 新增報價</button>
     </div>
     <div class="bulk-bar" id="qBulkBar" style="display:none">
@@ -3365,9 +3846,9 @@ function viewQuotes(v) {
       <button class="btn sm" onclick="qSelected.clear();document.getElementById('qs').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteQuotes()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="qlist"></div></div></div>`;
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="qlist"></div><div id="qPageBar"></div></div></div>`;
 
-  const run = () => {
+  const run = (resetPage) => {
     const kw = document.getElementById('qs').value.trim().toLowerCase();
     const st = document.getElementById('qstatus').value;
     const co = document.getElementById('qco').value;
@@ -3386,17 +3867,152 @@ function viewQuotes(v) {
     if (d1) list = list.filter(q => q.quote_date >= d1);
     if (d2) list = list.filter(q => q.quote_date <= d2);
     list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    list = sortRows(list, qSortState, quoteSortValue);
     qFilteredList = list;
-    document.getElementById('qlist').innerHTML = quoteTable(list, { selectable: true });
+    const info = paginateList('quotes', list, resetPage);
+    document.getElementById('qlist').innerHTML = quoteTable(info.pageItems, { selectable: true, preSorted: true });
+    document.getElementById('qPageBar').innerHTML = list.length ? pageBarHtml('quotes', info) : '';
     bindTableSort('qlist', qSortState, run);
+    makeColumnsResizable('qlist', 'quotes');
     updateBulkBar('q');
   };
+  registerPageRunner('quotes', run);
   ['qs', 'qstatus', 'qco', 'qsales', 'qd1', 'qd2'].forEach(id =>
-    document.getElementById(id).addEventListener('input', run));
+    document.getElementById(id).addEventListener('input', () => run(true)));
+  document.getElementById('qImpFile').onchange = e => {
+    importQuotesExcel(e.target.files[0]);
+    e.target.value = '';
+  };
   run();
 }
 
 // 匯出目前篩選出的報價清單成 Excel，條列式一單一列，方便之後篩選搜尋
+// 下載報價匯入範本：欄位說明 + 一列範例，讓使用者照著格式填
+function downloadQuoteImportTemplate() {
+  const rows = [
+    { '批次編號': '1', '客戶名稱': '千附精密股份有限公司', '商品名稱': 'CT203484 原廠碳粉匣', '品牌': 'FUJIFILM',
+      '規格': '', '數量': 2, '單價': 3500, '業務': '', '備註': '同一個批次編號=同一張報價單' },
+    { '批次編號': '1', '客戶名稱': '千附精密股份有限公司', '商品名稱': 'ApeosPrint 4620 SDN', '品牌': 'FUJIFILM',
+      '規格': 'A4 黑白雷射', '數量': 1, '單價': 18500, '業務': '', '備註': '' },
+    { '批次編號': '2', '客戶名稱': '（換成你自己的客戶名稱，要跟客戶管理裡的名稱完全一樣）', '商品名稱': '（商品名稱）', '品牌': '',
+      '規格': '', '數量': 1, '單價': 0, '業務': '（選填，要跟業務管理裡的姓名一樣）', '備註': '' }
+  ];
+  exportExcelRows(rows, '報價匯入範本', '報價匯入範本.xlsx');
+}
+
+// 解析上傳的Excel檔案，讀取指定工作表回傳物件陣列（每列一個物件，key是欄位標題）
+function parseExcelFile(file) {
+  return new Promise((resolve, reject) => {
+    if (typeof XLSX === 'undefined') return reject(new Error('Excel 匯入功能載入失敗'));
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const wb = XLSX.read(r.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        resolve(XLSX.utils.sheet_to_json(ws, { defval: '' }));
+      } catch (e) { reject(e); }
+    };
+    r.onerror = () => reject(new Error('檔案讀取失敗'));
+    r.readAsArrayBuffer(file);
+  });
+}
+
+async function importQuotesExcel(file) {
+  if (!file) return;
+  let rows;
+  try { rows = await parseExcelFile(file); }
+  catch (e) { return toast('匯入失敗：' + e.message, 'err'); }
+  if (!rows.length) return toast('這個檔案沒有資料', 'err');
+
+  // 依「批次編號」把列分組，每組會變成一張報價單
+  const groups = {};
+  const order = [];
+  const errors = [];
+  rows.forEach((row, idx) => {
+    const batch = String(row['批次編號'] ?? '').trim();
+    const custName = String(row['客戶名稱'] ?? '').trim();
+    const prodName = String(row['商品名稱'] ?? '').trim();
+    if (!batch || !custName || !prodName) {
+      errors.push(`第 ${idx + 2} 列：批次編號／客戶名稱／商品名稱缺少必填欄位，已略過`);
+      return;
+    }
+    if (!groups[batch]) { groups[batch] = { batch, custName, rows: [] }; order.push(batch); }
+    groups[batch].rows.push(row);
+  });
+
+  const preview = order.map(batch => {
+    const g = groups[batch];
+    const cust = DB.customers.find(c => c.name === g.custName);
+    if (!cust) errors.push(`批次 ${batch}：找不到客戶「${g.custName}」，這張單會被略過（客戶名稱要跟客戶管理裡的完全一樣）`);
+    return { ...g, cust, itemCount: g.rows.length };
+  });
+  const valid = preview.filter(g => g.cust);
+
+  if (!valid.length) {
+    return openModal({
+      title: '匯入失敗', body: `<p style="color:var(--red)">沒有任何一筆資料可以匯入。</p>
+        <div class="editlog-list">${errors.map(e => `<div class="editlog-row">${esc(e)}</div>`).join('')}</div>`,
+      footer: `<button class="btn primary" data-close>關閉</button>`,
+      onMount(el, close) { el.querySelector('[data-close]').onclick = close; }
+    });
+  }
+
+  openModal({
+    title: '確認匯入報價單',
+    body: `<p style="margin:0 0 10px;color:var(--text-2)">將建立 <b>${valid.length}</b> 張新的草稿報價單，共 ${valid.reduce((s, g) => s + g.itemCount, 0)} 項商品明細。建立後狀態是「草稿」，請自行檢查內容後再送出。</p>
+      <div class="editlog-list">
+        ${valid.map(g => `<div class="editlog-row"><span class="editlog-who">批次 ${esc(g.batch)}</span>
+          <span class="editlog-action">${esc(g.custName)}　${g.itemCount} 項</span></div>`).join('')}
+      </div>
+      ${errors.length ? `<p style="margin:10px 0 4px;color:var(--red);font-size:12.5px">有 ${errors.length} 筆問題會被略過：</p>
+        <div class="editlog-list">${errors.map(e => `<div class="editlog-row" style="color:var(--red);font-size:12px">${esc(e)}</div>`).join('')}</div>` : ''}`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-yes>確定匯入</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = () => {
+        close();
+        valid.forEach(g => {
+          const salesRow = g.rows.find(r => String(r['業務'] ?? '').trim());
+          const salesName = salesRow ? String(salesRow['業務']).trim() : '';
+          const salesUser = salesName ? DB.users.find(u => u.name === salesName) : null;
+          const noteRow = g.rows.find(r => String(r['備註'] ?? '').trim());
+          const site = defaultSite(g.cust);
+          const co = byId(DB.companies, g.cust.default_company_id) || DB.companies[0];
+          const q = {
+            id: uid('q'), quote_no: draftNo(), company_id: co.id, customer_id: g.cust.id,
+            customer_site_id: site ? site.id : null,
+            customer_snapshot: {
+              name: g.cust.name, tax_id: g.cust.tax_id, site_label: site ? site.label : '',
+              contact_person: site ? site.contact_person : '', phone: site ? site.phone : '',
+              fax: site ? site.fax : '', address: site ? site.address : '', email: site ? site.email : ''
+            },
+            sales_user_id: salesUser ? salesUser.id : '', sales_name: salesName,
+            quote_date: today(), valid_until: addDays(today(), DB.settings.valid_days),
+            status: 'draft', revision: 1, unlocked: true, price_display: 'tax_excluded',
+            order_method: null, order_note: '', signed_back_at: null, signed_back_file: null, sent_at: null,
+            created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
+            edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '從Excel匯入建立' }],
+            note: noteRow ? String(noteRow['備註']).trim() : '',
+            items: g.rows.map(r => ({
+              id: uid('qi'), product_id: null, sort_order: 0,
+              part_no: '', brand: String(r['品牌'] ?? '').trim(), name: String(r['商品名稱'] ?? '').trim(),
+              spec: String(r['規格'] ?? '').trim(), unit: '台',
+              qty: Math.max(0, Math.round(+r['數量'] || 1)), unit_price: +r['單價'] || 0, default_cost: 0,
+              supplier_name: '', in_stock: true, source: 'stock',
+              assembly_items: [], shipped_qty: 0, components: []
+            })),
+            created_at: new Date().toISOString()
+          };
+          q.items.forEach((it, i) => it.sort_order = i);
+          DB.quotes.push(q);
+        });
+        save(); render();
+        toast(`已從 Excel 匯入 ${valid.length} 張草稿報價單`, 'ok');
+      };
+    }
+  });
+}
+
 function exportQuotesExcel() {
   const list = qFilteredList;
   if (!list.length) return toast('目前沒有資料可以匯出', 'err');
@@ -3460,6 +4076,7 @@ function newQuote() {
     order_method: null, order_note: '', signed_back_at: null, signed_back_file: null,
     price_display: 'breakdown',
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
+    edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '建立草稿' }],
     note: '', items: [], created_at: new Date().toISOString()
   };
   DB.quotes.push(q); save();
@@ -3471,6 +4088,7 @@ let QE = null;
 // 報價可編輯條件：草稿，或已解鎖（議價用）
 function qEditable(q) {
   if (!q) return false;
+  if (!canEdit()) return false;
   if (['cancelled'].includes(q.status)) return false;
   return q.status === 'draft' || q.unlocked === true;
 }
@@ -3551,7 +4169,7 @@ function viewQuote(v) {
               placeholder="留空就不印備註">${esc(q.note || '')}</textarea></div>
         </div></div>
         <div class="btn-row">
-          <button class="btn primary" style="flex:1" onclick="downloadQuotePDF('${q.id}')">⬇ 下載報價單 PDF</button>
+          <button class="btn primary" style="flex:1" onclick="downloadQuotePDF('${q.id}')">⬇ 另存成 PDF</button>
         </div>
         <div class="btn-row">
           <button class="btn" style="flex:1" onclick="previewQuotePDF('${q.id}')">預覽 / 列印</button>
@@ -3647,6 +4265,8 @@ function qActions(q) {
     b += `<button class="btn" onclick="unlockQuote('${q.id}')">✏ 編輯報價單</button>`;
   b += `<button class="btn" onclick="cloneQuote('${q.id}')">複製為新報價</button>`;
   if (dvs.length) b += `<button class="btn ghost" onclick="go('delivery/${dvs[0].id}')">出貨單</button>`;
+  if (q.status === 'signed' && !dvs.length)
+    b += `<button class="btn sm ghost" style="color:var(--text-3)" onclick="undoMarkOrdered('${q.id}')">取消回簽</button>`;
   b += '</div><div class="btn-row">';
   if (!['cancelled', 'completed'].includes(q.status))
     b += `<button class="btn danger" onclick="cancelQuote('${q.id}')">取消</button>`;
@@ -3714,7 +4334,7 @@ function editSnapshot() {
 /* ===========================================================
    §7.1 狀態轉移
    =========================================================== */
-function sendQuote(id) {
+function sendQuote(id, onSuccess) {
   const q = byId(DB.quotes, id);
   if (!q.customer_snapshot) return toast('請先選擇客戶', 'err');
   const real = q.items.filter(i => (i.name || '').trim());
@@ -3728,7 +4348,9 @@ function sendQuote(id) {
     q.company_snapshot = snapCompany(co);
     q.status = 'sent'; q.unlocked = false;
     q.sent_at = new Date().toISOString();
-    save(); render();
+    appendEditLog(q, '送出報價');
+    save();
+    if (onSuccess) onSuccess(); else render();
     toast('已送出，單號 ' + q.quote_no, 'ok');
   });
 }
@@ -3742,6 +4364,22 @@ function snapCompany(co) {
 }
 
 // 下單方式：客戶簽回 / 文字下單
+// 取消回簽：客戶明明還沒真的簽回，不小心點到「登記下單」時可以退回去。
+// 已經開出貨單就不給取消（避免出貨單失去來源依據），且一定要二次確認才會真的動作。
+function undoMarkOrdered(id) {
+  const q = byId(DB.quotes, id);
+  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled');
+  if (dvs.length) return toast('已經開立出貨單，不能取消回簽。請先處理出貨單。', 'err');
+  confirmBox('取消回簽',
+    `確定要取消「${esc(q.quote_no)}」的客戶回簽紀錄嗎？<br>會回到「已送出，等待客戶下單」的狀態，回簽方式／日期／備註都會被清空。`, () => {
+      q.status = 'sent';
+      q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null;
+      appendEditLog(q, '取消回簽');
+      save(); render();
+      toast('已取消回簽，回到待下單狀態', 'ok');
+    }, true);
+}
+
 function markOrdered(id) {
   const q = byId(DB.quotes, id);
   openModal({
@@ -3785,6 +4423,7 @@ function markOrdered(id) {
         q.signed_back_file = method === 'signed' && f ? f.name : null;
         q.order_note = method === 'text' ? el.querySelector('#sbt').value.trim() : '';
         q.status = 'signed';
+        appendEditLog(q, '登記下單');
         save(); close(); render();
         toast('已登記下單，可以開立出貨單了', 'ok');
       };
@@ -3924,6 +4563,10 @@ function pickCustomerSitePrompt(q, c) {
 }
 
 function applySite(q, c, site) {
+  // 保險：重新從DB.quotes撈最新的物件參照。如果從打開自動完成到現在點選之間發生過重繪
+  // （例如雲端同步確認寫入回來），q有可能已經是脫離DB.quotes的舊物件，直接改q會憑空消失。
+  q = byId(DB.quotes, q.id) || q;
+  QE = q;
   q.customer_id = c.id;
   q.customer_site_id = site ? site.id : null;
   q.customer_snapshot = {
@@ -3932,6 +4575,11 @@ function applySite(q, c, site) {
     fax: site ? site.fax : '', address: site ? site.address : '', email: site ? site.email : ''
   };
   if (c.default_company_id) q.company_id = c.default_company_id;
+  // 客戶有設定預設服務業務的話，選這個客戶時直接套用（如果想用別的業務，選完客戶後再改業務欄位即可）
+  if (c.default_sales_user_id) {
+    const salesUser = byId(DB.users, c.default_sales_user_id);
+    if (salesUser) { q.sales_user_id = salesUser.id; q.sales_name = salesUser.name; }
+  }
   save(); render(); toast(`已帶入 ${c.name}${site && site.label ? '（' + site.label + '）' : ''}`);
 }
 
@@ -4045,14 +4693,20 @@ function drawItems() {
       const [iid, aid] = e.target.dataset.ai.split('|');
       const it = byId(q.items, iid), a = byId(it.assembly_items, aid), k = e.target.dataset.k;
       if (e.target.dataset.aitax !== undefined) { a.cost_tax = a.cost_tax === 'in' ? 'ex' : 'in'; save(); drawItems(); return; }
-      a[k] = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' ? (+e.target.value || 0) : e.target.value);
+      if (k === 'qty' && e.target.type === 'number') {
+        a.qty = Math.max(0, Math.round(+e.target.value || 0));
+        if (String(a.qty) !== e.target.value) e.target.value = a.qty;
+      } else {
+        a[k] = e.target.type === 'checkbox' ? e.target.checked : (e.target.type === 'number' ? (+e.target.value || 0) : e.target.value);
+      }
       save();
       if (k === 'in_stock') drawItems();
     });
   });
   box.querySelectorAll('[data-qty]').forEach(el => el.addEventListener('input', e => {
     const it = byId(q.items, e.target.dataset.qty);
-    it.qty = Math.max(0, +e.target.value || 0);
+    it.qty = Math.max(0, Math.round(+e.target.value || 0));
+    if (String(it.qty) !== e.target.value) e.target.value = it.qty; // 打小數點會被四捨五入，畫面要跟著同步，不然會顯示小數卻存整數
     save(); refreshAmount(it); drawTotals(); mobileSticky(q);
   }));
   box.querySelectorAll('[data-up]').forEach(el => el.addEventListener('input', e => {
@@ -4070,9 +4724,10 @@ function drawItems() {
           if (!kw) return [];
           const k = kw.toLowerCase();
           return DB.products.filter(p => p.is_active &&
-            ((p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(k)))
+            ((p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(k) ||
+             (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(k))))
             .sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0))
-            .slice(0, 8).map(p => ({
+            .slice(0, 40).map(p => ({
               p, html: `<div class="m">
                 <div class="t">${p.is_favorite ? '<span class="star">★</span> ' : ''}${esc(p.brand ? p.brand + ' ' : '')}${esc(p.name)}
                   ${p.has_bom ? '<span class="bdg blue plain" style="height:16px;font-size:9px">BOM</span>' : ''}</div>
@@ -4118,7 +4773,7 @@ function itemRow(it, n, editable) {
       </div>
     </div>
     <div class="qty"><div class="mfield"><label>數量</label>
-      <input class="inp num" type="number" inputmode="decimal" step="0.01" min="0"
+      <input class="inp num" type="number" inputmode="numeric" step="1" min="0"
         data-qty="${it.id}" value="${it.qty}" ${D}></div></div>
     <div class="up"><div class="mfield"><label>單價</label>
       <input class="inp num" type="number" inputmode="decimal" step="0.01" min="0"
@@ -4237,7 +4892,7 @@ function assemblyBox(it, editable) {
       <div class="asm-row">
         <input class="inp asm-pn" data-ai="${it.id}|${a.id}" data-k="part_no" placeholder="料號" value="${esc(a.part_no || '')}" ${D}>
         <input class="inp asm-name" data-ai="${it.id}|${a.id}" data-k="name" placeholder="品名" value="${esc(a.name || '')}" ${D}>
-        <input class="inp num asm-qty" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="qty" placeholder="數量" value="${a.qty}" ${D}>
+        <input class="inp num asm-qty" type="number" step="1" min="0" data-ai="${it.id}|${a.id}" data-k="qty" placeholder="數量" value="${a.qty}" ${D}>
         <input class="inp num asm-price" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="unit_price" placeholder="單價" value="${a.unit_price}" ${D}>
         <label class="asm-chk"><input type="checkbox" data-ai="${it.id}|${a.id}" data-k="in_stock" ${a.in_stock ? 'checked' : ''} ${D}> 有庫</label>
         ${a.in_stock
@@ -4480,7 +5135,8 @@ function makeDelivery(q, co, o) {
     invoice_method: '隨貨', payment_method: '月結', attachment: '', note: DEFAULT_DELIVERY_NOTE,
     no_invoice: false, invoice_copies: 3,
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
-    invoiced: false, invoice_date: '',
+    edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '開立出貨單' }],
+    invoiced: false, invoice_date: '', invoice_no: '', customer_po: '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
   dv.status = dsFirst(dv);
@@ -4511,21 +5167,25 @@ function deliverySortValue(d, key) {
     case 'product': return (d.items.find(i => i.name) || {}).name || '';
     case 'quote_no': return d.quote_no || '';
     case 'sales': return userName(d.sales_user_id) || '';
-    case 'created_by': return d.created_by || '';
+    case 'created_by': return d.created_by_op || '';
     case 'delivery_date': return d.delivery_date || '';
     case 'items': return d.items.length;
     case 'amount': return t.total;
     case 'buy': return allLines(d).filter(i => !i.in_stock).length;
     case 'status': return DS[d.status] ? DS[d.status].label : '';
     case 'invoiced': return d.invoiced ? 1 : 0;
+    case 'invoice_no': return d.invoice_no || '';
+    case 'customer_po': return d.customer_po || '';
     case 'note': return d.note || '';
+    case 'edit_log': return (d.edit_log || []).length;
     default: return d.created_at || '';
   }
 }
 const D_COLS = [
   ['delivery_no', '出貨單號'], ['customer', '客戶'], ['product', '商品'], ['quote_no', '來源報價'],
   ['sales', '業務'], ['created_by', '開單人員'], ['delivery_date', '日期'], ['items', '品項'],
-  ['amount', '含稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'], ['note', '備註']
+  ['amount', '含稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'],
+  ['invoice_no', '發票號碼'], ['customer_po', '客戶PO單號'], ['note', '備註'], ['edit_log', '異動紀錄']
 ];
 
 function toggleDvInvoiced(id, el) {
@@ -4546,11 +5206,20 @@ function toggleDvInvoiced(id, el) {
 function applyInvoicedChange(id, checked) {
   const d = byId(DB.deliveries, id);
   d.invoiced = checked;
-  if (!d.invoiced) d.invoice_date = '';
+  if (!d.invoiced) { d.invoice_date = ''; d.invoice_no = ''; d.customer_po = ''; }
   else if (!d.invoice_date) d.invoice_date = today();
   save();
   const dateEl = document.querySelector(`[data-invdate="${id}"]`);
   if (dateEl) { dateEl.disabled = !checked; dateEl.value = d.invoice_date || ''; }
+  const noEl = document.querySelector(`[data-invno="${id}"]`);
+  if (noEl) { noEl.disabled = !checked; noEl.value = d.invoice_no || ''; noEl.placeholder = checked ? '發票號碼' : '—'; }
+  const poEl = document.querySelector(`[data-custpo="${id}"]`);
+  if (poEl) { poEl.disabled = !checked; poEl.value = d.customer_po || ''; poEl.placeholder = checked ? '客戶PO單號' : '—'; }
+}
+function setDvField(id, field, val) {
+  const d = byId(DB.deliveries, id);
+  d[field] = val.trim();
+  save();
 }
 function setDvInvoiceDate(id, val) {
   const d = byId(DB.deliveries, id);
@@ -4564,7 +5233,7 @@ function deliveryTable(list, opts) {
   opts = opts || {};
   if (!list.length) return `<div class="empty"><div class="e">${icon('delivery')}</div><h3>沒有出貨單</h3>
     <p>出貨單由已下單的報價開立</p><button class="btn" onclick="go('quotes?status=signed')">查看已下單報價</button></div>`;
-  const sorted = sortRows(list, dSortState, deliverySortValue);
+  const sorted = opts.preSorted ? list : sortRows(list, dSortState, deliverySortValue);
   const rc = k => ['items', 'amount', 'buy', 'invoiced'].includes(k) ? 'c' : '';
   const sel = opts.selectable;
   const allChecked = sel && sorted.length && sorted.every(d => dSelected.has(d.id));
@@ -4588,7 +5257,7 @@ function deliveryTable(list, opts) {
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
         <td class="muted nowrap" style="font-family:var(--mono);font-size:11px">${esc(d.quote_no || '—')}</td>
         <td class="nowrap">${esc(userName(d.sales_user_id) || '—')}</td>
-        <td class="muted nowrap">${esc(d.created_by || '—')}</td>
+        <td class="muted nowrap">${esc(d.created_by_op || '—')}</td>
         <td class="nowrap">${fmtDateShort(d.delivery_date)}</td>
         <td class="c">${d.items.length}</td>
         <td class="r money nowrap">${money(t.total)}</td>
@@ -4599,7 +5268,15 @@ function deliveryTable(list, opts) {
             <input type="checkbox" ${d.invoiced ? 'checked' : ''} onchange="toggleDvInvoiced('${d.id}', this)"></label>
           <input type="date" class="inp" data-invdate="${d.id}" value="${esc(d.invoice_date || '')}"
             ${d.invoiced ? '' : 'disabled'} onchange="setDvInvoiceDate('${d.id}', this.value)"></td>
+        <td onclick="event.stopPropagation()">
+          <input class="inp" style="height:28px;font-size:12px" data-invno="${d.id}" value="${esc(d.invoice_no || '')}"
+            placeholder="${d.invoiced ? '發票號碼' : '—'}" ${d.invoiced ? '' : 'disabled'} onchange="setDvField('${d.id}','invoice_no',this.value)"></td>
+        <td onclick="event.stopPropagation()">
+          <input class="inp" style="height:28px;font-size:12px" data-custpo="${d.id}" value="${esc(d.customer_po || '')}"
+            placeholder="${d.invoiced ? '客戶PO單號' : '—'}" ${d.invoiced ? '' : 'disabled'} onchange="setDvField('${d.id}','customer_po',this.value)"></td>
         <td class="prod-col muted" title="${esc(d.note || '')}">${esc(d.note || '—')}</td>
+        <td class="c nowrap" onclick="event.stopPropagation()">
+          ${(d.edit_log && d.edit_log.length) ? `<a href="javascript:void(0)" class="op-trail-link" onclick="showEditLog('${d.id}')">查看（${d.edit_log.length}）</a>` : '<span class="muted">—</span>'}</td>
       </tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -4614,9 +5291,13 @@ function toggleDSelAll(checked, ids) {
   updateBulkBar('d');
 }
 
+let dPeriodMode = 'all'; // all | month | year | custom
+
 function viewDeliveries(v) {
   const f = route.q;
   dSelected.clear();
+  const nowYM = today().slice(0, 7);       // YYYY-MM
+  const nowY = today().slice(0, 4);        // YYYY
   v.innerHTML = `
     <div class="toolbar">
       <div class="grow"><input class="inp" id="ds" placeholder="搜尋出貨單號 / 報價單號 / 客戶 / 品名 / 料號…" value="${esc(f.kw || '')}"></div>
@@ -4628,10 +5309,27 @@ function viewDeliveries(v) {
         <option value="">全部業務</option>
         ${DB.users.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}
       </select>
-      <input class="inp" type="date" id="dd1" style="width:150px">
-      <input class="inp" type="date" id="dd2" style="width:150px">
       <button class="btn" onclick="go('deliveries')">清除</button>
       <button class="btn" onclick="exportDeliveriesExcel()">⬇ 匯出 Excel</button>
+      <button class="btn" onclick="document.getElementById('dImpFile').click()">⬆ 匯入 Excel</button>
+      <a href="javascript:void(0)" onclick="downloadDeliveryImportTemplate()" style="font-size:12px;color:var(--text-3);white-space:nowrap">下載範本</a>
+      <input type="file" id="dImpFile" accept=".xlsx,.xls" class="hide">
+    </div>
+    <div class="period-bar">
+      <div class="period-tabs">
+        <button class="period-tab ${dPeriodMode === 'all' ? 'active' : ''}" data-pm="all">全部</button>
+        <button class="period-tab ${dPeriodMode === 'month' ? 'active' : ''}" data-pm="month">每月</button>
+        <button class="period-tab ${dPeriodMode === 'year' ? 'active' : ''}" data-pm="year">每年</button>
+        <button class="period-tab ${dPeriodMode === 'custom' ? 'active' : ''}" data-pm="custom">自訂區間</button>
+      </div>
+      <div class="period-input">
+        ${dPeriodMode === 'month' ? `<input class="inp" type="month" id="dPeriodMonth" value="${nowYM}" style="width:150px">` : ''}
+        ${dPeriodMode === 'year' ? `<input class="inp" type="number" id="dPeriodYear" value="${nowY}" min="2000" max="2100" style="width:100px">` : ''}
+        ${dPeriodMode === 'custom' ? `
+          <input class="inp" type="date" id="dd1" style="width:150px">
+          <span class="muted">至</span>
+          <input class="inp" type="date" id="dd2" style="width:150px">` : ''}
+      </div>
     </div>
     <div class="dsum-bar" id="dSumBar"></div>
     <div class="bulk-bar" id="dBulkBar" style="display:none">
@@ -4639,13 +5337,35 @@ function viewDeliveries(v) {
       <button class="btn sm" onclick="dSelected.clear();document.getElementById('ds').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteDeliveries()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="dlist"></div></div></div>`;
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="dlist"></div><div id="dPageBar"></div></div></div>`;
 
-  const run = () => {
+  v.querySelectorAll('[data-pm]').forEach(btn => btn.onclick = () => {
+    dPeriodMode = btn.dataset.pm;
+    viewDeliveries(v); // 重畫整頁換上對應的日期輸入控制項
+  });
+
+  const periodBounds = () => {
+    if (dPeriodMode === 'month') {
+      const ym = document.getElementById('dPeriodMonth').value || nowYM;
+      const [y, m] = ym.split('-').map(Number);
+      const last = new Date(y, m, 0).getDate();
+      return { d1: ym + '-01', d2: `${ym}-${String(last).padStart(2, '0')}` };
+    }
+    if (dPeriodMode === 'year') {
+      const y = document.getElementById('dPeriodYear').value || nowY;
+      return { d1: `${y}-01-01`, d2: `${y}-12-31` };
+    }
+    if (dPeriodMode === 'custom') {
+      return { d1: document.getElementById('dd1').value, d2: document.getElementById('dd2').value };
+    }
+    return { d1: '', d2: '' }; // 全部
+  };
+
+  const run = (resetPage) => {
     const kw = document.getElementById('ds').value.trim().toLowerCase();
     const st = document.getElementById('dstatus').value;
     const sa = document.getElementById('dsales').value;
-    const d1 = document.getElementById('dd1').value, d2 = document.getElementById('dd2').value;
+    const { d1, d2 } = periodBounds();
     let list = DB.deliveries.slice();
     if (kw) list = list.filter(d =>
       (d.delivery_no + ' ' + (d.quote_no || '')).toLowerCase().includes(kw) ||
@@ -4656,13 +5376,26 @@ function viewDeliveries(v) {
     if (d1) list = list.filter(d => d.delivery_date >= d1);
     if (d2) list = list.filter(d => d.delivery_date <= d2);
 
-    document.getElementById('dlist').innerHTML = deliveryTable(list, { selectable: true });
+    list = sortRows(list, dSortState, deliverySortValue);
     dFilteredList = list;
+    const info = paginateList('deliveries', list, resetPage);
+    document.getElementById('dlist').innerHTML = deliveryTable(info.pageItems, { selectable: true, preSorted: true });
+    document.getElementById('dPageBar').innerHTML = list.length ? pageBarHtml('deliveries', info) : '';
     bindTableSort('dlist', dSortState, run);
+    makeColumnsResizable('dlist', 'deliveries');
     updateBulkBar('d');
-    drawDSumBar(list);
+    drawDSumBar(list); // 統計列用完整篩選結果，不是只算當前頁
   };
-  ['ds', 'dstatus', 'dsales', 'dd1', 'dd2'].forEach(id => document.getElementById(id).addEventListener('input', run));
+  registerPageRunner('deliveries', run);
+  ['ds', 'dstatus', 'dsales'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
+  ['dPeriodMonth', 'dPeriodYear', 'dd1', 'dd2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => run(true));
+  });
+  document.getElementById('dImpFile').onchange = e => {
+    importDeliveriesExcel(e.target.files[0]);
+    e.target.value = '';
+  };
   run();
 }
 
@@ -4687,6 +5420,77 @@ function drawDSumBar(list) {
 }
 
 // 匯出目前篩選出的出貨清單成 Excel，條列式一單一列；成本/毛利尊重目前的成本顯示設定
+// 下載出貨匯入範本：出貨單只能靠既有報價開立，不能憑空從Excel建立，
+// 所以匯入設計成「用出貨單號比對，批次更新發票號碼/客戶PO單號/已開發票這些後續才會補的欄位」
+function downloadDeliveryImportTemplate() {
+  const sample = DB.deliveries[0];
+  const rows = [
+    { '出貨單號': sample ? sample.delivery_no : 'D-YX-202607-001', '發票號碼': 'INV-2026-0001',
+      '客戶PO單號': 'PO-12345', '已開發票': '是', '發票日期': today(), '備註': '（選填，會直接取代原本的備註）' },
+    { '出貨單號': '（換成要更新的出貨單號，要跟出貨管理裡的完全一樣）', '發票號碼': '', '客戶PO單號': '', '已開發票': '', '發票日期': '', '備註': '' }
+  ];
+  exportExcelRows(rows, '出貨匯入範本', '出貨匯入範本.xlsx');
+}
+
+async function importDeliveriesExcel(file) {
+  if (!file) return;
+  let rows;
+  try { rows = await parseExcelFile(file); }
+  catch (e) { return toast('匯入失敗：' + e.message, 'err'); }
+  if (!rows.length) return toast('這個檔案沒有資料', 'err');
+
+  const errors = [];
+  const changes = rows.map((row, idx) => {
+    const no = String(row['出貨單號'] ?? '').trim();
+    if (!no) { errors.push(`第 ${idx + 2} 列：沒有填出貨單號，已略過`); return null; }
+    const d = DB.deliveries.find(x => x.delivery_no === no);
+    if (!d) { errors.push(`第 ${idx + 2} 列：找不到出貨單號「${no}」，已略過`); return null; }
+    const fields = {};
+    if (String(row['發票號碼'] ?? '').trim()) fields.invoice_no = String(row['發票號碼']).trim();
+    if (String(row['客戶PO單號'] ?? '').trim()) fields.customer_po = String(row['客戶PO單號']).trim();
+    if (String(row['已開發票'] ?? '').trim()) fields.invoiced = ['是', 'true', '1', 'yes'].includes(String(row['已開發票']).trim().toLowerCase());
+    if (String(row['發票日期'] ?? '').trim()) fields.invoice_date = String(row['發票日期']).trim();
+    if (String(row['備註'] ?? '').trim()) fields.note = String(row['備註']).trim();
+    if (!Object.keys(fields).length) { errors.push(`出貨單號「${no}」：這一列沒有任何欄位要更新，已略過`); return null; }
+    return { d, no, fields };
+  }).filter(Boolean);
+
+  if (!changes.length) {
+    return openModal({
+      title: '匯入失敗', body: `<p style="color:var(--red)">沒有任何一筆資料可以更新。</p>
+        <div class="editlog-list">${errors.map(e => `<div class="editlog-row">${esc(e)}</div>`).join('')}</div>`,
+      footer: `<button class="btn primary" data-close>關閉</button>`,
+      onMount(el, close) { el.querySelector('[data-close]').onclick = close; }
+    });
+  }
+
+  const fieldLabel = { invoice_no: '發票號碼', customer_po: '客戶PO單號', invoiced: '已開發票', invoice_date: '發票日期', note: '備註' };
+  openModal({
+    title: '確認匯入更新出貨單',
+    body: `<p style="margin:0 0 10px;color:var(--text-2)">將更新 <b>${changes.length}</b> 張出貨單的欄位。</p>
+      <div class="editlog-list">
+        ${changes.map(c => `<div class="editlog-row"><span class="editlog-who">${esc(c.no)}</span>
+          <span class="editlog-action">${Object.keys(c.fields).map(k => fieldLabel[k]).join('、')}</span></div>`).join('')}
+      </div>
+      ${errors.length ? `<p style="margin:10px 0 4px;color:var(--red);font-size:12.5px">有 ${errors.length} 筆問題會被略過：</p>
+        <div class="editlog-list">${errors.map(e => `<div class="editlog-row" style="color:var(--red);font-size:12px">${esc(e)}</div>`).join('')}</div>` : ''}`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-yes>確定更新</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = () => {
+        close();
+        changes.forEach(c => {
+          Object.assign(c.d, c.fields);
+          if (c.fields.invoiced === true && !c.d.invoice_date) c.d.invoice_date = today();
+          if (c.fields.invoiced === false) { c.d.invoice_date = ''; c.d.invoice_no = ''; c.d.customer_po = ''; }
+        });
+        save(); render();
+        toast(`已從 Excel 匯入更新 ${changes.length} 張出貨單`, 'ok');
+      };
+    }
+  });
+}
+
 function exportDeliveriesExcel() {
   const list = dFilteredList;
   if (!list.length) return toast('目前沒有資料可以匯出', 'err');
@@ -4715,6 +5519,8 @@ function exportDeliveriesExcel() {
       '發票方式': d.invoice_method || '',
       '付款方式': d.payment_method || '',
       '已開發票': d.invoiced ? '是' : '否',
+      '發票號碼': d.invoice_no || '',
+      '客戶PO單號': d.customer_po || '',
       '發票日期': d.invoice_date || '',
       '送貨地址': d.ship_address || '',
       '交貨單位': d.delivery_target || '',
@@ -4760,7 +5566,7 @@ function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
   if (!d) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張出貨單</h3></div>`; return; }
   DE = d;
-  const editable = !['shipped', 'completed', 'cancelled'].includes(d.status);
+  const editable = canEdit() && !['shipped', 'completed', 'cancelled'].includes(d.status);
   const c = d.customer_snapshot || {};
   const nxt = dsNext(d);
   const flow = dsFlow(d);
@@ -4858,7 +5664,7 @@ function viewDelivery(v) {
         <div class="total" id="dvTotal"></div>
         <div class="cost-panel" id="dvCost"></div>
         <div class="btn-row">
-          <button class="btn primary" style="flex:1" onclick="downloadDeliveryPDF('${d.id}')">⬇ 下載出貨單 PDF</button>
+          <button class="btn primary" style="flex:1" onclick="downloadDeliveryPDF('${d.id}')">⬇ 另存成 PDF</button>
         </div>
         <div class="btn-row">
           <button class="btn" style="flex:1" onclick="previewDeliveryPDF('${d.id}')">預覽 / 列印</button>
@@ -4896,7 +5702,7 @@ function viewDelivery(v) {
    「是否有庫」：有庫打勾就好；沒有就填廠商+成本（未稅/含稅可切換），
    廠商/成本欄位永遠可編輯，因為可能一開始以為有庫，後來才發現要跟廠商叫貨 */
 function drawDvItems() {
-  const d = DE, editable = !['shipped', 'completed', 'cancelled'].includes(d.status);
+  const d = DE, editable = canEdit() && !['shipped', 'completed', 'cancelled'].includes(d.status);
   const D = editable ? '' : 'disabled';
   const stockColW = 168;
 
@@ -4949,7 +5755,7 @@ function drawDvItems() {
           ${!hasBom ? `<button class="bom-toggle asm-note" onclick="toggleDvAsm('${i.id}')">${dvAsmOpen[i.id] ? '▾' : '▸'} ⚠ 組裝配件 ${(i.assembly_items || []).length} 項</button>` : ''}</td>
         <td>${editable ? `<input class="inp" style="height:28px" data-di="${i.id}" data-k="unit" value="${esc(i.unit || '')}">` : esc(i.unit || '')}</td>
         <td class="r">${editable
-          ? `<input class="inp num" type="number" step="0.01" min="0" style="height:28px" data-di="${i.id}" data-k="qty" value="${i.qty}">`
+          ? `<input class="inp num" type="number" step="1" min="0" style="height:28px" data-di="${i.id}" data-k="qty" value="${i.qty}">`
           : `<span class="money">${moneyD(i.qty)}</span>`}</td>
         <td class="r">${editable
           ? `<input class="inp num" type="number" step="0.01" min="0" style="height:28px" data-di="${i.id}" data-k="unit_price" value="${i.unit_price}">`
@@ -4993,7 +5799,7 @@ function drawDvItems() {
                   ? `<input class="inp" style="height:26px;font-size:11.5px" data-da="${i.id}|${a.id}" data-k="name" value="${esc(a.name || '')}">`
                   : esc(a.name || '')}</td>
                 <td class="r">${editable
-                  ? `<input class="inp num" type="number" step="0.01" min="0" style="height:26px" data-da="${i.id}|${a.id}" data-k="qty" value="${a.qty}">`
+                  ? `<input class="inp num" type="number" step="1" min="0" style="height:26px" data-da="${i.id}|${a.id}" data-k="qty" value="${a.qty}">`
                   : moneyD(a.qty)}</td>
                 <td class="r">${editable
                   ? `<input class="inp num" type="number" step="0.01" min="0" style="height:26px" data-da="${i.id}|${a.id}" data-k="unit_price" value="${a.unit_price}">`
@@ -5210,7 +6016,7 @@ function buildFileName(q, co, kind) {
    =========================================================== */
 const pdfLibReady = () => typeof window.jspdf !== 'undefined' && typeof window.html2canvas !== 'undefined';
 
-async function renderPDF(html, size, filename) {
+async function renderPDF(html, size, filename, folderKey) {
   if (!pdfLibReady()) { toast('PDF 元件尚未載入完成，請稍候再試', 'err'); return; }
   const [w, h] = size === 'A5' ? [210, 148] : [210, 297];
   const stage = document.getElementById('pdfStage');
@@ -5238,9 +6044,9 @@ async function renderPDF(html, size, filename) {
       if (i) pdf.addPage([w, h], w > h ? 'landscape' : 'portrait');
       pdf.addImage(img, 'JPEG', 0, 0, w, h, undefined, 'FAST');
     }
-    pdf.save(filename + '.pdf');
+    const blob = pdf.output('blob');
     t.close(); stage.innerHTML = '';
-    toast('已下載：' + filename + '.pdf', 'ok');
+    await saveFileSmart(filename + '.pdf', () => blob, 'application/pdf', null, folderKey);
   } catch (e) {
     console.error(e); t.close(); stage.innerHTML = '';
     toast('PDF 產生失敗：' + e.message, 'err');
@@ -5252,13 +6058,13 @@ function downloadQuotePDF(id) {
   if (!q.customer_snapshot) return toast('請先選擇客戶', 'err');
   if (!q.items.some(i => (i.name || '').trim())) return toast('請至少填一項商品', 'err');
   const co = byId(DB.companies, q.company_id);
-  renderPDF(quotePaper(q), 'A4', buildFileName(q, co, 'quote'));
+  renderPDF(quotePaper(q), 'A4', buildFileName(q, co, 'quote'), 'quotePdf_' + q.company_id);
 }
 
 function downloadDeliveryPDF(id) {
   const d = byId(DB.deliveries, id);
   const co = byId(DB.companies, d.company_id);
-  renderPDF(deliveryPaper(d), 'A5', buildFileName(d, co, 'delivery'));
+  renderPDF(deliveryPaper(d), 'A5', buildFileName(d, co, 'delivery'), 'deliveryPdf_' + d.company_id);
 }
 
 /* 預覽 / 列印 */
@@ -5669,8 +6475,8 @@ function viewCustomers(v) {
       <button class="btn sm" onclick="cSelected.clear();document.getElementById('cs').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteCustomers()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="clist"></div></div></div>`;
-  const run = () => {
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="clist"></div><div id="cPageBar"></div></div></div>`;
+  const run = (resetPage) => {
     const kw = document.getElementById('cs').value.trim().toLowerCase();
     let list = DB.customers.filter(c => {
       if (!kw) return true;
@@ -5678,19 +6484,22 @@ function viewCustomers(v) {
       return (c.sites || []).some(s => (s.label + s.contact_person + s.phone + s.address).toLowerCase().includes(kw));
     });
     cFilteredList = list;
-    const allChecked = list.length && list.every(c => cSelected.has(c.id));
+    const info = paginateList('customers', list, resetPage);
+    const page = info.pageItems;
+    const allChecked = page.length && page.every(c => cSelected.has(c.id));
     document.getElementById('clist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('customer')}</div><h3>沒有客戶</h3>
          <button class="btn primary" onclick="editCustomer(null)">＋ 新增客戶</button></div>`
       : `<table class="tbl"><thead><tr>
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
-              onclick="toggleSelAll('c', this.checked, ${esc(JSON.stringify(list.map(c => c.id)))})"></th>
-          <th>客戶名稱</th><th>統一編號</th><th>聯絡窗口／廠區</th><th>電話</th><th>預設公司</th><th class="c">報價數</th>
+              onclick="toggleSelAll('c', this.checked, ${esc(JSON.stringify(page.map(c => c.id)))})"></th>
+          <th>客戶名稱</th><th>統一編號</th><th>聯絡窗口／廠區</th><th>電話</th><th>預設公司</th><th>預設業務</th><th class="c">報價數</th>
         </tr></thead><tbody>
-        ${list.map(c => {
+        ${page.map(c => {
           const n = DB.quotes.filter(q => q.customer_id === c.id).length;
           const co = byId(DB.companies, c.default_company_id);
+          const salesUser = c.default_sales_user_id ? byId(DB.users, c.default_sales_user_id) : null;
           const d = defaultSite(c);
           const extra = (c.sites || []).length - 1;
           return `<tr onclick="editCustomer('${c.id}')">
@@ -5700,12 +6509,16 @@ function viewCustomers(v) {
             <td>${esc(d ? (d.label || d.contact_person || '—') : '—')}
               ${extra > 0 ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">+${extra}</span>` : ''}</td>
             <td style="font-family:var(--mono)">${esc(d ? d.phone || '—' : '—')}</td>
-            <td>${co ? `<span class="bdg gray plain">${esc(co.badge || co.code)}</span>` : '—'}</td>
+            <td>${co ? `<span class="co-badge" style="background:${companyColor(co)}22;color:${companyColor(co)}">${esc(co.badge || co.code)}</span>` : '—'}</td>
+            <td class="muted">${esc(salesUser ? salesUser.name : '—')}</td>
             <td class="c">${n || '<span class="muted">—</span>'}</td></tr>`;
         }).join('')}</tbody></table>`;
+    document.getElementById('cPageBar').innerHTML = list.length ? pageBarHtml('customers', info) : '';
+    makeColumnsResizable('clist', 'customers');
     updateBulkBar('c');
   };
-  document.getElementById('cs').addEventListener('input', run);
+  registerPageRunner('customers', run);
+  document.getElementById('cs').addEventListener('input', () => run(true));
   run();
 }
 
@@ -5729,7 +6542,7 @@ function bulkDeleteCustomers() {
 function editCustomer(id) {
   const c = id ? byId(DB.customers, id) : {
     id: null, name: '', tax_id: '', note: '',
-    default_company_id: DB.companies[0].id, is_active: true, sites: []
+    default_company_id: DB.companies[0].id, default_sales_user_id: '', is_active: true, sites: []
   };
   const sites = id ? JSON.parse(JSON.stringify(c.sites || [])) : [];
   if (!sites.length) sites.push({ id: uid('cs'), label: '', contact_person: '', phone: '', fax: '', address: '', email: '', note: '', is_default: true });
@@ -5745,6 +6558,12 @@ function editCustomer(id) {
             ${DB.companies.map(x => `<option value="${x.id}" ${x.id === c.default_company_id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
           </select></div>
       </div>
+      <div class="field"><label>預設服務業務</label>
+        <select class="inp" data-f="default_sales_user_id">
+          <option value="">（不指定）</option>
+          ${DB.users.map(u => `<option value="${u.id}" ${u.id === c.default_sales_user_id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
+        </select>
+        <div class="hint">之後幫這位客戶開新報價單，業務欄位會自動帶入這裡設定的人（可以再改）。</div></div>
       <div class="field"><label>備註</label><textarea class="inp" data-f="note">${esc(c.note || '')}</textarea></div>
 
       <div class="sec-title" style="margin:16px 0 8px">聯絡窗口／廠區</div>
@@ -5906,6 +6725,9 @@ function viewProducts(v) {
       <select class="inp" id="pcat" style="width:150px">
         <option value="">全部分類</option>${cats.map(c => `<option>${esc(c.name)}</option>`).join('')}
       </select>
+      <select class="inp" id="psup" style="width:150px">
+        <option value="">全部進貨廠商</option>${[...new Set(DB.products.map(p => p.default_supplier).filter(Boolean))].sort().map(s => `<option>${esc(s)}</option>`).join('')}
+      </select>
       <button class="btn ghost" onclick="manageCategories()">管理分類</button>
       <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button>
     </div>
@@ -5914,33 +6736,38 @@ function viewProducts(v) {
       <button class="btn sm" onclick="pSelected.clear();document.getElementById('ps').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteProducts()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="plist"></div></div></div>`;
-  const run = () => {
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="plist"></div><div id="pPageBar"></div></div></div>`;
+  const run = (resetPage) => {
     const kw = document.getElementById('ps').value.trim().toLowerCase();
     const cat = document.getElementById('pcat').value;
+    const sup = document.getElementById('psup').value;
     let list = DB.products.filter(p =>
-      (!kw || (p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(kw)) &&
-      (!cat || p.category === cat));
+      (!kw || (p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(kw) ||
+        (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(kw))) &&
+      (!cat || p.category === cat) &&
+      (!sup || p.default_supplier === sup));
     list.sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) || a.name.localeCompare(b.name));
-    const allChecked = list.length && list.every(p => pSelected.has(p.id));
+    const info = paginateList('products', list, resetPage);
+    const page = info.pageItems;
+    const allChecked = page.length && page.every(p => pSelected.has(p.id));
     document.getElementById('plist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('product')}</div><h3>找不到商品</h3>
          <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button></div>`
       : `<table class="tbl"><thead><tr>
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
-              onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(list.map(p => p.id)))})"></th>
+              onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(page.map(p => p.id)))})"></th>
           <th style="width:34px">★</th><th>料號</th><th>品名</th><th>品牌</th><th>分類</th><th>進貨廠商</th>
           <th class="r cost-col">成本</th><th class="r">牌價</th><th class="c">BOM</th><th>備註</th>
         </tr></thead><tbody>
-        ${list.map(p => `<tr>
+        ${page.map(p => `<tr>
           <td onclick="event.stopPropagation()"><input type="checkbox" ${pSelected.has(p.id) ? 'checked' : ''} onchange="toggleSel('p','${p.id}', this.checked)"></td>
           <td onclick="event.stopPropagation();toggleFav('${p.id}')" style="cursor:pointer;text-align:center;font-size:15px;color:${p.is_favorite ? 'var(--orange)' : 'var(--line-2)'}">★</td>
           <td onclick="editProduct('${p.id}')" style="font-family:var(--mono);font-size:11.5px">${esc(p.part_no || '—')}</td>
           <td onclick="editProduct('${p.id}')"><b>${esc(p.name)}</b>
             ${p.spec ? `<div class="muted">${esc(p.spec)}</div>` : ''}</td>
           <td onclick="editProduct('${p.id}')">${esc(p.brand || '—')}</td>
-          <td onclick="editProduct('${p.id}')"><span class="bdg gray plain">${esc(p.category || '—')}</span></td>
+          <td onclick="editProduct('${p.id}')">${p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '—'}</td>
           <td onclick="editProduct('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
           <td onclick="editProduct('${p.id}')" class="r money cost-col">${p.has_bom ? '<span class="muted">組合</span>' : money(p.default_cost)}</td>
           <td onclick="editProduct('${p.id}')" class="r money">${money(p.list_price)}
@@ -5948,9 +6775,12 @@ function viewProducts(v) {
           <td onclick="editProduct('${p.id}')" class="c">${p.has_bom ? `<span class="bdg blue plain">${(p.components || []).length} 項</span>` : '<span class="muted">—</span>'}</td>
           <td onclick="editProduct('${p.id}')" class="muted prod-col" title="${esc(p.note || '')}">${esc(p.note || '—')}</td>
         </tr>`).join('')}</tbody></table>`;
+    document.getElementById('pPageBar').innerHTML = list.length ? pageBarHtml('products', info) : '';
+    makeColumnsResizable('plist', 'products');
     updateBulkBar('p');
   };
-  ['ps', 'pcat'].forEach(id => document.getElementById(id).addEventListener('input', run));
+  ['ps', 'pcat', 'psup'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
+  registerPageRunner('products', run);
   run();
 }
 
@@ -6121,6 +6951,7 @@ function editProduct(id) {
           : p.components.map((c, n) => `
             <div class="comp-row">
               <span class="idx">${n + 1}</span>
+              <input class="inp" data-c="${c.id}" data-k="part_no" placeholder="料號" value="${esc(c.part_no || '')}" style="width:100px">
               <input class="inp" data-c="${c.id}" data-k="name" placeholder="零件名稱" value="${esc(c.name)}">
               <input class="inp" data-c="${c.id}" data-k="brand" placeholder="品牌" value="${esc(c.brand || '')}">
               <input class="inp" data-c="${c.id}" data-k="spec" placeholder="規格" value="${esc(c.spec || '')}">
@@ -6153,7 +6984,7 @@ function editProduct(id) {
 
       el.querySelector('#addComp').onclick = () => {
         p.components.push({
-          id: uid('bc'), sort_order: p.components.length, name: '', brand: '', spec: '',
+          id: uid('bc'), sort_order: p.components.length, name: '', brand: '', spec: '', part_no: '',
           qty: 1, cost: 0, need_assembly: false, is_optional: false, supplier_name: '', in_stock: false
         });
         drawComps();
@@ -6279,10 +7110,26 @@ function viewSettings(v) {
         <button class="btn danger" onclick="wipe()">清空所有資料</button>
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-        <div style="font-size:12.5px;font-weight:700;color:var(--text-2);margin-bottom:6px">備份存檔位置</div>
-        <div style="font-size:12px;color:var(--text-3);margin-bottom:8px">
-          設定好資料夾後，之後點「匯出備份」「匯出 Excel」會直接存進去，不用每次選存檔位置（僅電腦版 Chrome / Edge 支援；手機版照常用瀏覽器下載）。</div>
-        ${backupFolderStatusHtml()}
+        <div style="font-size:12.5px;font-weight:700;color:var(--text-2);margin-bottom:6px">存檔位置</div>
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">
+          三個各自獨立的資料夾，設定好之後對應的匯出/另存會直接存進去，不用每次選存檔位置；
+          檔名重複時會先問要不要覆蓋，不會自動變成「(1)(2)」（僅電腦版 Chrome / Edge 支援；手機版照常用瀏覽器下載）。</div>
+        ${Object.keys(folderTypesList()).map(key => `
+          <div style="margin-bottom:10px;padding:8px 10px;background:var(--bg-2);border-radius:var(--r-sm)">
+            <div style="font-size:12.5px;font-weight:600;color:var(--text-1);margin-bottom:2px">${folderTypesList()[key].label}</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">${folderTypesList()[key].desc}</div>
+            ${backupFolderStatusHtml(key)}
+          </div>`).join('')}
+      </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+        <div style="font-size:12.5px;font-weight:700;color:var(--text-2);margin-bottom:6px">自動備份週期</div>
+        <div id="autoBackupHint" style="font-size:12px;color:var(--text-3);margin-bottom:8px">${autoBackupHintHtml()}</div>
+        <select class="inp" id="sAutoBackup" style="width:180px">
+          <option value="off" ${s.auto_backup_interval === 'off' ? 'selected' : ''}>關閉</option>
+          <option value="daily" ${s.auto_backup_interval === 'daily' ? 'selected' : ''}>每天開啟系統時</option>
+          <option value="weekly" ${s.auto_backup_interval === 'weekly' ? 'selected' : ''}>每週開啟系統時</option>
+        </select>
+        ${lastAutoBackupText()}
       </div>
       <div style="margin-top:12px;font-size:12px;color:var(--text-2);line-height:1.8">
         公司 ${DB.companies.length}　業務 ${DB.users.length}　客戶 ${DB.customers.length}　商品 ${DB.products.length}　
@@ -6298,7 +7145,50 @@ function viewSettings(v) {
     s.allow_price_edit = document.getElementById('sprice').value === '1';
     save(); render(); toast('設定已儲存', 'ok');
   };
+  document.getElementById('sAutoBackup').onchange = e => {
+    s.auto_backup_interval = e.target.value;
+    save();
+    toast(e.target.value === 'off' ? '已關閉自動備份' : '已設定自動備份週期', 'ok');
+  };
   document.getElementById('impFile').onchange = e => importJSON(e.target.files[0]);
+}
+
+function lastAutoBackupText() {
+  const at = localStorage.getItem('erp_last_auto_backup');
+  if (!at) return `<div class="hint" style="margin-top:6px">這台裝置還沒有自動備份過</div>`;
+  return `<div class="hint" style="margin-top:6px">這台裝置上次自動備份：${fmtDateTime(at)}</div>`;
+}
+
+function autoBackupHintHtml() {
+  return `開啟後，每次開啟系統時會檢查距離上次自動備份是否已經超過設定的週期，超過就自動存一份備份 JSON 到上面設定的「備份／Excel」資料夾。
+    ${folderHandles.backup && !folderNeedsPermission.backup ? '' : '<b>目前還沒有設定「備份／Excel」資料夾，自動備份不會執行</b>——請先在上面選一個資料夾。'}`;
+}
+
+// 開機時檢查是否該做自動備份了（依設定的週期 + 這台裝置上次備份的時間，只有設定了「備份」資料夾才會真的執行）
+async function checkAutoBackup() {
+  const interval = DB.settings.auto_backup_interval;
+  if (!interval || interval === 'off') return;
+  if (!folderHandles.backup || folderNeedsPermission.backup) return; // 沒設定資料夾，靜靜跳過，不用瀏覽器下載打擾使用者
+  const lastAt = localStorage.getItem('erp_last_auto_backup');
+  const days = interval === 'weekly' ? 7 : 1;
+  if (lastAt && (Date.now() - new Date(lastAt).getTime()) < days * 86400000) return;
+  try {
+    await saveFileSmartSilent(`自動備份_${today()}.json`, () => JSON.stringify(DB, null, 2), 'application/json');
+    localStorage.setItem('erp_last_auto_backup', new Date().toISOString());
+  } catch (e) { console.warn('自動備份失敗', e); }
+}
+
+// 自動備份用：跟saveFileSmart一樣會寫進「備份」資料夾，但檔名重複時直接覆蓋，不用跳出來問（避免開機時無故彈視窗打斷使用者）
+async function saveFileSmartSilent(filename, contentFn, mimeType) {
+  if (!folderHandles.backup || folderNeedsPermission.backup) return;
+  const perm = await folderHandles.backup.queryPermission({ mode: 'readwrite' });
+  if (perm !== 'granted') return;
+  const content = await contentFn();
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  const fileHandle = await folderHandles.backup.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
 }
 
 function readImg(file, cb, maxW) {
@@ -6455,6 +7345,120 @@ function wipe() {
 
 /* ===========================================================
    啟動
+   =========================================================== */
+/* ===========================================================
+   帳號管理（僅管理員可見）：每個人自己的登入帳密 + 權限等級
+   =========================================================== */
+function viewAccounts(v) {
+  const list = DB.accounts || [];
+  const myUid = fbUser && fbUser.uid;
+  v.innerHTML = `
+    <div class="banner info"><span class="bi">ℹ</span><div>
+      每個人可以用自己的 Email／密碼登入，權限分三級：<b>管理員</b>能管理帳號跟所有資料、
+      <b>編輯</b>能新增修改報價出貨等業務資料、<b>唯讀</b>只能查看不能修改。<br>
+      舊的共用密碼登入方式還是可以用，效果等同管理員。</div></div>
+    <div class="toolbar"><div class="grow"></div>
+      <button class="btn primary" onclick="createAccountModal()" ${(!FIREBASE_ENABLED || !cloudConnected) ? 'disabled title="要連上雲端才能新增帳號"' : ''}>＋ 新增帳號</button></div>
+    ${(!FIREBASE_ENABLED || !cloudConnected) ? `<div class="banner warn"><span class="bi">⚠</span><div>目前連不上雲端資料庫，沒辦法新增或管理帳號（帳號驗證需要雲端服務）。</div></div>` : ''}
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap">
+      ${!list.length ? `<div class="empty"><div class="e">${icon('accounts')}</div><h3>還沒有個人帳號</h3>
+        <p>目前大家都是用共用密碼登入。新增第一個帳號，就可以開始用個人帳密登入了。</p></div>` :
+      `<table class="tbl"><thead><tr><th>姓名</th><th>Email</th><th>權限</th><th class="c">狀態</th><th>建立時間</th><th></th></tr></thead><tbody>
+        ${list.map(a => {
+          const isMe = a.uid === myUid;
+          return `<tr>
+          <td><b>${esc(a.name)}</b>${isMe ? ' <span class="bdg blue plain" style="height:16px;font-size:9px">目前登入</span>' : ''}</td>
+          <td class="muted" style="font-family:var(--mono);font-size:12px">${esc(a.email)}</td>
+          <td><select class="inp sm" style="width:100px" onchange="changeAccountRole('${a.id}', this.value)" ${isMe ? 'disabled title="不能修改自己的權限"' : ''}>
+              <option value="admin" ${a.role === 'admin' ? 'selected' : ''}>管理員</option>
+              <option value="editor" ${a.role === 'editor' ? 'selected' : ''}>編輯</option>
+              <option value="viewer" ${a.role === 'viewer' ? 'selected' : ''}>唯讀</option>
+            </select></td>
+          <td class="c">${a.is_active ? '<span class="bdg green">啟用</span>' : '<span class="bdg gray">已停用</span>'}</td>
+          <td class="muted" style="font-size:11px">${fmtDateTime(a.created_at)}</td>
+          <td class="c"><button class="btn sm ghost" onclick="toggleAccountActive('${a.id}')" ${isMe ? 'disabled title="不能停用自己"' : ''}>${a.is_active ? '停用' : '啟用'}</button></td>
+        </tr>`;
+        }).join('')}</tbody></table>`}
+    </div></div>`;
+}
+
+function countActiveAdmins(excludeId) {
+  return (DB.accounts || []).filter(a => a.is_active && a.role === 'admin' && a.id !== excludeId).length;
+}
+
+function createAccountModal() {
+  if (!FIREBASE_ENABLED || !cloudConnected) return toast('要連上雲端才能新增帳號', 'err');
+  openModal({
+    title: '新增帳號',
+    body: `
+      <div class="field"><label class="req">姓名</label><input class="inp" id="newAccName"></div>
+      <div class="field"><label class="req">Email</label><input class="inp" type="email" id="newAccEmail" autocomplete="off"></div>
+      <div class="field"><label class="req">密碼</label><input class="inp" type="password" id="newAccPwd" placeholder="至少6碼" autocomplete="new-password"></div>
+      <div class="field"><label>權限</label>
+        <select class="inp" id="newAccRole">
+          <option value="editor" selected>編輯（可新增修改業務資料）</option>
+          <option value="admin">管理員（可管理帳號跟所有資料）</option>
+          <option value="viewer">唯讀（只能查看，不能修改）</option>
+        </select></div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-yes>建立</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = async () => {
+        const name = el.querySelector('#newAccName').value.trim();
+        const email = el.querySelector('#newAccEmail').value.trim();
+        const pwd = el.querySelector('#newAccPwd').value;
+        const role = el.querySelector('#newAccRole').value;
+        if (!name || !email || !pwd) return toast('姓名／Email／密碼都要填', 'err');
+        if (pwd.length < 6) return toast('密碼至少要6碼', 'err');
+        const btn = el.querySelector('[data-yes]');
+        btn.disabled = true; btn.textContent = '建立中…';
+        try {
+          const uid = await createAccountAuth(email, pwd);
+          DB.accounts = DB.accounts || [];
+          DB.accounts.push({
+            id: uid, uid, email, name, role, is_active: true,
+            created_at: new Date().toISOString(), created_by: currentOperator()
+          });
+          save(); close(); render();
+          toast(`已建立帳號：${name}`, 'ok');
+        } catch (e) {
+          btn.disabled = false; btn.textContent = '建立';
+          const msg = e.code === 'auth/email-already-in-use' ? '這個 Email 已經有帳號了'
+            : e.code === 'auth/invalid-email' ? 'Email 格式不對'
+            : e.message || '未知錯誤';
+          toast('建立失敗：' + msg, 'err');
+        }
+      };
+    }
+  });
+}
+
+function changeAccountRole(id, role) {
+  const acc = (DB.accounts || []).find(a => a.id === id);
+  if (!acc) return;
+  if (acc.role === 'admin' && role !== 'admin' && countActiveAdmins(id) === 0) {
+    toast('至少要保留一位啟用中的管理員，不能把最後一位改成其他權限', 'err');
+    render();
+    return;
+  }
+  acc.role = role;
+  save(); toast(`已把「${acc.name}」的權限改成${ROLE_LABEL[role]}`, 'ok');
+}
+
+function toggleAccountActive(id) {
+  const acc = (DB.accounts || []).find(a => a.id === id);
+  if (!acc) return;
+  if (acc.is_active && acc.role === 'admin' && countActiveAdmins(id) === 0) {
+    return toast('至少要保留一位啟用中的管理員，不能停用最後一位', 'err');
+  }
+  const doToggle = () => { acc.is_active = !acc.is_active; save(); render(); toast(acc.is_active ? '已啟用' : '已停用該帳號', 'ok'); };
+  if (acc.is_active) {
+    confirmBox('停用帳號', `確定要停用「${esc(acc.name)}」的帳號嗎？停用後這個帳號登入只會有唯讀權限。`, doToggle, true);
+  } else doToggle();
+}
+
+/* ===========================================================
+   §22 開機
    =========================================================== */
 function boot() {
   fbInit();
