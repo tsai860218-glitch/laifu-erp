@@ -109,6 +109,16 @@ a{color:var(--primary-600);text-decoration:none}
    ============================================================ */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh)}
 .card-h{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.comp-list-wrap{overflow-x:auto}
+.comp-cols{min-width:900px}
+.comp-list-hd{display:grid;grid-template-columns:24px 100px 1fr 90px 100px 64px 90px 130px 52px 52px 52px 26px;
+  gap:6px;padding:2px 8px 8px;font-size:10.5px;color:var(--text-3);font-weight:600;white-space:nowrap}
+.comp-row{display:grid;grid-template-columns:24px 100px 1fr 90px 100px 64px 90px 130px 52px 52px 52px 26px;
+  gap:6px;align-items:center;padding:7px 8px;border-bottom:1px solid var(--line)}
+.comp-row .idx{color:var(--text-3);font-family:var(--mono);font-size:11px;text-align:center}
+.comp-row .inp{height:30px;font-size:12px;padding:0 6px}
+.cchk{display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--text-2);white-space:nowrap;cursor:pointer}
+.comp-sum{display:flex;justify-content:space-between;padding:9px 8px;font-size:12.5px;font-weight:600;border-top:1px solid var(--line);min-width:900px}
 .card-h h2{margin:0;font-size:14px;font-weight:700}
 .card-h .sub{font-size:12px;color:var(--text-3)}
 .card-h .right{margin-left:auto;display:flex;gap:8px;align-items:center}
@@ -1702,10 +1712,11 @@ async function firestoreSaveDiff() {
   if (DB._schema !== _lastSynced._schema) {
     ops.push({ type: 'set', ref: fbDb.collection('meta').doc('schema'), data: { v: DB._schema } });
   }
-  if (!ops.length) return;
+  if (!ops.length) { try { localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {} return; }
   try {
     await fsBatchWrite(ops);
     _lastSynced = JSON.parse(JSON.stringify(DB));
+    try { localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {}
   } catch (e) {
     console.error('雲端同步失敗（資料仍在本機，恢復連線後會自動重試）', e);
   }
@@ -1791,6 +1802,9 @@ function safeRerender(changes, col) {
    實際同步邏輯在 00-firebase.js。
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
+// 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
+// 代表上次可能是存檔後太快關掉/重整，雲端同步的700ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
+const PENDING_SYNC_KEY = 'erp_pending_sync';
 const SCHEMA_V = 14;                    // ← 每次改結構就 +1
 let DB = null;
 
@@ -1867,7 +1881,10 @@ function save() {
     DE.last_modified_at = new Date().toISOString();
     appendEditLog(DE, '編輯');
   }
-  try { localStorage.setItem(KEY, JSON.stringify(DB)); }
+  try {
+    localStorage.setItem(KEY, JSON.stringify(DB));
+    if (FIREBASE_ENABLED && fbUser) localStorage.setItem(PENDING_SYNC_KEY, '1');
+  }
   catch (e) {
     toast('本機儲存失敗：瀏覽器空間已滿。請到「設定」匯出備份後清理舊資料。', 'err');
     console.error(e);
@@ -1893,6 +1910,25 @@ function appendEditLog(rec, action) {
 async function load() {
   if (FIREBASE_ENABLED && fbUser) {
     try {
+      // 上次存檔後，700ms的雲端同步防抖可能還沒送出去（例如存完馬上重新整理或關掉），
+      // 這種情況下本機資料比雲端新，不能讓雲端的舊資料把它蓋掉——先用本機的、開機後立刻補送同步
+      let hasPendingLocal = false;
+      try { hasPendingLocal = localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch (e) {}
+      if (hasPendingLocal) {
+        const localRaw = localStorage.getItem(KEY);
+        if (localRaw) {
+          DB = JSON.parse(localRaw);
+          const before = DB._schema || 1;
+          migrate(DB);
+          DB.settings = Object.assign({}, DEFAULT_SETTINGS, DB.settings || {});
+          // _lastSynced刻意留空（而不是設成目前DB），這樣firestoreSaveDiff才會正確算出「跟雲端不一樣的地方」全部補送
+          const remoteForDiff = await firestoreLoadAll().catch(() => null);
+          _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
+          toast('偵測到上次還有未同步的本機修改，已優先套用並補送到雲端', 'ok');
+          scheduleFirestoreSync();
+          return;
+        }
+      }
       const remote = await firestoreLoadAll();
       if (isFirestoreEmpty(remote)) {
         // 雲端資料庫還是空的：優先把本機既有資料搬上去，沒有的話才用種子資料
@@ -1912,7 +1948,7 @@ async function load() {
         if (before < SCHEMA_V) await firestoreUploadAll(DB);
       }
       _lastSynced = JSON.parse(JSON.stringify(DB));
-      try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+      try { localStorage.setItem(KEY, JSON.stringify(DB)); localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {}
       return;
     } catch (e) {
       console.error('雲端讀取失敗，改用本機資料', e);
@@ -3112,8 +3148,8 @@ function seed() {
   ];
 
   const users = [
-    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
+    { id: 'u_1', name: '業務', phone: '', email: '', role: '管理者', is_active: true },
+    { id: 'u_2', name: '行政', phone: '', email: '', role: '行政', is_active: true }
   ];
 
   const suppliers = [
@@ -7068,21 +7104,26 @@ function editProduct(id) {
       const drawComps = () => {
         el.querySelector('#compList').innerHTML = !p.components.length
           ? `<div class="empty" style="padding:22px"><p>還沒有組成項目</p></div>`
-          : p.components.map((c, n) => `
+          : `<div class="comp-list-wrap"><div class="comp-cols">
+            <div class="comp-list-hd">
+              <span></span><span>料號</span><span>零件名稱</span><span>品牌</span><span>規格</span>
+              <span>數量</span><span>單位成本</span><span>進貨廠商</span><span>有庫</span><span>組裝</span><span>可選</span><span></span>
+            </div>` +
+            p.components.map((c, n) => `
             <div class="comp-row">
               <span class="idx">${n + 1}</span>
-              <input class="inp" data-c="${c.id}" data-k="part_no" placeholder="料號" value="${esc(c.part_no || '')}" style="width:100px">
+              <input class="inp" data-c="${c.id}" data-k="part_no" placeholder="料號" value="${esc(c.part_no || '')}">
               <input class="inp" data-c="${c.id}" data-k="name" placeholder="零件名稱" value="${esc(c.name)}">
               <input class="inp" data-c="${c.id}" data-k="brand" placeholder="品牌" value="${esc(c.brand || '')}">
               <input class="inp" data-c="${c.id}" data-k="spec" placeholder="規格" value="${esc(c.spec || '')}">
-              <input class="inp num" type="number" step="0.01" data-c="${c.id}" data-k="qty" value="${c.qty}" title="數量">
-              <input class="inp num cost-col" type="number" data-c="${c.id}" data-k="cost" value="${c.cost}" title="單位成本">
-              <input class="inp" list="supList" data-c="${c.id}" data-k="supplier_name" placeholder="進貨廠商" value="${esc(c.supplier_name || '')}" style="width:120px">
+              <input class="inp num" type="number" step="0.01" data-c="${c.id}" data-k="qty" placeholder="數量" value="${c.qty}" title="數量">
+              <input class="inp num cost-col" type="number" data-c="${c.id}" data-k="cost" placeholder="成本" value="${c.cost}" title="單位成本（未稅）">
+              <input class="inp" list="supList" data-c="${c.id}" data-k="supplier_name" placeholder="進貨廠商" value="${esc(c.supplier_name || '')}">
               <label class="cchk" title="公司庫存有貨"><input type="checkbox" data-c="${c.id}" data-k="in_stock" ${c.in_stock ? 'checked' : ''}>有庫</label>
               <label class="cchk" title="需組裝"><input type="checkbox" data-c="${c.id}" data-k="need_assembly" ${c.need_assembly ? 'checked' : ''}>組裝</label>
               <label class="cchk" title="可選項目"><input type="checkbox" data-c="${c.id}" data-k="is_optional" ${c.is_optional ? 'checked' : ''}>可選</label>
               <button class="del" data-rm="${c.id}">×</button>
-            </div>`).join('') + `
+            </div>`).join('') + `</div></div>
             <div class="comp-sum">
               <span>組成成本合計（必要項）</span>
               <b>${money(p.components.filter(c => !c.is_optional).reduce((s, c) => s + (+c.cost || 0) * (+c.qty || 0), 0))}</b>
