@@ -227,6 +227,8 @@ body.col-resizing *{cursor:col-resize!important}
 .ac-item .s{font-size:11px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ac-item .p{font-family:var(--mono);font-weight:700;font-size:12px;color:var(--primary)}
 .ac-empty{padding:14px;text-align:center;color:var(--text-3);font-size:12px}
+.inv-cell{display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:2px}
+.inv-cell input[type="date"]{width:112px}
 .star{color:#F59E0B}
 
 /* Chips */
@@ -319,8 +321,9 @@ body.col-resizing *{cursor:col-resize!important}
 .items{display:flex;flex-direction:column}
 .irow{
   display:grid;grid-template-columns:26px 1fr 74px 96px 104px 30px;
-  gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);align-items:center;
+  gap:8px;padding:9px 12px;border-bottom:1px solid var(--line);align-items:start;
 }
+.irow .idx,.irow .del{padding-top:6px}
 .irow.head{
   background:var(--bg);font-size:11px;font-weight:600;color:var(--text-2);
   padding:8px 12px;letter-spacing:.03em;position:sticky;top:56px;z-index:5;
@@ -335,6 +338,7 @@ body.col-resizing *{cursor:col-resize!important}
   padding:2px 5px;border-radius:5px;line-height:1}
 .irow .del:hover{background:var(--red-bg);color:var(--red)}
 .irow .inp{height:30px;font-size:13px}
+.irow .mfield label{display:none} /* 桌面版上方已經有「數量／未稅單價」欄位標題，這裡不用重複顯示，避免比其他欄位多一行造成對不齊 */
 .bom-toggle{
   font-size:11px;color:var(--primary);cursor:pointer;font-weight:600;
   background:none;border:none;padding:2px 0;margin-top:2px;
@@ -829,7 +833,7 @@ body.st-d-completed .main{background:#F0FBF4}
   .irow .del{grid-column:2;grid-row:1;justify-self:end;font-size:19px;padding:5px 8px}
   .irow .qty,.irow .up{grid-column:1;grid-row:auto}
   .irow .mfield{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:8px}
-  .irow .mfield label{font-size:11px;color:var(--text-2);font-weight:500}
+  .irow .mfield label{display:block;font-size:11px;color:var(--text-2);font-weight:500}
   .irow .amt{grid-column:1/-1;text-align:right;font-size:15px;padding-top:2px;border-top:1px dashed var(--line)}
   .fi-r{flex-wrap:wrap}
   .fi-r .inp{height:38px;font-size:16px}
@@ -1827,7 +1831,7 @@ function promptOperator(force) {
         ${names.map(n => `<button class="chip ${n === currentOperator() ? 'on' : ''}" data-pick="${esc(n)}">${esc(n)}</button>`).join('')}
       </div>` : ''}
       <div class="field"><label>或直接輸入名字</label>
-        <input class="inp" id="opName" placeholder="輸入名字" value="${esc(currentOperator())}"></div>`,
+        <input class="inp" id="opName" placeholder="請輸入名字" value="${esc(currentOperator())}"></div>`,
     footer: `<button class="btn primary" style="width:100%" data-ok>確定</button>`,
     onMount(el, close) {
       el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
@@ -2592,7 +2596,9 @@ function closeFloatAC() {
 
 function floatAC(input, searchFn, pickFn) {
   const open = () => {
+    console.log('[DEBUG floatAC open]', input.value, input.dataset.k, input.dataset.c);
     const rows = searchFn(input.value.trim());
+    console.log('[DEBUG floatAC rows]', rows.length);
     acItems = rows;
     if (!rows.length) { closeFloatAC(); return; }
     if (!acHost) {
@@ -2633,6 +2639,9 @@ function floatAC(input, searchFn, pickFn) {
   input.addEventListener('blur', () => setTimeout(closeFloatAC, 120));
   input.addEventListener('keydown', e => {
     if (!acHost) return;
+    // 中文注音/拼音輸入法組字中，上下鍵是輸入法自己在選候選字，不要跟它搶，
+    // 不然會變成「打中文時上下鍵完全沒反應」——這是最容易忽略的自動完成元件通病
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'ArrowDown') { acSel = Math.min(acSel + 1, acItems.length - 1); e.preventDefault(); open(); }
     else if (e.key === 'ArrowUp') { acSel = Math.max(acSel - 1, 0); e.preventDefault(); open(); }
     else if (e.key === 'Enter') {
@@ -3016,7 +3025,7 @@ function saveColWidths(storageKey, widths) {
 // null表示這一欄已經有自己的inline width了（例如勾選框、★），不需要另外給預設值
 const DEFAULT_COL_WIDTHS = {
   quotes:     [null, 112, 180, 220, 68, 78, 96, 100, 88, 96, 160, 88, 92],
-  deliveries: [null, 130, 150, 200, 120, 70, 84, 90, 62, 100, 76, 88, 68, 108, 108, 160, 92],
+  deliveries: [null, 130, 150, 200, 120, 70, 84, 90, 62, 100, 76, 88, 160, 130, 130, 160, 92],
   customers:  [null, 190, 116, 168, 128, 96, 96, 68],
   products:   [null, null, 100, 220, 92, 92, 116, 88, 88, 60, 170],
   users:      [null, 104, 116, 168, 88, 84, 76],
@@ -3089,8 +3098,8 @@ function seed() {
   ];
 
   const users = [
-    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
+    { id: 'u_1', name: 'A先生', phone: '', email: '', role: '管理者', is_active: true },
+    { id: 'u_2', name: 'B小姐', phone: '', email: '', role: '行政', is_active: true }
   ];
 
   const suppliers = [
@@ -4066,11 +4075,10 @@ function bulkDeleteQuotes() {
    =========================================================== */
 function newQuote() {
   const co = DB.companies[0];
-  const me = DB.users.find(u => u.is_active) || DB.users[0];
   const q = {
     id: uid('q'), quote_no: draftNo(), company_id: co.id, customer_id: null,
     customer_snapshot: null, company_snapshot: null,
-    sales_user_id: me ? me.id : null, sales_name: me ? me.name : '',
+    sales_user_id: null, sales_name: '',
     quote_date: today(), valid_until: addDays(today(), DB.settings.valid_days),
     status: 'draft', revision: 1, unlocked: false,
     order_method: null, order_note: '', signed_back_at: null, signed_back_file: null,
@@ -4241,7 +4249,6 @@ function qBanner(q) {
     const om = ORDER_METHODS[q.order_method] || {};
     return `<div class="banner ok"><span class="bi">✓</span><div>
       <b>客戶已下單　${om.ico || ''} ${om.label || ''}${q.signed_back_at ? '（' + fmtDateShort(q.signed_back_at.slice(0, 10)) + '）' : ''}</b>
-      ${q.order_method === 'signed' && q.signed_back_file ? '　簽回檔：' + esc(q.signed_back_file) : ''}
       ${q.order_method === 'text' && q.order_note ? '<div style="margin-top:4px;font-size:11.5px;white-space:pre-wrap">' + esc(q.order_note) + '</div>' : ''}
       </div></div>`;
   }
@@ -4266,10 +4273,10 @@ function qActions(q) {
   b += `<button class="btn" onclick="cloneQuote('${q.id}')">複製為新報價</button>`;
   if (dvs.length) b += `<button class="btn ghost" onclick="go('delivery/${dvs[0].id}')">出貨單</button>`;
   if (q.status === 'signed' && !dvs.length)
-    b += `<button class="btn sm ghost" style="color:var(--text-3)" onclick="undoMarkOrdered('${q.id}')">取消回簽</button>`;
+    b += `<button class="btn sm ghost" style="color:var(--orange);border-color:var(--orange)" onclick="undoMarkOrdered('${q.id}')">↩ 取消客戶回簽</button>`;
   b += '</div><div class="btn-row">';
   if (!['cancelled', 'completed'].includes(q.status))
-    b += `<button class="btn danger" onclick="cancelQuote('${q.id}')">取消</button>`;
+    b += `<button class="btn danger" onclick="cancelQuote('${q.id}')">取消報價（退回草稿）</button>`;
   b += `<button class="btn danger" onclick="deleteQuote('${q.id}')">🗑 刪除報價單</button>`;
   b += '</div>';
   return b;
@@ -4369,14 +4376,14 @@ function snapCompany(co) {
 function undoMarkOrdered(id) {
   const q = byId(DB.quotes, id);
   const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled');
-  if (dvs.length) return toast('已經開立出貨單，不能取消回簽。請先處理出貨單。', 'err');
-  confirmBox('取消回簽',
+  if (dvs.length) return toast('已經開立出貨單，不能取消客戶回簽。請先處理出貨單。', 'err');
+  confirmBox('取消客戶回簽',
     `確定要取消「${esc(q.quote_no)}」的客戶回簽紀錄嗎？<br>會回到「已送出，等待客戶下單」的狀態，回簽方式／日期／備註都會被清空。`, () => {
       q.status = 'sent';
       q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null;
-      appendEditLog(q, '取消回簽');
+      appendEditLog(q, '取消客戶回簽');
       save(); render();
-      toast('已取消回簽，回到待下單狀態', 'ok');
+      toast('已取消客戶回簽，回到待下單狀態', 'ok');
     }, true);
 }
 
@@ -4393,11 +4400,6 @@ function markOrdered(id) {
         <div class="hint">不是每張單都會有簽回；LINE／Email 文字下單也算數。</div></div>
       <div class="field"><label class="req">下單日期</label>
         <input class="inp" type="date" id="sbd" value="${today()}"></div>
-      <div id="omSigned">
-        <div class="field"><label>簽回檔案</label>
-          <input class="inp" type="file" id="sbf" accept="image/*,application/pdf" capture="environment" style="padding:6px;height:auto">
-          <div class="hint">可直接用手機拍照。本機版只記錄檔名，接 Firebase 後才會實際上傳。</div></div>
-      </div>
       <div id="omText" class="hide">
         <div class="field"><label class="req">下單訊息內容</label>
           <textarea class="inp" id="sbt" rows="4" placeholder="貼上客戶的 LINE／Email 原文，作為下單憑據"></textarea></div>
@@ -4408,7 +4410,6 @@ function markOrdered(id) {
       el.querySelectorAll('#omPick .chip').forEach(c => c.onclick = () => {
         method = c.dataset.m;
         el.querySelectorAll('#omPick .chip').forEach(x => x.classList.toggle('on', x === c));
-        el.querySelector('#omSigned').classList.toggle('hide', method !== 'signed');
         el.querySelector('#omText').classList.toggle('hide', method !== 'text');
       });
       el.querySelector('[data-no]').onclick = close;
@@ -4417,10 +4418,9 @@ function markOrdered(id) {
         if (!d) return toast('請填下單日期', 'err');
         if (method === 'text' && !el.querySelector('#sbt').value.trim())
           return toast('請貼上下單訊息內容', 'err');
-        const f = el.querySelector('#sbf').files[0];
         q.order_method = method;
         q.signed_back_at = d + 'T00:00:00.000Z';
-        q.signed_back_file = method === 'signed' && f ? f.name : null;
+        q.signed_back_file = null;
         q.order_note = method === 'text' ? el.querySelector('#sbt').value.trim() : '';
         q.status = 'signed';
         appendEditLog(q, '登記下單');
@@ -4470,13 +4470,17 @@ function renewQuote(id) {
   save(); render(); toast('已延長效期至 ' + fmtDateShort(q.valid_until), 'ok');
 }
 
+// 取消報價：退回草稿，不是永久作廢——單號、內容都保留，可以直接繼續編輯、修改後重新送出
 function cancelQuote(id) {
   const q = byId(DB.quotes, id);
   const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled');
   if (dv.length) return toast(`還有 ${dv.length} 張出貨單未作廢，無法取消報價`, 'err');
-  confirmBox('取消報價', '取消後不可復原（單號保留不回收）。確定？', () => {
-    q.status = 'cancelled'; q.unlocked = false; save(); render(); toast('已取消');
-  }, true);
+  confirmBox('取消報價', '取消後會退回「草稿」狀態，內容都會保留，可以直接繼續編輯、之後重新送出。<br><br>確定要取消嗎？', () => {
+    q.status = 'draft'; q.unlocked = false;
+    q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null; q.sent_at = null;
+    appendEditLog(q, '取消報價（退回草稿）');
+    save(); render(); toast('已取消，退回草稿狀態');
+  });
 }
 
 function cloneQuote(id) {
@@ -4709,6 +4713,40 @@ function drawItems() {
     if (String(it.qty) !== e.target.value) e.target.value = it.qty; // 打小數點會被四捨五入，畫面要跟著同步，不然會顯示小數卻存整數
     save(); refreshAmount(it); drawTotals(); mobileSticky(q);
   }));
+
+  // 組裝配件的料號/品名自動完成：搜尋過去在任何一張報價單用過的配件（不管當時是哪個商品底下的），
+  // 選了就把料號/品名/廠商/成本一次帶入這一列，不用每次手動重打一樣的料
+  if (editable) {
+    box.querySelectorAll('.asm-pn,.asm-name').forEach(inp => {
+      floatAC(inp,
+        kw => {
+          if (!kw) return [];
+          const k = kw.toLowerCase();
+          const seen = new Set(); const rows = [];
+          DB.quotes.forEach(qq => (qq.items || []).forEach(itm => (itm.assembly_items || []).forEach(a => {
+            if (!a.part_no && !a.name) return;
+            const key = (a.part_no || '') + '\u0001' + (a.name || '') + '\u0001' + (a.supplier_name || '');
+            if (seen.has(key)) return;
+            if (!((a.part_no || '') + (a.name || '') + (a.supplier_name || '')).toLowerCase().includes(k)) return;
+            seen.add(key); rows.push(a);
+          })));
+          return rows.slice(0, 30).map(a => ({
+            a, html: `<div class="m">
+              <div class="t">${esc(a.name || '（無品名）')}</div>
+              <div class="s">${esc(a.part_no || '')}${a.supplier_name ? '　' + esc(a.supplier_name) : ''}</div></div>
+              <div class="p">${a.cost ? money(a.cost) : ''}</div>`
+          }));
+        },
+        row => {
+          const [iid, aid] = inp.dataset.ai.split('|');
+          const it = byId(q.items, iid), a = byId(it.assembly_items, aid);
+          a.part_no = row.a.part_no || ''; a.name = row.a.name || '';
+          a.supplier_name = row.a.supplier_name || ''; a.cost = row.a.cost || 0;
+          a.cost_tax = row.a.cost_tax || 'ex';
+          save(); drawItems(); toast(`已帶入 ${row.a.name || row.a.part_no}`);
+        });
+    });
+  }
   box.querySelectorAll('[data-up]').forEach(el => el.addEventListener('input', e => {
     const it = byId(q.items, e.target.dataset.up);
     it.unit_price = Math.max(0, +e.target.value || 0);
@@ -4759,7 +4797,7 @@ function itemRow(it, n, editable) {
           <input class="inp f-pn" data-fi="${it.id}" data-k="part_no" placeholder="料號" value="${esc(it.part_no || '')}" ${D}>
           <input class="inp f-br" data-fi="${it.id}" data-k="brand" placeholder="品牌" value="${esc(it.brand || '')}" ${D}>
           <input class="inp f-nm" data-fi="${it.id}" data-k="name" data-ac="${it.id}"
-            placeholder="品名（打字可搜尋主檔，也可自己打）" value="${esc(it.name || '')}" autocomplete="off" ${D}>
+            placeholder="請輸入料號或品名搜尋" value="${esc(it.name || '')}" autocomplete="off" ${D}>
         </div>
         <div class="fi-r">
           <input class="inp f-sp" data-fi="${it.id}" data-k="spec" placeholder="規格" value="${esc(it.spec || '')}" ${D}>
@@ -5206,15 +5244,11 @@ function toggleDvInvoiced(id, el) {
 function applyInvoicedChange(id, checked) {
   const d = byId(DB.deliveries, id);
   d.invoiced = checked;
-  if (!d.invoiced) { d.invoice_date = ''; d.invoice_no = ''; d.customer_po = ''; }
+  if (!d.invoiced) d.invoice_date = '';
   else if (!d.invoice_date) d.invoice_date = today();
   save();
   const dateEl = document.querySelector(`[data-invdate="${id}"]`);
   if (dateEl) { dateEl.disabled = !checked; dateEl.value = d.invoice_date || ''; }
-  const noEl = document.querySelector(`[data-invno="${id}"]`);
-  if (noEl) { noEl.disabled = !checked; noEl.value = d.invoice_no || ''; noEl.placeholder = checked ? '發票號碼' : '—'; }
-  const poEl = document.querySelector(`[data-custpo="${id}"]`);
-  if (poEl) { poEl.disabled = !checked; poEl.value = d.customer_po || ''; poEl.placeholder = checked ? '客戶PO單號' : '—'; }
 }
 function setDvField(id, field, val) {
   const d = byId(DB.deliveries, id);
@@ -5270,10 +5304,10 @@ function deliveryTable(list, opts) {
             ${d.invoiced ? '' : 'disabled'} onchange="setDvInvoiceDate('${d.id}', this.value)"></td>
         <td onclick="event.stopPropagation()">
           <input class="inp" style="height:28px;font-size:12px" data-invno="${d.id}" value="${esc(d.invoice_no || '')}"
-            placeholder="${d.invoiced ? '發票號碼' : '—'}" ${d.invoiced ? '' : 'disabled'} onchange="setDvField('${d.id}','invoice_no',this.value)"></td>
+            placeholder="發票號碼" onchange="setDvField('${d.id}','invoice_no',this.value)"></td>
         <td onclick="event.stopPropagation()">
           <input class="inp" style="height:28px;font-size:12px" data-custpo="${d.id}" value="${esc(d.customer_po || '')}"
-            placeholder="${d.invoiced ? '客戶PO單號' : '—'}" ${d.invoiced ? '' : 'disabled'} onchange="setDvField('${d.id}','customer_po',this.value)"></td>
+            placeholder="客戶PO單號" onchange="setDvField('${d.id}','customer_po',this.value)"></td>
         <td class="prod-col muted" title="${esc(d.note || '')}">${esc(d.note || '—')}</td>
         <td class="c nowrap" onclick="event.stopPropagation()">
           ${(d.edit_log && d.edit_log.length) ? `<a href="javascript:void(0)" class="op-trail-link" onclick="showEditLog('${d.id}')">查看（${d.edit_log.length}）</a>` : '<span class="muted">—</span>'}</td>
@@ -6979,6 +7013,35 @@ function editProduct(id) {
         el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
           p.components = p.components.filter(x => x.id !== b.dataset.rm); drawComps();
         });
+        // 料號/品名自動完成：搜尋過去在任何商品的BOM組成裡用過的零件，選了就把料號/品名/品牌/規格/廠商/成本一次帶入
+        el.querySelectorAll('.comp-row [data-k="part_no"],.comp-row [data-k="name"]').forEach(inp => {
+          floatAC(inp,
+            kw => {
+              if (!kw) return [];
+              const k = kw.toLowerCase();
+              const seen = new Set(); const rows = [];
+              DB.products.forEach(prod => (prod.components || []).forEach(c => {
+                if (!c.part_no && !c.name) return;
+                const key = (c.part_no || '') + '\u0001' + (c.name || '') + '\u0001' + (c.supplier_name || '');
+                if (seen.has(key)) return;
+                if (!((c.part_no || '') + (c.name || '') + (c.brand || '') + (c.spec || '')).toLowerCase().includes(k)) return;
+                seen.add(key); rows.push(c);
+              }));
+              return rows.slice(0, 30).map(c => ({
+                c, html: `<div class="m">
+                  <div class="t">${esc(c.name || '（無品名）')}</div>
+                  <div class="s">${esc(c.part_no || '')}${c.brand ? '　' + esc(c.brand) : ''}${c.spec ? '　' + esc(c.spec) : ''}</div></div>
+                  <div class="p">${c.cost ? money(c.cost) : ''}</div>`
+              }));
+            },
+            row => {
+              const c = byId(p.components, inp.dataset.c);
+              c.part_no = row.c.part_no || ''; c.name = row.c.name || '';
+              c.brand = row.c.brand || ''; c.spec = row.c.spec || '';
+              c.supplier_name = row.c.supplier_name || ''; c.cost = row.c.cost || 0;
+              drawComps(); toast(`已帶入 ${row.c.name || row.c.part_no}`);
+            });
+        });
       };
       drawComps();
 
@@ -7376,7 +7439,11 @@ function viewAccounts(v) {
             </select></td>
           <td class="c">${a.is_active ? '<span class="bdg green">啟用</span>' : '<span class="bdg gray">已停用</span>'}</td>
           <td class="muted" style="font-size:11px">${fmtDateTime(a.created_at)}</td>
-          <td class="c"><button class="btn sm ghost" onclick="toggleAccountActive('${a.id}')" ${isMe ? 'disabled title="不能停用自己"' : ''}>${a.is_active ? '停用' : '啟用'}</button></td>
+          <td class="c nowrap">
+            <button class="btn sm ghost" onclick="editAccountModal('${a.id}')">編輯</button>
+            <button class="btn sm ghost" onclick="toggleAccountActive('${a.id}')" ${isMe ? 'disabled title="不能停用自己"' : ''}>${a.is_active ? '停用' : '啟用'}</button>
+            <button class="btn sm danger ghost" onclick="deleteAccount('${a.id}')" ${isMe ? 'disabled title="不能刪除自己"' : ''}>刪除</button>
+          </td>
         </tr>`;
         }).join('')}</tbody></table>`}
     </div></div>`;
@@ -7455,6 +7522,49 @@ function toggleAccountActive(id) {
   if (acc.is_active) {
     confirmBox('停用帳號', `確定要停用「${esc(acc.name)}」的帳號嗎？停用後這個帳號登入只會有唯讀權限。`, doToggle, true);
   } else doToggle();
+}
+
+// 編輯帳號：只能改姓名（顯示用），Email／密碼是Firebase帳密本身，這裡不動它，要改請請當事人自己登入去改
+function editAccountModal(id) {
+  const acc = (DB.accounts || []).find(a => a.id === id);
+  if (!acc) return;
+  openModal({
+    title: '編輯帳號',
+    body: `
+      <div class="field"><label class="req">姓名</label><input class="inp" id="editAccName" value="${esc(acc.name)}"></div>
+      <div class="field"><label>Email</label><input class="inp" value="${esc(acc.email)}" disabled>
+        <div class="hint">Email／密碼是登入帳密本身，這裡不能改；要換密碼請當事人自己在登入畫面用「忘記密碼」，或停用這個帳號重新建一個。</div></div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-yes>儲存</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-yes]').onclick = () => {
+        const name = el.querySelector('#editAccName').value.trim();
+        if (!name) return toast('姓名不能空白', 'err');
+        const fresh = (DB.accounts || []).find(a => a.id === id) || acc;
+        fresh.name = name;
+        save(); close(); render();
+        toast('已更新帳號資料', 'ok');
+      };
+    }
+  });
+}
+
+// 刪除帳號：從帳號清單移除（畫面上看不到、也不能再用個人身分登入判斷權限），
+// 但因為前端沒辦法真的刪掉Firebase Auth的登入帳密（要用後台管理才能做到），
+// 這裡刪除後那組Email/密碼理論上還是登得進去，只是找不到對應的帳號資料、系統會當唯讀處理，效果等同停用+從清單移除
+function deleteAccount(id) {
+  const acc = (DB.accounts || []).find(a => a.id === id);
+  if (!acc) return;
+  if (acc.role === 'admin' && countActiveAdmins(id) === 0 && acc.is_active) {
+    return toast('至少要保留一位啟用中的管理員，不能刪除最後一位', 'err');
+  }
+  confirmBox('刪除帳號', `確定要刪除「${esc(acc.name)}」（${esc(acc.email)}）這個帳號嗎？<br><br>
+    這只會移除帳號清單上的紀錄，沒辦法真的刪掉登入密碼本身（前端做不到，需要後台管理）——
+    如果這組帳密之後又被拿來登入，系統會當作唯讀處理。<br><br><b>此動作無法復原。</b>`, () => {
+    DB.accounts = (DB.accounts || []).filter(a => a.id !== id);
+    save(); render();
+    toast('已刪除帳號', 'ok');
+  }, true);
 }
 
 /* ===========================================================
