@@ -99,6 +99,12 @@ a{color:var(--primary-600);text-decoration:none}
 .editlog-at{font-size:12px;font-family:var(--mono)}
 .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
 .netdot{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-2)}
+.sync-status{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:20px}
+.sync-status.syncing{color:var(--orange);background:#FFF7ED}
+.sync-status.synced{color:#15803D;background:#F0FDF4}
+.sync-status .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.sync-status.syncing .dot{animation:syncPulse 1s ease-in-out infinite}
+@keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.3}}
 .netdot i{width:7px;height:7px;border-radius:50%;background:var(--green);display:block}
 .netdot.off i{background:var(--red)}
 .content{padding:20px;flex:1;max-width:1640px;width:100%}
@@ -946,6 +952,7 @@ body.mobile.has-sticky .sticky-total{display:flex}
       </div>
       <div class="topbar-actions">
         <span class="netdot" id="netDot"><i></i><span>已連線</span></span>
+        <span id="syncStatus" class="sync-status" style="display:none"></span>
         <span id="roleTag"></span>
         <button class="btn sm ghost" id="operatorBtn" onclick="promptOperator(true)" title="切換操作者名字">
           👤 <span id="operatorTag">—</span></button>
@@ -1632,6 +1639,14 @@ function wireCoreListeners() {
       el.title = online ? '連線中' : '離線（資料仍存在本機，恢復連線後自動同步）';
     };
     window.addEventListener('online', dot); window.addEventListener('offline', dot); dot();
+    // 頁面即將關閉/重新整理前的最後補救：如果還有本機修改沒確認同步成功，
+    // 盡力觸發一次立即同步（不等待結果，瀏覽器不保證會等非同步操作完成，
+    // 但能多搶一點時間總比什麼都不做好，正常情況下250ms的防抖通常早就送出去了）
+    window.addEventListener('beforeunload', () => {
+      let hasPendingLocal = false;
+      try { hasPendingLocal = localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch (e) {}
+      if (hasPendingLocal && FIREBASE_ENABLED && fbUser) { clearTimeout(_syncTimer); firestoreSaveDiff(); }
+    });
   }
 }
 
@@ -1724,34 +1739,64 @@ async function firestoreSaveDiff() {
 function scheduleFirestoreSync() {
   if (!FIREBASE_ENABLED || !fbUser) return;
   clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(firestoreSaveDiff, 700);
+  _syncTimer = setTimeout(firestoreSaveDiff, 250);
 }
 
 // 即時監聽：別人改了什麼，畫面自動更新
+let _listenerAttachedAt = 0;
 function firestoreListen() {
   if (_listenersOn) return;
   _listenersOn = true;
+  _listenerAttachedAt = Date.now();
   FS_COLLECTIONS.forEach(col => {
     fbDb.collection(col).onSnapshot(snap => {
+      // 第一層防護：只在監聽器剛掛上去的短短幾秒內生效——這段期間如果本機還有修改尚未
+      // 確認同步成功，收到的整批資料先不套用。這一層專門用來擋「Firestore SDK自己的離線
+      // 快取機制」——監聽剛掛上去的當下，有可能先收到SDK快取裡的舊資料，不是真正剛補送
+      // 成功的最新狀態，沒辦法單純用「這筆記錄本機版本跟上次同步版本是否一致」來判斷（因為
+      // 那個判斷在同步成功的瞬間就會變成一致，之後才姍姍來遲的舊快照就繞過去了）。
+      // 只限定在剛掛上監聽的短暫窗口內這樣做，避免誤擋掉之後其他人真正即時傳來的修改
+      // （那些是正常的多人協作情境，不該被本機當下的pending狀態卡住）。
+      if (Date.now() - _listenerAttachedAt < 1500) {
+        let hasPendingLocal = false;
+        try { hasPendingLocal = localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch (e) {}
+        if (hasPendingLocal) return;
+      }
       const remoteChanges = snap.docChanges().filter(ch => !ch.doc.metadata.hasPendingWrites);
       if (!remoteChanges.length) return;
+      const arr = DB[col] = DB[col] || [];
+      const larr = _lastSynced[col] = _lastSynced[col] || [];
+      let appliedAny = false;
       remoteChanges.forEach(ch => {
         const data = ch.doc.data();
-        const arr = DB[col] = DB[col] || [];
         const idx = arr.findIndex(x => x.id === data.id);
+        const lidx = larr.findIndex(x => x.id === data.id);
+        // 第二層防護：這筆記錄本機目前的版本，跟「上次確認同步成功」的版本比對：如果不一樣，
+        // 代表本機有這筆記錄還沒送出去的修改，這種情況下不能讓收到的（可能是舊的）遠端資料
+        // 蓋過去，不然使用者剛做的修改會憑空消失。本機的修改之後還是會透過正常同步機制送出去。
+        // 注意：這裡只跳過「套用資料」，下面safeRerender仍然會用完整的remoteChanges去判斷，
+        // 如果剛好是別人真的同時改了你正在看的這筆，還是要跳出提示，不能因為保護資料就連通知都省略。
+        const localDirty = idx >= 0 && (lidx < 0 || JSON.stringify(arr[idx]) !== JSON.stringify(larr[lidx]));
+        if (localDirty) return;
         if (ch.type === 'removed') { if (idx >= 0) arr.splice(idx, 1); }
         else { if (idx >= 0) arr[idx] = data; else arr.push(data); }
-        const larr = _lastSynced[col] = _lastSynced[col] || [];
-        const lidx = larr.findIndex(x => x.id === data.id);
         if (ch.type === 'removed') { if (lidx >= 0) larr.splice(lidx, 1); }
         else { if (lidx >= 0) larr[lidx] = data; else larr.push(data); }
+        appliedAny = true;
       });
-      try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+      if (appliedAny) { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} }
       safeRerender(remoteChanges, col);
     });
   });
   fbDb.collection('meta').doc('settings').onSnapshot(doc => {
     if (doc.metadata.hasPendingWrites || !doc.exists) return;
+    if (Date.now() - _listenerAttachedAt < 1500) {
+      let hasPendingLocal = false;
+      try { hasPendingLocal = localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch (e) {}
+      if (hasPendingLocal) return;
+    }
+    // settings跟其他集合一樣，本機有未送出的修改時不要被遠端覆蓋
+    if (JSON.stringify(DB.settings) !== JSON.stringify(_lastSynced.settings)) return;
     DB.settings = Object.assign({}, DEFAULT_SETTINGS, doc.data());
     _lastSynced.settings = JSON.parse(JSON.stringify(DB.settings));
     render();
@@ -1802,7 +1847,7 @@ function safeRerender(changes, col) {
    =========================================================== */
 const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
-// 代表上次可能是存檔後太快關掉/重整，雲端同步的700ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
+// 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
 const SCHEMA_V = 14;                    // ← 每次改結構就 +1
 let DB = null;
@@ -1892,6 +1937,18 @@ function save() {
   return true;
 }
 
+// 給「彈窗編輯完成、按下儲存」這種一次性動作用的版本：跟save()一樣寫本機，
+// 但不透過防抖，直接立刻觸發同步。這種操作不像打字那樣一個字一個字觸發，
+// 沒有防抖的必要，能省掉的等待時間就直接省掉，把「存檔後太快切走/重整」的風險窗口降到最低。
+async function saveNow() {
+  if (!save()) return false;
+  if (FIREBASE_ENABLED && fbUser) {
+    clearTimeout(_syncTimer);
+    await firestoreSaveDiff().catch(e => console.error('立即同步失敗（資料仍在本機，稍後會自動重試）', e));
+  }
+  return true;
+}
+
 // 完整異動紀錄：同一人的例行編輯只更新最後一筆的時間，不重複新增一行；
 // 換了不同的人、或遇到送出/登記下單這類重要節點，才會獨立記一筆。
 // 這樣才能真的看出「A建立草稿 → B接續編輯 → B送出」這種接力過程，而不是被大量重複的編輯紀錄洗版。
@@ -1909,7 +1966,7 @@ function appendEditLog(rec, action) {
 async function load() {
   if (FIREBASE_ENABLED && fbUser) {
     try {
-      // 上次存檔後，700ms的雲端同步防抖可能還沒送出去（例如存完馬上重新整理或關掉），
+      // 上次存檔後，250ms的雲端同步防抖可能還沒送出去（例如存完馬上重新整理或關掉），
       // 這種情況下本機資料比雲端新，不能讓雲端的舊資料把它蓋掉——先用本機的、開機後立刻補送同步
       let hasPendingLocal = false;
       try { hasPendingLocal = localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch (e) {}
@@ -1923,7 +1980,7 @@ async function load() {
           // _lastSynced刻意留空（而不是設成目前DB），這樣firestoreSaveDiff才會正確算出「跟雲端不一樣的地方」全部補送
           const remoteForDiff = await firestoreLoadAll().catch(() => null);
           _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
-          // 重要：這裡必須「立刻同步並等待完成」，不能只是排程700ms後才送。
+          // 重要：這裡必須「立刻同步並等待完成」，不能只是排程250ms後才送。
           // 因為load()結束後緊接著會呼叫firestoreListen()掛上即時監聽，監聽一掛上就會馬上
           // 收到雲端「目前」的資料——如果這時候雲端還沒收到補送的修改，等於又把剛救回來的
           // 本機修改蓋掉一次，而且蓋掉之後_lastSynced也會被同步更新，之後排程的同步會誤判
@@ -4070,7 +4127,7 @@ async function importQuotesExcel(file) {
           q.items.forEach((it, i) => it.sort_order = i);
           DB.quotes.push(q);
         });
-        save(); render();
+        saveNow(); render();
         toast(`已從 Excel 匯入 ${valid.length} 張草稿報價單`, 'ok');
       };
     }
@@ -4120,7 +4177,7 @@ function bulkDeleteQuotes() {
   confirmBox('批次刪除報價單', msg, () => {
     DB.quotes = DB.quotes.filter(q => !deletable.includes(q.id));
     qSelected.clear();
-    save(); render();
+    saveNow(); render();
     toast(`已刪除 ${deletable.length} 張報價單${blocked.length ? '（' + blocked.length + ' 張因有出貨單略過）' : ''}`, 'ok');
   }, true);
 }
@@ -4261,7 +4318,7 @@ function viewQuote(v) {
   if (fs) fs.addEventListener('change', () => {
     if (fs.value === '__new') {
       fs.value = q.sales_user_id || '';
-      editUser(null, nu => { q.sales_user_id = nu.id; q.sales_name = nu.name; save(); render(); });
+      editUser(null, nu => { q.sales_user_id = nu.id; q.sales_name = nu.name; saveNow(); render(); });
       return;
     }
     q.sales_user_id = fs.value || null;
@@ -4373,7 +4430,7 @@ function editSnapshot() {
       const grab = () => { const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim()); return o; };
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
-        Object.assign(q.customer_snapshot, grab()); save(); close(); render(); toast('已更新此單客戶資料', 'ok');
+        Object.assign(q.customer_snapshot, grab()); saveNow(); close(); render(); toast('已更新此單客戶資料', 'ok');
       };
       el.querySelector('[data-sync]').onclick = () => {
         const o = grab(); Object.assign(q.customer_snapshot, o);
@@ -4387,7 +4444,7 @@ function editSnapshot() {
           }
           s.contact_person = o.contact_person; s.phone = o.phone; s.fax = o.fax; s.address = o.address;
         }
-        save(); close(); render(); toast('已同步回客戶主檔', 'ok');
+        saveNow(); close(); render(); toast('已同步回客戶主檔', 'ok');
       };
     }
   });
@@ -4437,7 +4494,7 @@ function undoMarkOrdered(id) {
       q.status = 'sent';
       q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null;
       appendEditLog(q, '取消客戶回簽');
-      save(); render();
+      saveNow(); render();
       toast('已取消客戶回簽，回到待下單狀態', 'ok');
     }, true);
 }
@@ -4479,7 +4536,7 @@ function markOrdered(id) {
         q.order_note = method === 'text' ? el.querySelector('#sbt').value.trim() : '';
         q.status = 'signed';
         appendEditLog(q, '登記下單');
-        save(); close(); render();
+        saveNow(); close(); render();
         toast('已登記下單，可以開立出貨單了', 'ok');
       };
     }
@@ -4495,13 +4552,13 @@ function unlockQuote(id) {
     <b>提醒：</b>客戶手上已有舊版 PDF，改完記得重新發一份給客戶。<br>確定要編輯？`, () => {
     q.unlocked = true; q.revision = (q.revision || 1) + 1;
     q.revised_at = new Date().toISOString();
-    save(); render(); toast('已解鎖，可以修改了', 'ok');
+    saveNow(); render(); toast('已解鎖，可以修改了', 'ok');
   });
 }
 function lockQuote(id) {
   const q = byId(DB.quotes, id);
   q.items = q.items.filter(i => (i.name || '').trim());
-  q.unlocked = false; save(); render(); toast('已完成編輯', 'ok');
+  q.unlocked = false; saveNow(); render(); toast('已完成編輯', 'ok');
 }
 
 function deleteQuote(id) {
@@ -4522,7 +4579,7 @@ function renewQuote(id) {
   const q = byId(DB.quotes, id);
   q.valid_until = addDays(today(), DB.settings.valid_days);
   q.status = 'sent'; q.sent_at = new Date().toISOString();
-  save(); render(); toast('已延長效期至 ' + fmtDateShort(q.valid_until), 'ok');
+  saveNow(); render(); toast('已延長效期至 ' + fmtDateShort(q.valid_until), 'ok');
 }
 
 // 取消報價：退回草稿，不是永久作廢——單號、內容都保留，可以直接繼續編輯、修改後重新送出
@@ -4534,7 +4591,7 @@ function cancelQuote(id) {
     q.status = 'draft'; q.unlocked = false;
     q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null; q.sent_at = null;
     appendEditLog(q, '取消報價（退回草稿）');
-    save(); render(); toast('已取消，退回草稿狀態');
+    saveNow(); render(); toast('已取消，退回草稿狀態');
   });
 }
 
@@ -4639,7 +4696,7 @@ function applySite(q, c, site) {
     const salesUser = byId(DB.users, c.default_sales_user_id);
     if (salesUser) { q.sales_user_id = salesUser.id; q.sales_name = salesUser.name; }
   }
-  save(); render(); toast(`已帶入 ${c.name}${site && site.label ? '（' + site.label + '）' : ''}`);
+  saveNow(); render(); toast(`已帶入 ${c.name}${site && site.label ? '（' + site.label + '）' : ''}`);
 }
 
 
@@ -5604,7 +5661,7 @@ async function importDeliveriesExcel(file) {
           if (c.fields.invoiced === true && !c.d.invoice_date) c.d.invoice_date = today();
           if (c.fields.invoiced === false) { c.d.invoice_date = ''; c.d.invoice_no = ''; c.d.customer_po = ''; }
         });
-        save(); render();
+        saveNow(); render();
         toast(`已從 Excel 匯入更新 ${changes.length} 張出貨單`, 'ok');
       };
     }
@@ -5660,7 +5717,7 @@ function bulkDeleteDeliveries() {
       DB.deliveries = DB.deliveries.filter(d => !ids.includes(d.id));
       qids.forEach(qid => { const q = byId(DB.quotes, qid); if (q) syncQuoteStatus(q); });
       dSelected.clear();
-      save(); render();
+      saveNow(); render();
       toast(`已刪除 ${ids.length} 張出貨單`, 'ok');
     }, true);
 }
@@ -6045,7 +6102,7 @@ function advance(id) {
   if (n === 'shipped') d.shipped_at = new Date().toISOString();
   const q = byId(DB.quotes, d.quote_id);
   if (q) syncQuoteStatus(q);
-  save(); render(); toast('狀態已更新為「' + DS[n].label + '」', 'ok');
+  saveNow(); render(); toast('狀態已更新為「' + DS[n].label + '」', 'ok');
 }
 
 function cancelDelivery(id) {
@@ -6055,7 +6112,7 @@ function cancelDelivery(id) {
     d.status = 'cancelled';
     const q = byId(DB.quotes, d.quote_id);
     if (q) syncQuoteStatus(q);
-    save(); render(); toast('已作廢');
+    saveNow(); render(); toast('已作廢');
   }, true);
 }
 
@@ -6768,7 +6825,7 @@ function editCustomer(id) {
         const doSave = () => {
           if (id) Object.assign(c, o);
           else DB.customers.push(Object.assign({ id: uid('cu'), is_active: true }, o));
-          save(); render(); toast('已儲存', 'ok');
+          saveNow(); render(); toast('已儲存', 'ok');
         };
         if (id) { doSave(); close(); return; }
         close();
@@ -6783,7 +6840,7 @@ function editCustomer(id) {
         if (n) return toast(`此客戶有 ${n} 張報價，不可刪除`, 'err');
         confirmBox('刪除客戶', `確定刪除「${esc(c.name)}」？`, () => {
           DB.customers = DB.customers.filter(x => x.id !== id);
-          save(); close(); render(); toast('已刪除');
+          saveNow(); close(); render(); toast('已刪除');
         }, true);
       };
     }
@@ -7038,7 +7095,7 @@ function manageCategories() {
             return toast('已有相同名稱的分類', 'err'), (inp.value = oldName);
           cat.name = newName;
           DB.products.forEach(p => { if (p.category === oldName) p.category = newName; });
-          save(); toast('已更新分類，並套用到所有商品', 'ok');
+          saveNow(); toast('已更新分類，並套用到所有商品', 'ok');
         }));
         el.querySelectorAll('[data-crm]').forEach(b => b.onclick = () => {
           const cat = byId(DB.categories, b.dataset.crm);
@@ -7052,7 +7109,7 @@ function manageCategories() {
             const removeNames = new Set([cat.name, ...subs.map(s => s.name)]);
             DB.products.forEach(p => { if (removeNames.has(p.category)) p.category = ''; });
             DB.categories = DB.categories.filter(c => !removeIds.has(c.id));
-            save(); draw(); toast('已刪除分類');
+            saveNow(); draw(); toast('已刪除分類');
           }, true);
         });
       };
@@ -7065,7 +7122,7 @@ function manageCategories() {
         if (DB.categories.some(c => c.name === name)) return toast('已有相同名稱的分類', 'err');
         DB.categories.push({ id: uid('cat'), name, parent_id: parentId });
         inp.value = '';
-        save(); draw(); toast(parentId ? '已新增小分類' : '已新增大分類', 'ok');
+        saveNow(); draw(); toast(parentId ? '已新增小分類' : '已新增大分類', 'ok');
       };
       el.querySelector('[data-no]').onclick = () => { close(); render(); };
     }
@@ -7256,7 +7313,7 @@ function editProduct(id) {
         const doSave = () => {
           if (id) { const t = byId(DB.products, id); Object.assign(t, p); }
           else { p.id = uid('p'); p.is_active = true; DB.products.push(p); }
-          save(); render(); toast('已儲存', 'ok');
+          saveNow(); render(); toast('已儲存', 'ok');
         };
         if (id) { doSave(); close(); return; }
         close();
@@ -7271,7 +7328,7 @@ function editProduct(id) {
         if (n) return toast(`此商品被 ${n} 張報價使用，不可刪除（既有報價使用的是快照，不受影響，但主檔仍需保留）`, 'err');
         confirmBox('刪除商品', `確定刪除「${esc(p.name)}」？`, () => {
           DB.products = DB.products.filter(x => x.id !== id);
-          save(); close(); render(); toast('已刪除');
+          saveNow(); close(); render(); toast('已刪除');
         }, true);
       };
     }
@@ -7387,7 +7444,7 @@ function viewSettings(v) {
     s.a4_rows = Math.max(4, +document.getElementById('sa4').value || 12);
     s.date_format = document.getElementById('sdate').value;
     s.allow_price_edit = document.getElementById('sprice').value === '1';
-    save(); render(); toast('設定已儲存', 'ok');
+    saveNow(); render(); toast('設定已儲存', 'ok');
   };
   document.getElementById('sAutoBackup').onchange = e => {
     s.auto_backup_interval = e.target.value;
@@ -7690,7 +7747,7 @@ function changeAccountRole(id, role) {
     return;
   }
   acc.role = role;
-  save(); toast(`已把「${acc.name}」的權限改成${ROLE_LABEL[role]}`, 'ok');
+  saveNow(); toast(`已把「${acc.name}」的權限改成${ROLE_LABEL[role]}`, 'ok');
 }
 
 function toggleAccountActive(id) {
@@ -7699,7 +7756,7 @@ function toggleAccountActive(id) {
   if (acc.is_active && acc.role === 'admin' && countActiveAdmins(id) === 0) {
     return toast('至少要保留一位啟用中的管理員，不能停用最後一位', 'err');
   }
-  const doToggle = () => { acc.is_active = !acc.is_active; save(); render(); toast(acc.is_active ? '已啟用' : '已停用該帳號', 'ok'); };
+  const doToggle = () => { acc.is_active = !acc.is_active; saveNow(); render(); toast(acc.is_active ? '已啟用' : '已停用該帳號', 'ok'); };
   if (acc.is_active) {
     confirmBox('停用帳號', `確定要停用「${esc(acc.name)}」的帳號嗎？停用後這個帳號登入只會有唯讀權限。`, doToggle, true);
   } else doToggle();
