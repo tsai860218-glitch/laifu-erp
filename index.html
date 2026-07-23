@@ -491,7 +491,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-slabel{padding:0 0 1mm;font-size:8pt;font-weight:700;color:#333;border-bottom:.5pt solid #CCC}
 .pp-sarea{height:24mm;position:relative;margin-top:2mm}
 .pp-sarea.stamp{display:flex;align-items:center;justify-content:center}
-.pp-stamp{max-height:22mm;max-width:52mm;object-fit:contain}
+.pp-stamp{width:30mm;height:25mm;object-fit:contain}
 
 .pp-foot{position:absolute;left:15mm;right:15mm;bottom:7mm}
 .pp-brands{display:flex;gap:3mm;align-items:center;flex-wrap:wrap;justify-content:space-between;
@@ -1923,8 +1923,14 @@ async function load() {
           // _lastSynced刻意留空（而不是設成目前DB），這樣firestoreSaveDiff才會正確算出「跟雲端不一樣的地方」全部補送
           const remoteForDiff = await firestoreLoadAll().catch(() => null);
           _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
+          // 重要：這裡必須「立刻同步並等待完成」，不能只是排程700ms後才送。
+          // 因為load()結束後緊接著會呼叫firestoreListen()掛上即時監聽，監聽一掛上就會馬上
+          // 收到雲端「目前」的資料——如果這時候雲端還沒收到補送的修改，等於又把剛救回來的
+          // 本機修改蓋掉一次，而且蓋掉之後_lastSynced也會被同步更新，之後排程的同步會誤判
+          // 成「沒有差異」而不送出，變成真的永久遺失，不只是暫時被蓋過去而已。
+          clearTimeout(_syncTimer);
+          await firestoreSaveDiff().catch(e => console.error('補送本機未同步的修改失敗', e));
           toast('偵測到上次還有未同步的本機修改，已優先套用並補送到雲端', 'ok');
-          scheduleFirestoreSync();
           return;
         }
       }
@@ -6871,19 +6877,22 @@ function productSortValue(p, key) {
   }
 }
 
+let pFilterState = { kw: '', majorId: '', subName: '', sup: '' };
+
 function viewProducts(v) {
   pSelected.clear();
+  const fs = pFilterState;
   v.innerHTML = `
     <div class="toolbar">
-      <div class="grow"><input class="inp" id="ps" placeholder="搜尋品名 / 料號 / 品牌 / 規格…"></div>
+      <div class="grow"><input class="inp" id="ps" placeholder="搜尋品名 / 料號 / 品牌 / 規格…" value="${esc(fs.kw)}"></div>
       <select class="inp" id="pMajorCat" style="width:130px">
-        <option value="">全部大分類</option>${majorCategories().map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+        <option value="">全部大分類</option>${majorCategories().map(c => `<option value="${c.id}" ${c.id === fs.majorId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select>
       <select class="inp" id="pSubCat" style="width:130px">
-        <option value="">全部小分類</option>
+        <option value="">全部小分類</option>${(fs.majorId ? subCategoriesOf(fs.majorId) : []).map(s => `<option ${s.name === fs.subName ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
       </select>
       <select class="inp" id="psup" style="width:150px">
-        <option value="">全部進貨廠商</option>${[...new Set(DB.products.map(p => p.default_supplier).filter(Boolean))].sort().map(s => `<option>${esc(s)}</option>`).join('')}
+        <option value="">全部進貨廠商</option>${[...new Set(DB.products.map(p => p.default_supplier).filter(Boolean))].sort().map(s => `<option ${s === fs.sup ? 'selected' : ''}>${esc(s)}</option>`).join('')}
       </select>
       <button class="btn ghost" onclick="manageCategories()">管理分類</button>
       <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button>
@@ -6900,6 +6909,7 @@ function viewProducts(v) {
     const subSel = document.getElementById('pSubCat');
     const subs = e.target.value ? subCategoriesOf(e.target.value) : [];
     subSel.innerHTML = `<option value="">全部小分類</option>` + subs.map(s => `<option>${esc(s.name)}</option>`).join('');
+    fs.subName = '';
   });
 
   const run = (resetPage) => {
@@ -6907,6 +6917,7 @@ function viewProducts(v) {
     const majorId = document.getElementById('pMajorCat').value;
     const subName = document.getElementById('pSubCat').value;
     const sup = document.getElementById('psup').value;
+    fs.kw = document.getElementById('ps').value; fs.majorId = majorId; fs.subName = subName; fs.sup = sup;
     const majorNames = majorId ? categoryFilterNames(majorId) : null;
     let list = DB.products.filter(p =>
       (!kw || (p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(kw) ||
