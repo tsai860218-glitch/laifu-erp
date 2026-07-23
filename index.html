@@ -110,15 +110,16 @@ a{color:var(--primary-600);text-decoration:none}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh)}
 .card-h{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
 .comp-list-wrap{overflow-x:auto}
-.comp-cols{min-width:900px}
-.comp-list-hd{display:grid;grid-template-columns:24px 100px 1fr 90px 100px 64px 90px 130px 52px 52px 52px 26px;
+.comp-cols{min-width:1000px}
+.comp-list-hd{display:grid;grid-template-columns:24px 100px 130px 90px 100px 64px 90px 130px 52px 52px 52px 26px;
   gap:6px;padding:2px 8px 8px;font-size:10.5px;color:var(--text-3);font-weight:600;white-space:nowrap}
-.comp-row{display:grid;grid-template-columns:24px 100px 1fr 90px 100px 64px 90px 130px 52px 52px 52px 26px;
+.comp-row{display:grid;grid-template-columns:24px 100px 130px 90px 100px 64px 90px 130px 52px 52px 52px 26px;
   gap:6px;align-items:center;padding:7px 8px;border-bottom:1px solid var(--line)}
 .comp-row .idx{color:var(--text-3);font-family:var(--mono);font-size:11px;text-align:center}
-.comp-row .inp{height:30px;font-size:12px;padding:0 6px}
+.comp-row>*{min-width:0}
+.comp-row .inp{height:30px;font-size:12px;padding:0 6px;min-width:0}
 .cchk{display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--text-2);white-space:nowrap;cursor:pointer}
-.comp-sum{display:flex;justify-content:space-between;padding:9px 8px;font-size:12.5px;font-weight:600;border-top:1px solid var(--line);min-width:900px}
+.comp-sum{display:flex;justify-content:space-between;padding:9px 8px;font-size:12.5px;font-weight:600;border-top:1px solid var(--line);min-width:1000px}
 .card-h h2{margin:0;font-size:14px;font-weight:700}
 .card-h .sub{font-size:12px;color:var(--text-3)}
 .card-h .right{margin-left:auto;display:flex;gap:8px;align-items:center}
@@ -170,6 +171,8 @@ select.inp{padding-right:6px;cursor:pointer}
   position:sticky;top:0;white-space:nowrap;letter-spacing:.03em;
   overflow:hidden;text-overflow:ellipsis;
 }
+.tbl th.sortable{cursor:pointer;user-select:none}
+.tbl th.sortable:hover{color:var(--primary);background:var(--primary-050)}
 .col-resizer{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:col-resize;
   z-index:2;touch-action:none}
 .col-resizer:hover,.col-resizing .col-resizer{background:var(--primary-050)}
@@ -516,6 +519,12 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-info b{font-weight:700;min-width:0;word-break:break-all}
 
 .dp-tbl{width:100%;border-collapse:collapse;margin-top:1.4mm;font-size:7.5pt;table-layout:fixed}
+/* 依商品筆數動態縮放整張表格(字體/內距/列高一起等比例變化)：商品少時放大方便閱讀，商品多時縮小盡量塞進單頁 */
+.dp-tbl.z-130{zoom:1.30}
+.dp-tbl.z-115{zoom:1.15}
+.dp-tbl.z-100{zoom:1}
+.dp-tbl.z-88{zoom:.88}
+.dp-tbl.z-78{zoom:.78}
 .dp-tbl th{background:#E8EDF7;border:.4pt solid #7A8AA5;padding:1mm .8mm;
   font-size:6.5pt;font-weight:700;color:#1E3A8A;text-align:center}
 .dp-tbl td{border:.4pt solid #BBB;padding:.9mm .8mm;line-height:1.3;vertical-align:top;word-break:break-word}
@@ -523,7 +532,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-tbl .r{text-align:right;font-family:var(--mono)}
 .dp-tbl .pn{font-family:var(--mono);font-size:6.5pt;word-break:break-all}
 .dp-tbl .item-brand{font-size:6.8pt;color:#333}
-.dp-tbl .sp{font-size:6.5pt;color:#555;line-height:1.3}
+.dp-tbl .sp{font-size:6.5pt;color:#333;line-height:1.3}
 .dp-tbl .asm-note-tag{font-size:6pt;background:#FFF2E5;color:#C2410C;border-radius:.6mm;padding:0 .8mm;margin-right:.6mm;font-weight:700}
 .dp-tbl .sm{font-size:6.5pt}
 .dp-tbl .mut{color:#888}
@@ -641,17 +650,7 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 .dv-tbl .inp{width:100%}
 .dv-tbl tr.bom-row td{background:var(--bg)}
 
-/* 商品 BOM 編輯器 */
-.comp-row{display:flex;gap:5px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line)}
-.comp-row .idx{flex:0 0 18px;font-size:11px;color:var(--text-3);font-family:var(--mono)}
-.comp-row .inp{height:30px;font-size:12px;flex:1;min-width:0}
-.comp-row .inp.num{flex:0 0 74px}
-.comp-row .del{flex:0 0 24px;height:24px;border:none;background:transparent;color:var(--red);
-  font-size:17px;cursor:pointer;border-radius:5px}
-.comp-row .del:hover{background:var(--red-50)}
-.cchk{display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--text-2);
-  white-space:nowrap;cursor:pointer;flex:0 0 auto}
-.comp-sum{display:flex;justify-content:space-between;padding:9px 12px;background:var(--bg);font-size:12px}
+/* 商品 BOM 編輯器：完整樣式已搬到 erp.html 的 .comp-list-hd/.comp-row（改用 grid 排版讓標題列跟資料列對齊），這裡不再重複定義
 .comp-sum b{font-family:var(--mono);font-weight:700}
 
 /* 圖片上傳槽 */
@@ -2149,7 +2148,7 @@ function migrate(db) {
       if (p.note == null) p.note = '';
     });
 
-    // 報價：新增「只顯示含稅價格」模式（例如政府標案）
+    // 報價：新增「只顯示含稅價格」模式（例如學校客戶）
     db.quotes.forEach(q => {
       if (q.price_display == null) q.price_display = 'breakdown';
       (q.items || []).forEach(it => { if (it.assembly_note == null) it.assembly_note = ''; });
@@ -3148,8 +3147,8 @@ function seed() {
   ];
 
   const users = [
-    { id: 'u_1', name: '業務', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '行政', phone: '', email: '', role: '行政', is_active: true }
+    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
+    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
   ];
 
   const suppliers = [
@@ -6398,7 +6397,7 @@ function dpBlankRowHtml() {
 
 // 產生一整頁（表頭資訊 + 表格 + 是否含總計/簽名區）
 // 總計/簽名區固定貼在紙張底部（不管表格內容多少都不會跟著表格漂移）
-function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSummary) {
+function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSummary, zoomClass) {
   return `<div class="paper a5">
     <div class="dp-head">
       <div class="dp-co-wrap">
@@ -6422,7 +6421,7 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
       <div><span>來源報價</span><b>${esc(d.quote_no || '')}</b></div>
     </div>
 
-    <table class="dp-tbl">
+    <table class="dp-tbl ${zoomClass || 'z-100'}">
       <thead><tr>
         <th style="width:7mm">項次</th>
         <th style="width:20mm">品牌</th>
@@ -6478,51 +6477,72 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
 // 用瀏覽器實際渲染量測每個項目的高度 + 每頁可用高度，回傳分頁結果
 // 每頁回傳 {items, blanks}：items 是這頁真正的項目、blanks 是這頁還能放幾條空白列撐版面
 // 保證：不管品名多長、BOM 多少項、組裝備註多長，都不會超出 A5 紙張範圍
+// 依商品筆數動態選字級：由大到小依序嘗試，量出「這個字級下，所有商品能不能剛好塞進單頁」，
+// 選第一個塞得下的（最大的那個）；如果最小字級都塞不下，才退回原本的多頁分頁邏輯。
+const DP_ZOOM_TIERS = ['z-130', 'z-115', 'z-100', 'z-88', 'z-78'];
+
 function paginateDeliveryItemsMeasured(d, co, c, t, ship) {
   const items = d.items || [];
-
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
   document.body.appendChild(host);
 
-  // ① 空表格（不含總計區）：量出「非末頁」可用高度，順便量一條空白列的高度
-  host.innerHTML = dpPageHtml(d, co, c, t, ship, dpBlankRowHtml(), 1, 1, false);
-  let paper = host.querySelector('.paper.a5');
-  const padBottomPx = parseFloat(getComputedStyle(paper).paddingBottom) || 0;
-  const safeBottom = paper.getBoundingClientRect().bottom - padBottomPx; // padding-bottom 留給絕對定位頁尾，一般內容不能佔用
-  const tbodyTop = paper.querySelector('.dp-tbl tbody').getBoundingClientRect().top;
-  const blankRowHeight = paper.querySelector('.dp-tbl tbody tr').getBoundingClientRect().height || 20;
-  const availNonLast = safeBottom - tbodyTop;
+  // 在指定字級下量出：非末頁可用高度、空白列高度、末頁扣掉總計/簽名區後的可用高度、每個項目實際高度
+  function measureAt(zoomClass) {
+    host.innerHTML = dpPageHtml(d, co, c, t, ship, dpBlankRowHtml(), 1, 1, false, zoomClass);
+    let paper = host.querySelector('.paper.a5');
+    const padBottomPx = parseFloat(getComputedStyle(paper).paddingBottom) || 0;
+    const safeBottom = paper.getBoundingClientRect().bottom - padBottomPx;
+    const tbodyTop = paper.querySelector('.dp-tbl tbody').getBoundingClientRect().top;
+    const blankRowHeight = paper.querySelector('.dp-tbl tbody tr').getBoundingClientRect().height || 20;
+    const availNonLast = safeBottom - tbodyTop;
 
-  // ② 空表格＋總計/簽名區：總計/簽名區已經是絕對定位貼底，直接量它自己的高度就好，
-  //    不受表格內容多少影響（貼底位置固定，但仍要幫表格留出對應的淨空）
-  host.innerHTML = dpPageHtml(d, co, c, t, ship, '', 1, 1, true);
-  paper = host.querySelector('.paper.a5');
-  const summaryOwnHeight = paper.querySelector('.dp-bottom').getBoundingClientRect().height;
-  const availLast = availNonLast - summaryOwnHeight;
+    host.innerHTML = dpPageHtml(d, co, c, t, ship, '', 1, 1, true, zoomClass);
+    paper = host.querySelector('.paper.a5');
+    const summaryOwnHeight = paper.querySelector('.dp-bottom').getBoundingClientRect().height;
+    const availLast = availNonLast - summaryOwnHeight;
 
-  // ③ 全部項目（不含總計區）：量每個項目自己實際佔多高
-  const allRows = items.map((it, n) => dpItemRowsHtml(it, n + 1, 'g' + n)).join('');
-  host.innerHTML = dpPageHtml(d, co, c, t, ship, allRows, 1, 1, false);
-  paper = host.querySelector('.paper.a5');
-  const tbody = paper.querySelector('.dp-tbl tbody');
-  const itemHeights = items.map((it, n) => {
-    const rows = [...tbody.querySelectorAll(`tr[data-rg="g${n}"]`)];
-    let h = 0;
-    rows.forEach(tr => { h += tr.getBoundingClientRect().height; });
-    return h;
-  });
+    const allRows = items.map((it, n) => dpItemRowsHtml(it, n + 1, 'g' + n)).join('');
+    host.innerHTML = dpPageHtml(d, co, c, t, ship, allRows, 1, 1, false, zoomClass);
+    paper = host.querySelector('.paper.a5');
+    const tbody = paper.querySelector('.dp-tbl tbody');
+    const itemHeights = items.map((it, n) => {
+      const rows = [...tbody.querySelectorAll(`tr[data-rg="g${n}"]`)];
+      let h = 0;
+      rows.forEach(tr => { h += tr.getBoundingClientRect().height; });
+      return h;
+    });
+    return { availNonLast, availLast, blankRowHeight, itemHeights };
+  }
+
+  const SAFETY = 4; // px 安全緩衝
+
+  if (!items.length) {
+    const m = measureAt(DP_ZOOM_TIERS[0]); // 沒有商品，直接用最大字級撐版面最好看
+    document.body.removeChild(host);
+    const budgetLast = m.availLast - SAFETY;
+    return {
+      zoomClass: DP_ZOOM_TIERS[0],
+      pages: [{ items: [], blanks: Math.max(0, Math.floor(budgetLast / m.blankRowHeight)) }]
+    };
+  }
+
+  // 由大到小依序嘗試，找第一個「所有商品總高度塞得進單頁末頁可用空間」的字級
+  let chosenZoom = null, chosen = null;
+  for (const zoomClass of DP_ZOOM_TIERS) {
+    const m = measureAt(zoomClass);
+    const totalHeight = m.itemHeights.reduce((s, h) => s + h, 0);
+    if (totalHeight <= m.availLast - SAFETY) { chosenZoom = zoomClass; chosen = m; break; }
+  }
+  // 全部字級都塞不下：退回最小字級，改用多頁分頁
+  if (!chosenZoom) { chosenZoom = DP_ZOOM_TIERS[DP_ZOOM_TIERS.length - 1]; chosen = measureAt(chosenZoom); }
 
   document.body.removeChild(host);
 
-  const SAFETY = 4; // px 安全緩衝
+  const { availNonLast, availLast, blankRowHeight, itemHeights } = chosen;
   const budgetNonLast = availNonLast - SAFETY;
   const budgetLast = availLast - SAFETY;
   const blankFor = leftover => Math.max(0, Math.floor(leftover / blankRowHeight));
-
-  if (!items.length) {
-    return [{ items: [], blanks: blankFor(budgetLast) }];
-  }
 
   // ① 先用「非末頁」寬鬆預算分頁（此時還不知道哪一頁會是真正的最後一頁）
   const pages = [];
@@ -6547,11 +6567,14 @@ function paginateDeliveryItemsMeasured(d, co, c, t, ship) {
     pages.push({ idxs: [movedIdx], used: itemHeights[movedIdx] });
   }
 
-  return pages.map((p, pi) => {
-    const isLast = pi === pages.length - 1;
-    const budget = isLast ? budgetLast : budgetNonLast;
-    return { items: p.idxs.map(i => items[i]), blanks: blankFor(budget - p.used) };
-  });
+  return {
+    zoomClass: chosenZoom,
+    pages: pages.map((p, pi) => {
+      const isLast = pi === pages.length - 1;
+      const budget = isLast ? budgetLast : budgetNonLast;
+      return { items: p.idxs.map(i => items[i]), blanks: blankFor(budget - p.used) };
+    })
+  };
 }
 
 function deliveryPaper(d) {
@@ -6559,14 +6582,15 @@ function deliveryPaper(d) {
   const c = d.customer_snapshot || {};
   const t = calcDoc(d);
   const ship = d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : d.shipping_method;
-  const pages = paginateDeliveryItemsMeasured(d, co, c, t, ship);
+  const result = paginateDeliveryItemsMeasured(d, co, c, t, ship);
+  const pages = result.pages;
   let rowNo = 0;
 
   return pages.map((pg, pi) => {
     const last = pi === pages.length - 1;
     const itemRows = pg.items.map(i => { rowNo++; return dpItemRowsHtml(i, rowNo, 'p' + pi + '_' + rowNo); }).join('');
     const blankRows = Array(pg.blanks || 0).fill(dpBlankRowHtml()).join('');
-    return dpPageHtml(d, co, c, t, ship, itemRows + blankRows, pi + 1, pages.length, last);
+    return dpPageHtml(d, co, c, t, ship, itemRows + blankRows, pi + 1, pages.length, last, result.zoomClass);
   }).join('');
 }
 
@@ -6830,6 +6854,22 @@ function quickCustomer(preset, cb) {
    §18 商品管理（含料號）
    =========================================================== */
 let pSelected = new Set();
+let pSortState = { key: null, dir: 'asc' };
+function productSortValue(p, key) {
+  switch (key) {
+    case 'fav': return p.is_favorite ? 1 : 0;
+    case 'part_no': return p.part_no || '';
+    case 'name': return p.name || '';
+    case 'brand': return p.brand || '';
+    case 'category': return p.category || '';
+    case 'supplier': return p.default_supplier || '';
+    case 'cost': return p.has_bom ? -1 : (+p.default_cost || 0);
+    case 'price': return +p.list_price || 0;
+    case 'bom': return p.has_bom ? (p.components || []).length : -1;
+    case 'note': return p.note || '';
+    default: return '';
+  }
+}
 
 function viewProducts(v) {
   pSelected.clear();
@@ -6873,10 +6913,12 @@ function viewProducts(v) {
         (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(kw))) &&
       (subName ? p.category === subName : (!majorNames || majorNames.includes(p.category))) &&
       (!sup || p.default_supplier === sup));
-    list.sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) || a.name.localeCompare(b.name));
+    list = pSortState.key ? sortRows(list, pSortState, productSortValue)
+      : list.slice().sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) || a.name.localeCompare(b.name));
     const info = paginateList('products', list, resetPage);
     const page = info.pageItems;
     const allChecked = page.length && page.every(p => pSelected.has(p.id));
+    const th = (key, label, cls) => `<th class="sortable ${cls || ''}" data-sortkey="${key}">${label}${sortArrow(pSortState, key)}</th>`;
     document.getElementById('plist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('product')}</div><h3>找不到商品</h3>
          <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button></div>`
@@ -6884,8 +6926,8 @@ function viewProducts(v) {
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
               onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(page.map(p => p.id)))})"></th>
-          <th style="width:34px">★</th><th>料號</th><th>品名</th><th>品牌</th><th>分類</th><th>進貨廠商</th>
-          <th class="r cost-col">成本</th><th class="r">牌價</th><th class="c">BOM</th><th>備註</th>
+          ${th('fav', '★', 'c')}${th('part_no', '料號')}${th('name', '品名')}${th('brand', '品牌')}${th('category', '分類')}${th('supplier', '進貨廠商')}
+          ${th('cost', '成本', 'r cost-col')}${th('price', '牌價', 'r')}${th('bom', 'BOM', 'c')}${th('note', '備註')}
         </tr></thead><tbody>
         ${page.map(p => `<tr>
           <td onclick="event.stopPropagation()"><input type="checkbox" ${pSelected.has(p.id) ? 'checked' : ''} onchange="toggleSel('p','${p.id}', this.checked)"></td>
@@ -6904,6 +6946,7 @@ function viewProducts(v) {
         </tr>`).join('')}</tbody></table>`;
     document.getElementById('pPageBar').innerHTML = list.length ? pageBarHtml('products', info) : '';
     makeColumnsResizable('plist', 'products');
+    bindTableSort('plist', pSortState, () => run());
     updateBulkBar('p');
   };
   ['ps', 'pMajorCat', 'pSubCat', 'psup'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
