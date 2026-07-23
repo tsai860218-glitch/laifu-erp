@@ -6817,6 +6817,7 @@ function editCustomer(id) {
       el.querySelector('[data-f="name"]').focus();
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
+        if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         if (!o.name) return toast('請填客戶名稱', 'err');
         if (o.tax_id && !/^\d{8}$/.test(o.tax_id)) return toast('統一編號需為 8 位數字', 'err');
@@ -6867,6 +6868,7 @@ function editCustomerSite(customer, siteId, cb) {
       el.querySelector('[data-f="label"]').focus();
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
+        if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         customer.sites = customer.sites || [];
         if (siteId) Object.assign(s, o);
@@ -6894,6 +6896,7 @@ function quickCustomer(preset, cb) {
       el.querySelector('[data-f="name"]').focus();
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
+        if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         if (!o.name) return toast('請填客戶名稱', 'err');
         if (o.tax_id && !/^\d{8}$/.test(o.tax_id)) return toast('統一編號需為 8 位數字', 'err');
@@ -7300,6 +7303,7 @@ function editProduct(id) {
       });
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
+        if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {};
         el.querySelectorAll('[data-f]').forEach(i =>
           o[i.dataset.f] = i.type === 'checkbox' ? i.checked : (i.type === 'number' ? +i.value || 0 : i.value.trim()));
@@ -7604,6 +7608,7 @@ function editCompany(id) {
 
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
+        if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {}; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
         if (!o.name || !o.code) return toast('公司全名與代碼必填', 'err');
         if (!o.short_name) o.short_name = shortenName(o.name);
