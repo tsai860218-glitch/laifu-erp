@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1E3A8A">
 <title>報價與出貨管理系統</title>
+<!-- 分頁圖示：深藍底 + 白色勾號。直接內嵌 SVG，不需要額外的圖檔，
+     所以不管是本機 file:// 開啟還是放到 GitHub Pages 都會顯示 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231E3A8A'/%3E%3Cpath d='M17 34L28 45L48 20' fill='none' stroke='%23fff' stroke-width='8.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -350,6 +353,18 @@ body.col-resizing *{cursor:col-resize!important}
   padding:8px 12px;letter-spacing:.03em;position:sticky;top:56px;z-index:5;
 }
 .irow:last-child{border-bottom:none}
+
+/* 「此單只顯示含稅價格」模式：整個商品明細換底色，欄位標題也改成「含稅單價／含稅小計」，
+   讓業務一眼就知道現在輸入框裡打的是含稅金額，不會誤把未稅價打進去 */
+.items.tax-incl{background:#FFFBEB}
+.items.tax-incl .irow.head{background:#FEF3C7;color:#92400E}
+.items.tax-incl .irow{border-bottom-color:#FDE68A}
+.items.tax-incl .up .inp{background:#FFFFFF;border-color:#F59E0B;font-weight:600}
+.items.tax-incl .amt{color:#92400E;font-weight:700}
+.tax-incl-note{
+  background:#FEF3C7;color:#92400E;border-bottom:1px solid #FDE68A;
+  padding:7px 12px;font-size:11.5px;font-weight:600;display:flex;gap:6px;align-items:center;
+}
 .irow .idx{color:var(--text-3);font-family:var(--mono);font-size:12px;text-align:center}
 .irow .nm{min-width:0}
 .irow .nm .t{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -499,7 +514,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-slabel{padding:0 0 1mm;font-size:8pt;font-weight:700;color:#333;border-bottom:.5pt solid #CCC}
 .pp-sarea{height:24mm;position:relative;margin-top:2mm}
 .pp-sarea.stamp{display:flex;align-items:center;justify-content:center}
-.pp-stamp{width:40mm;height:35mm;object-fit:contain;margin-top:10mm; /* 加入這行：強制將印章向下推，數值可依實際需求微調 */}
+.pp-stamp{width:40mm;height:35mm;object-fit:contain;margin-top:10mm} /* 印章往下推，避開上面的簽名欄線 */
 
 .pp-foot{position:absolute;left:15mm;right:15mm;bottom:7mm}
 .pp-brands{display:flex;gap:3mm;align-items:center;flex-wrap:wrap;justify-content:space-between;
@@ -4450,8 +4465,10 @@ function viewQuote(v) {
                   ${editable ? '<option value="__new">＋ 新增業務…</option>' : ''}
                 </select></div>
             </div>
-            <label class="fi-chk" style="margin-top:10px;font-size:12.5px">
-              <input type="checkbox" id="fpriceIncl" ${q.price_display === 'tax_included' ? 'checked' : ''} ${editable ? '' : 'disabled'}>
+            <label class="fi-chk" style="margin-top:10px;font-size:15px;font-weight:700;
+                   ${q.price_display === 'tax_included' ? 'background:#FEF3C7;color:#92400E;border-color:#F59E0B;' : ''}">
+              <input type="checkbox" id="fpriceIncl" style="width:16px;height:16px"
+                     ${q.price_display === 'tax_included' ? 'checked' : ''} ${editable ? '' : 'disabled'}>
               此單只顯示含稅價格</label>
           </div>
         </div>
@@ -4504,7 +4521,10 @@ function viewQuote(v) {
   const fp = document.getElementById('fpriceIncl');
   if (fp) fp.addEventListener('change', () => {
     q.price_display = fp.checked ? 'tax_included' : 'breakdown';
-    save(); toast(fp.checked ? '此單改為只顯示含稅價格' : '此單改回未稅+稅分開顯示');
+    save();
+    drawItems();   // 單價欄的標籤、數字、底色都要跟著換
+    render();      // 上面那個勾選框自己的醒目底色也要更新
+    toast(fp.checked ? '此單改為只顯示含稅價格（單價欄已換算成含稅）' : '此單改回未稅+稅分開顯示');
   });
   const fs = document.getElementById('fsales');
   if (fs) fs.addEventListener('change', () => {
@@ -4977,12 +4997,19 @@ function drawItems() {
     drawTotals(); return;
   }
 
+  const taxIncl = isTaxInclQuote(q);
+  const inclMap = taxIncl ? inclLineAmounts(q) : null;
+  box.classList.toggle('tax-incl', taxIncl);
   box.innerHTML = `
+    ${taxIncl ? `<div class="tax-incl-note">
+      <span>💰</span><span>此單為「只顯示含稅價格」：以下單價與小計都是<b>含稅</b>金額，直接照客戶談好的含稅價填就好</span>
+    </div>` : ''}
     <div class="irow head">
       <span>#</span><span>商品</span><span style="text-align:right">數量</span>
-      <span style="text-align:right">未稅單價</span><span style="text-align:right">小計</span><span></span>
+      <span style="text-align:right">${taxIncl ? '含稅單價' : '未稅單價'}</span>
+      <span style="text-align:right">${taxIncl ? '含稅小計' : '小計'}</span><span></span>
     </div>
-    ${q.items.map((it, n) => itemRow(it, n, editable)).join('')}
+    ${q.items.map((it, n) => itemRow(it, n, editable, taxIncl, inclMap && inclMap[it.id])).join('')}
     ${editable ? `<div style="padding:10px 12px;border-top:1px solid var(--line)">
       <button class="btn sm ghost" onclick="addBlankRow()">＋ 新增商品列</button></div>` : ''}`;
 
@@ -5085,7 +5112,9 @@ function drawItems() {
   }
   box.querySelectorAll('[data-up]').forEach(el => el.addEventListener('input', e => {
     const it = byId(q.items, e.target.dataset.up);
-    it.unit_price = Math.max(0, +e.target.value || 0);
+    const v = Math.max(0, +e.target.value || 0);
+    // 含稅模式：使用者打的是含稅價，除回未稅才存——資料庫一律存未稅
+    it.unit_price = e.target.dataset.incl ? Math.max(0, toEx(v)) : v;
     save(); refreshAmount(it); drawTotals(); mobileSticky(q);
   }));
 
@@ -5115,7 +5144,7 @@ function drawItems() {
   drawTotals();
 }
 
-function itemRow(it, n, editable) {
+function itemRow(it, n, editable, taxIncl, inclAmt) {
   const D = editable ? '' : 'disabled';
   const amt = lineAmount(it.qty, it.unit_price);
   const hasBom = it.components && it.components.length;
@@ -5150,13 +5179,17 @@ function itemRow(it, n, editable) {
     <div class="qty"><div class="mfield"><label>數量</label>
       <input class="inp num" type="number" inputmode="numeric" step="1" min="0"
         data-qty="${it.id}" value="${it.qty}" ${D}></div></div>
-    <div class="up"><div class="mfield"><label>單價</label>
+    <div class="up"><div class="mfield"><label>${taxIncl ? '含稅單價' : '單價'}</label>
       <input class="inp num" type="number" inputmode="decimal" step="0.01" min="0"
-        data-up="${it.id}" value="${it.unit_price || ''}" ${priceEditable ? '' : 'disabled'}
-        placeholder="${refPrice ? '牌價 ' + moneyD(refPrice) : ''}"
-        title="${priceEditable ? (refPrice ? `牌價參考：${moneyD(refPrice)}（不會自動帶入，也不會列印）` : '') : '依設定，業務不可修改單價'}"></div>
-      ${refPrice && !it.unit_price ? `<div class="hint" style="margin-top:2px">牌價 ${moneyD(refPrice)} 參考用</div>` : ''}</div>
-    <div class="amt" data-amt="${it.id}">${money(amt)}</div>
+        data-up="${it.id}" ${taxIncl ? 'data-incl="1"' : ''}
+        value="${it.unit_price ? (taxIncl ? toIncl(it.unit_price) : it.unit_price) : ''}" ${priceEditable ? '' : 'disabled'}
+        placeholder="${refPrice ? '牌價 ' + moneyD(taxIncl ? toIncl(refPrice) : refPrice) : ''}"
+        title="${priceEditable
+          ? (taxIncl ? '此單只顯示含稅價格：這裡直接填含稅單價，系統會自動換算未稅存檔' : '')
+            + (refPrice ? `${taxIncl ? '　' : ''}牌價參考：${moneyD(taxIncl ? toIncl(refPrice) : refPrice)}（不會自動帶入，也不會列印）` : '')
+          : '依設定，業務不可修改單價'}"></div>
+      ${refPrice && !it.unit_price ? `<div class="hint" style="margin-top:2px">牌價 ${moneyD(taxIncl ? toIncl(refPrice) : refPrice)}${taxIncl ? '（含稅）' : ''} 參考用</div>` : ''}</div>
+    <div class="amt" data-amt="${it.id}">${money(taxIncl && inclAmt != null ? inclAmt : amt)}</div>
     ${editable ? `<button class="del" onclick="delItem('${it.id}')" aria-label="刪除">×</button>` : '<span></span>'}
     ${hasBom && open ? bomBox(it, editable) : ''}
     ${!hasBom && asmOpen[it.id] ? assemblyBox(it, editable) : ''}
@@ -5281,7 +5314,37 @@ function assemblyBox(it, editable) {
   </div>`;
 }
 
+// 「只顯示含稅價格」模式的換算工具。
+// 重點：資料庫裡的 unit_price 永遠存「未稅」——所有下游（calcQuote、成本毛利、
+// 開立出貨單、PDF）都是照未稅算的，一旦改存含稅會全盤錯亂。
+// 這裡只換算「畫面上顯示與輸入」的數字，存回去之前一律除回未稅。
+const taxMul = () => 1 + (DB.settings.tax_rate || 0.05);
+const toIncl = ex => Math.round((+ex || 0) * taxMul() * 100) / 100;   // 未稅 → 含稅（顯示用）
+const toEx = inc => (+inc || 0) / taxMul();                            // 含稅 → 未稅（存檔用）
+const isTaxInclQuote = q => q && q.price_display === 'tax_included';
+
+// 含稅模式下，每一列的小計要跟 PDF 完全一致（PDF 會把四捨五入的尾差補到最後一項），
+// 不然畫面上加起來跟印出來的總計會差個一兩塊，業務會以為算錯
+function inclLineAmounts(q) {
+  const items = (q.items || []).filter(i => (i.name || '').trim());
+  const t = calcQuote(q);
+  const amts = taxInclusiveAmounts(items, DB.settings.tax_rate || 0.05, t.total);
+  const map = {};
+  items.forEach((it, i) => { map[it.id] = amts[i]; });
+  return map;
+}
+
 function refreshAmount(it) {
+  const q = QE;
+  // 含稅模式改動任何一列都可能牽動最後一列的尾差，所以整批重算
+  if (isTaxInclQuote(q)) {
+    const map = inclLineAmounts(q);
+    (q.items || []).forEach(x => {
+      const e = document.querySelector(`[data-amt="${x.id}"]`);
+      if (e) e.textContent = map[x.id] == null ? money(0) : money(map[x.id]);
+    });
+    return;
+  }
   const el = document.querySelector(`[data-amt="${it.id}"]`);
   if (el) el.textContent = money(lineAmount(it.qty, it.unit_price));
 }
