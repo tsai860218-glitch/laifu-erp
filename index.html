@@ -2861,21 +2861,27 @@ function floatAC(input, searchFn, pickFn) {
       (rows.length > 8 ? `<div class="ac-float-hd">共 ${rows.length} 筆，↑↓ 鍵或滑鼠捲動選擇</div>` : '') +
       rows.map((r, i) => `<div class="ac-item ${i === acSel ? 'sel' : ''}" data-i="${i}">${r.html}</div>`).join('');
 
-    // 面板固定寬度、盡量開在輸入框右側（側邊視窗，不會被少少幾行高度限制住）；
-    // 右邊放不下就改左邊，都放不下才退回輸入框正下方。高度依畫面剩餘空間動態決定，絕對不會超出可視範圍。
+    // 面板一律開在輸入框正下方，左緣對齊輸入框；
+    // 只有在下方空間不足、而且上方明顯比較寬時，才翻到輸入框上面，避免面板被畫面底部切掉。
     const b = input.getBoundingClientRect();
-    const PW = 360, MARGIN = 10;
-    let left;
-    if (b.right + MARGIN + PW <= window.innerWidth) left = b.right + MARGIN;
-    else if (b.left - MARGIN - PW >= 0) left = b.left - MARGIN - PW;
-    else left = Math.max(MARGIN, Math.min(b.left, window.innerWidth - PW - MARGIN));
-    const sideMode = (b.right + MARGIN + PW <= window.innerWidth) || (b.left - MARGIN - PW >= 0);
-    const top = sideMode ? Math.max(MARGIN, Math.min(b.top, window.innerHeight - MARGIN)) : b.bottom + 4;
-    const maxH = Math.max(160, window.innerHeight - top - MARGIN);
+    const MARGIN = 10, GAP = 4, MIN_W = 300, MIN_H = 160;
+    const width = Math.min(Math.max(b.width, MIN_W), window.innerWidth - MARGIN * 2);
+    let left = b.left;
+    if (left + width > window.innerWidth - MARGIN) left = window.innerWidth - MARGIN - width;
+    if (left < MARGIN) left = MARGIN;
+
+    const spaceBelow = window.innerHeight - b.bottom - GAP - MARGIN;
+    const spaceAbove = b.top - GAP - MARGIN;
+    const flipUp = spaceBelow < MIN_H && spaceAbove > spaceBelow;
+    const maxH = Math.max(120, flipUp ? spaceAbove : spaceBelow);
+
     acHost.style.left = left + 'px';
-    acHost.style.top = top + 'px';
-    acHost.style.width = PW + 'px';
+    acHost.style.width = width + 'px';
     acHost.style.maxHeight = maxH + 'px';
+    // 先把面板移到左上角量實際高度（避免沿用上一次的位置影響量測），再決定往上還是往下開
+    acHost.style.top = '0px';
+    const panelH = Math.min(acHost.offsetHeight, maxH);
+    acHost.style.top = (flipUp ? Math.max(MARGIN, b.top - GAP - panelH) : b.bottom + GAP) + 'px';
     acHost.querySelectorAll('.ac-item').forEach(el => el.onmousedown = ev => {
       ev.preventDefault();
       pickFn(rows[+el.dataset.i]); closeFloatAC();
