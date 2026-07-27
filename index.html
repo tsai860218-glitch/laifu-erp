@@ -217,6 +217,11 @@ body.col-resizing *{cursor:col-resize!important}
 .bdg.blue{background:var(--blue-bg);color:#1D4ED8}
 .bdg.gray{background:var(--gray-bg);color:var(--text-2)}
 .bdg.plain::before{display:none}
+.rt-kvs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 22px}
+.rt-kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;border-bottom:1px dashed var(--line);padding-bottom:6px;min-width:0}
+.rt-kv span{color:var(--text-2);white-space:nowrap}
+.rt-kv b{font-weight:700;text-align:right;min-width:0}
+@media(max-width:640px){.rt-kvs{grid-template-columns:1fr}}
 
 /* Stats */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
@@ -1463,7 +1468,7 @@ const FIREBASE_CONFIG = {
 const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 
 const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY');
-const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts'];
+const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals'];
 
 let fbAuth = null, fbDb = null, fbUser = null;
 let cloudConnected = false; // 即時狀態：現在是不是真的連上雲端資料庫在跑（不是只看有沒有填設定）
@@ -1940,7 +1945,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 14;                    // ← 每次改結構就 +1
+const SCHEMA_V = 15;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -1999,6 +2004,30 @@ function promptOperator(force) {
   });
 }
 
+// 本機離線快取字串：有雲端時把公司大圖（base64 的 logo/印章/品牌圖）拿掉，快取才不會撐爆
+// localStorage（正本在雲端，重整後圖片會補回來）。純本機模式圖片是唯一副本，照原樣保留。
+function slimCacheString() {
+  if (!(FIREBASE_ENABLED && fbUser)) return JSON.stringify(DB);
+  const slim = Object.assign({}, DB, {
+    companies: (DB.companies || []).map(c =>
+      Object.assign({}, c, { logo_url: '', stamp_url: '', brand_logos: [] }))
+  });
+  return JSON.stringify(slim);
+}
+// 把 remote 的公司圖片補回目前 DB 裡被精簡快取清空的欄位，避免「未同步本機修改」補送時
+// 反而用空圖片蓋掉雲端既有的 logo/印章。
+function restoreCompanyImagesFrom(remote) {
+  if (!remote || !Array.isArray(remote.companies)) return;
+  (DB.companies || []).forEach(c => {
+    const r = remote.companies.find(x => x.id === c.id);
+    if (!r) return;
+    if (!c.logo_url && r.logo_url) c.logo_url = r.logo_url;
+    if (!c.stamp_url && r.stamp_url) c.stamp_url = r.stamp_url;
+    if ((!c.brand_logos || !c.brand_logos.length) && Array.isArray(r.brand_logos) && r.brand_logos.length)
+      c.brand_logos = r.brand_logos.slice();
+  });
+}
+
 function save() {
   if (!canEdit()) {
     toast('目前是唯讀權限，沒辦法儲存修改', 'err');
@@ -2016,18 +2045,20 @@ function save() {
     DE.last_modified_at = new Date().toISOString();
     appendEditLog(DE, '編輯');
   }
+  // 寫本機離線快取。真正把 localStorage 撐爆的是公司 logo／印章／品牌圖——它們是 base64
+  // 存在資料庫裡，一張可能好幾百 KB，而 localStorage 每個網域上限只有約 5MB。
+  // 有雲端同步時，本機這份只是「離線快取」，雲端才是正本，所以快取裡不需要塞這些大圖：
+  // 寫入前把公司圖片欄位拿掉，快取就縮到很小，永遠不會再跳「空間已滿」。重新整理後圖片會
+  // 從雲端補回來，完全不影響顯示與儲存。純本機模式（沒開雲端）時圖片是唯一副本，才照原樣保留。
+  const cloudOn = FIREBASE_ENABLED && fbUser;
   try {
-    localStorage.setItem(KEY, JSON.stringify(DB));
-    if (FIREBASE_ENABLED && fbUser) localStorage.setItem(PENDING_SYNC_KEY, '1');
+    localStorage.setItem(KEY, slimCacheString());
+    if (cloudOn) localStorage.setItem(PENDING_SYNC_KEY, '1');
   }
   catch (e) {
-    // localStorage 每個網域上限約 5MB，整個資料庫序列化成一個鍵，加上公司 logo／印章／品牌圖
-    // 都是 base64 存在資料庫裡，累積久了最容易撐爆的就是這裡。
     console.error(e);
-    if (FIREBASE_ENABLED && fbUser) {
-      // 雲端是主要儲存，資料仍會同步上去，不會遺失——別叫使用者刪資料，只提醒本機離線快取滿了
-      toast('本機離線快取已滿，資料仍會同步到雲端（不影響儲存）。建議把公司 logo／印章換成較小的圖片以釋放空間。', 'err');
-      // 純本機模式才需要 PENDING 標記；雲端會直接排程同步，這裡不設 PENDING（因為本機根本沒寫成功）
+    if (cloudOn) {
+      // 已經去掉大圖還是滿（極少見）：資料仍會同步到雲端，不會遺失，這裡就不打擾使用者了
     } else {
       // 純本機模式：localStorage 是唯一副本，滿了就真的存不進去，必須先清空間
       toast('本機儲存失敗：瀏覽器空間已滿。請到「設定」匯出備份，並縮小公司 logo／印章圖片或清理舊資料。', 'err');
@@ -2079,6 +2110,9 @@ async function load() {
           DB.settings = Object.assign({}, DEFAULT_SETTINGS, DB.settings || {});
           // _lastSynced刻意留空（而不是設成目前DB），這樣firestoreSaveDiff才會正確算出「跟雲端不一樣的地方」全部補送
           const remoteForDiff = await firestoreLoadAll().catch(() => null);
+          // 本機快取為了省空間把公司圖片清空了，補送前先從雲端把圖片補回來，
+          // 否則 firestoreSaveDiff 會把空圖片當成「修改」推上去，反而蓋掉雲端的 logo／印章。
+          restoreCompanyImagesFrom(remoteForDiff);
           _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
           // 重要：這裡必須「立刻同步並等待完成」，不能只是排程250ms後才送。
           // 因為load()結束後緊接著會呼叫firestoreListen()掛上即時監聽，監聽一掛上就會馬上
@@ -2110,7 +2144,7 @@ async function load() {
         if (before < SCHEMA_V) await firestoreUploadAll(DB);
       }
       _lastSynced = JSON.parse(JSON.stringify(DB));
-      try { localStorage.setItem(KEY, JSON.stringify(DB)); localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {}
+      try { localStorage.setItem(KEY, slimCacheString()); localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {}
       return;
     } catch (e) {
       console.error('雲端讀取失敗，改用本機資料', e);
@@ -2451,6 +2485,15 @@ function migrate(db) {
     (db.categories || []).forEach(c => { if (c.parent_id === undefined) c.parent_id = null; });
   }
 
+  if (v < 15) {
+    // 印表機租賃模組：新增 rentals 集合；首次升級時匯入既有的租賃一覽表資料（僅在還沒有任何租賃資料時）
+    db.rentals = db.rentals || [];
+    if (!db.rentals.length && typeof RENTAL_SEED !== 'undefined') {
+      db.rentals = JSON.parse(JSON.stringify(RENTAL_SEED));
+    }
+  }
+
+  db.rentals = db.rentals || [];
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
 }
@@ -2962,6 +3005,7 @@ const ICONS = {
   supplier: '<svg viewBox="0 0 24 24"><path d="M4 21V9l8-5 8 5v12"/><path d="M4 21h16M9 21v-6h6v6M9 12h.01M15 12h.01M12 12h.01"/></svg>',
   settings: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.8-1.4-1.7-2.9-2.1.7a7.4 7.4 0 0 0-2.6-1.5L14.4 3H9.6l-.4 2.4a7.4 7.4 0 0 0-2.6 1.5l-2.1-.7-1.7 2.9 1.8 1.4a7.6 7.6 0 0 0 0 3l-1.8 1.4 1.7 2.9 2.1-.7a7.4 7.4 0 0 0 2.6 1.5l.4 2.4h4.8l.4-2.4a7.4 7.4 0 0 0 2.6-1.5l2.1.7 1.7-2.9z"/></svg>',
   logo: '<svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg>',
+  rental: '<svg viewBox="0 0 24 24"><path d="M7 3h10v5H7z"/><rect x="4" y="8" width="16" height="8" rx="1.5"/><path d="M7 16h10v5H7z"/><path d="M17.5 11h.01"/></svg>',
   notfound: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5"/></svg>',
   accounts: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="12" r="2.2"/><path d="M6.5 16.5c0-1.8 1.3-3 2.5-3s2.5 1.2 2.5 3"/><path d="M15 10h4M15 14h3"/></svg>'
 };
@@ -3565,7 +3609,7 @@ function emptyDB() {
     _schema: SCHEMA_V,
     companies: s.companies,
     users: [], suppliers: [], customers: [], products: [], categories: [],
-    quotes: [], deliveries: [], counters: {}, accounts: [],
+    quotes: [], deliveries: [], counters: {}, accounts: [], rentals: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
     _created: new Date().toISOString()
   };
@@ -3575,11 +3619,419 @@ function emptyDB() {
 /* ===========================================================
    路由
    =========================================================== */
+/* ===========================================================
+   §印表機租賃  —— 客戶合約 + 每月抄表與收費（自成一套廠商名單，雲端同步）
+   =========================================================== */
+const RENTAL_SEED = [{"id": "rt_seed_01", "idx": "1", "name": "辰悅資有限公司 (原新野谷有限公司)", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "222822", "ctype": "月租", "rent": 1200.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 8.0, "p_c_a4": 4.0, "p_scan": 0.175, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2026-03-01", "end": "2029-02-28", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1236.0, "c_a3": 0, "c_a4": 70.0, "scan": 0}, "subtotal": 713.0, "offset": true, "received": 1200.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1479.0, "c_a3": 0, "c_a4": 81.0, "scan": 0}, "subtotal": 842.0, "offset": true, "received": 2400.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 393.0, "c_a3": 0, "c_a4": 37.0, "scan": 0}, "subtotal": 286.0, "offset": true, "received": 1200.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 432.0, "c_a3": 0, "c_a4": 61.0, "scan": 0}, "subtotal": 395.0, "offset": true, "received": 1200.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 689.0, "c_a3": 0, "c_a4": 59.0, "scan": 0}, "subtotal": 477.0, "offset": true, "received": 1200.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_02", "idx": "2", "name": "以衡法律事務所", "color": "彩色", "brand": "Fujifilm", "model": "C5571", "sn": "808393", "ctype": "月租", "rent": 3000.0, "rent_tax": "in", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 4000.0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 50.0, "start": "2024-10-01", "end": "2029-09-30", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 2036.0, "c_a3": 0, "c_a4": 50.0, "scan": 0}, "subtotal": 77.0, "offset": false, "received": 3077.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 7.0, "bw_a4": 6156.0, "c_a3": 0, "c_a4": 111.0, "scan": 0}, "subtotal": 39.0, "offset": false, "received": 6039.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 3704.0, "c_a3": 0, "c_a4": 82.0, "scan": 0}, "subtotal": 112.0, "offset": false, "received": 3112.0}, "2026-05": {"reading": null, "use": {"bw_a3": 3.0, "bw_a4": 2530.0, "c_a3": 12.0, "c_a4": 114.0, "scan": 0}, "subtotal": 308.0, "offset": false, "received": 3308.0}, "2026-06": {"reading": null, "use": {"bw_a3": 19.0, "bw_a4": 2809.0, "c_a3": 0, "c_a4": 108.0, "scan": 0}, "subtotal": 203.0, "offset": false, "received": 3203.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_03", "idx": "3", "name": "嵐炘室內裝修有限公司(原川可居室內裝修有限公司)", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "222532", "ctype": "月租", "rent": 1500.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 6.0, "p_c_a4": 3.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2026-04-01", "end": "2029-03-31", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 67.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 20.0, "offset": true, "received": 1500.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 599.0, "c_a3": 0, "c_a4": 9.0, "scan": 0}, "subtotal": 195.0, "offset": true, "received": 3000.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 357.0, "c_a3": 0, "c_a4": 25.0, "scan": 0}, "subtotal": 182.0, "offset": true, "received": 1500.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 262.0, "c_a3": 26.0, "c_a4": 33.0, "scan": 0}, "subtotal": 334.0, "offset": true, "received": 1500.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 583.0, "c_a3": 15.0, "c_a4": 6.0, "scan": 0}, "subtotal": 283.0, "offset": true, "received": 1500.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_04", "idx": "4", "name": "玖昌實業", "color": "彩色", "brand": "Fujifilm", "model": "C3371", "sn": "805667N50", "ctype": "月租", "rent": 3000.0, "rent_tax": "in", "rent_offset": false, "p_bw_a3": 0.8, "p_bw_a4": 0.4, "p_c_a3": 8.0, "p_c_a4": 4.0, "p_scan": 0.4, "f_bw_a3": 0, "f_bw_a4": 6000.0, "f_c_a3": 0, "f_c_a4": 50.0, "start": "2024-11-04", "end": "2027-11-03", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 9117.0, "c_a3": 0, "c_a4": 552.0, "scan": 0}, "subtotal": 2008.0, "offset": false, "received": 5008.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 9.0, "bw_a4": 13687.0, "c_a3": 3.0, "c_a4": 690.0, "scan": 0}, "subtotal": 3066.0, "offset": false, "received": 9066.0}, "2026-04": {"reading": null, "use": {"bw_a3": 2.0, "bw_a4": 8025.0, "c_a3": 0, "c_a4": 1002.0, "scan": 0}, "subtotal": 6193.0, "offset": false, "received": 9193.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 8149.0, "c_a3": 0, "c_a4": 467.0, "scan": 0}, "subtotal": 2528.0, "offset": false, "received": 5528.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 7232.0, "c_a3": 0, "c_a4": 50.0, "scan": 0}, "subtotal": 2417.0, "offset": false, "received": 5417.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_05", "idx": "5", "name": "安策國際法律事務所", "color": "彩色", "brand": "Fujifilm", "model": "C5571", "sn": "808077", "ctype": "月租", "rent": 2500.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 4000.0, "f_c_a3": 0, "f_c_a4": 100.0, "start": "2024-08-01", "end": "2029-07-31", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 5103.0, "c_a3": 0, "c_a4": 41.0, "scan": 0}, "subtotal": 386.0, "offset": false, "received": 2886.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 6189.0, "c_a3": 4.0, "c_a4": 99.0, "scan": 0}, "subtotal": 28.0, "offset": false, "received": 5028.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 4856.0, "c_a3": 0, "c_a4": 111.0, "scan": 0}, "subtotal": 339.0, "offset": false, "received": 2839.0}, "2026-05": {"reading": null, "use": {"bw_a3": 20.0, "bw_a4": 3216.0, "c_a3": 0, "c_a4": 41.0, "scan": 0}, "subtotal": 14.0, "offset": false, "received": 2500.0}, "2026-06": {"reading": null, "use": {"bw_a3": 2.0, "bw_a4": 4398.0, "c_a3": 0, "c_a4": 63.0, "scan": 0}, "subtotal": 140.0, "offset": false, "received": 2640.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_06", "idx": "6", "name": "路瑟芬貿易有限公司", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "224479", "ctype": "月租", "rent": 1762.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 2000.0, "f_c_a3": 0, "f_c_a4": 100.0, "start": "2025-04-21", "end": "2028-04-20", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 88.0, "c_a3": 0, "c_a4": 27.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1762.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 260.0, "c_a3": 40.0, "c_a4": 28.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 3524.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 121.0, "c_a3": 0, "c_a4": 102.0, "scan": 0}, "subtotal": 7.0, "offset": false, "received": 1769.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 133.0, "c_a3": 0, "c_a4": 2.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1762.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 96.0, "c_a3": 0, "c_a4": 28.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1762.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_07", "idx": "7", "name": "台鈞發工程有限公司", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "224537", "ctype": "月租", "rent": 1700.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 1000.0, "f_bw_a4": 0, "f_c_a3": 50.0, "f_c_a4": 0, "start": "2025-06-17", "end": "2027-06-16", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 179.0, "c_a3": 10.0, "c_a4": 25.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1700.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 297.0, "c_a3": 8.0, "c_a4": 36.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 3400.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 19.0, "c_a3": 1.0, "c_a4": 72.0, "scan": 0}, "subtotal": 84.0, "offset": false, "received": 1784.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 53.0, "c_a3": 0, "c_a4": 4.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1700.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 21.0, "c_a3": 10.0, "c_a4": 12.0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1700.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_08", "idx": "8", "name": "京城銀行大里分行", "color": "彩色", "brand": "Fujifilm", "model": "C3371", "sn": "806958-WC6", "ctype": "月租", "rent": 2500.0, "rent_tax": "in", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 8.0, "p_c_a4": 4.0, "p_scan": 0.35, "f_bw_a3": 8000.0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-08-06", "end": "2026-06-30", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 2962.0, "c_a3": 0, "c_a4": 24.0, "scan": 0}, "subtotal": 96.0, "offset": false, "received": 2596.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 36.0, "bw_a4": 4608.0, "c_a3": 0, "c_a4": 1.0, "scan": 0}, "subtotal": 4.0, "offset": false, "received": 5004.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1768.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 2500.0}, "2026-05": {"reading": null, "use": {"bw_a3": 116.0, "bw_a4": 2179.0, "c_a3": 0, "c_a4": 2.0, "scan": 0}, "subtotal": 8.0, "offset": false, "received": 2508.0}, "2026-06": {"reading": null, "use": {"bw_a3": 114.0, "bw_a4": 1733.0, "c_a3": 0, "c_a4": 4.0, "scan": 0}, "subtotal": 16.0, "offset": false, "received": 2516.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_09", "idx": "9", "name": "儷廚國際", "color": "彩色", "brand": "Fujifilm", "model": "C3376", "sn": "204323", "ctype": "月租", "rent": 1600.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 3.0, "p_c_a4": 1.5, "p_scan": 0.3, "f_bw_a3": 2500.0, "f_bw_a4": 0, "f_c_a3": 50.0, "f_c_a4": 0, "start": "2023-12-04", "end": "2026-12-03", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 48.0, "bw_a4": 474.0, "c_a3": 77.0, "c_a4": 318.0, "scan": 0}, "subtotal": 633.0, "offset": false, "received": 1833.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 67.0, "bw_a4": 1174.0, "c_a3": 53.0, "c_a4": 537.0, "scan": 0}, "subtotal": 815.0, "offset": false, "received": 4015.0}, "2026-04": {"reading": null, "use": {"bw_a3": 11.0, "bw_a4": 877.0, "c_a3": 31.0, "c_a4": 1604.0, "scan": 0}, "subtotal": 2289.0, "offset": false, "received": 3889.0}, "2026-05": {"reading": null, "use": {"bw_a3": 68.0, "bw_a4": 828.0, "c_a3": 2.0, "c_a4": 359.0, "scan": 0}, "subtotal": 470.0, "offset": false, "received": 2070.0}, "2026-06": {"reading": null, "use": {"bw_a3": 181.0, "bw_a4": 1346.0, "c_a3": 146.0, "c_a4": 586.0, "scan": 0}, "subtotal": 1023.0, "offset": false, "received": 2623.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_10", "idx": "10", "name": "農友-加禾蔬果行", "color": "黑白", "brand": "Fujifilm", "model": "SC2520", "sn": "470127", "ctype": "月租", "rent": 1000.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 2000.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2024-08-20", "end": "2027-08-19", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1392.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1000.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 2067.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 2000.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1272.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1000.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1133.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1000.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1348.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1000.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_11", "idx": "11", "name": "台中冠慶汽車-1F", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "224480", "ctype": "月租", "rent": 1700.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 6000.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-12-01", "end": "2026-11-30", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 1940.0, "bw_a4": 0, "c_a3": 86.0, "c_a4": 0, "scan": 0}, "subtotal": 301.0, "offset": false, "received": 2001.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 1840.0, "bw_a4": 0, "c_a3": 338.0, "c_a4": 0, "scan": 0}, "subtotal": 1183.0, "offset": false, "received": 4583.0}, "2026-04": {"reading": null, "use": {"bw_a3": 1090.0, "bw_a4": 0, "c_a3": 43.0, "c_a4": 0, "scan": 0}, "subtotal": 1851.0, "offset": false, "received": 0.0}, "2026-05": {"reading": null, "use": {"bw_a3": 1241.0, "bw_a4": 0, "c_a3": 57.0, "c_a4": 0, "scan": 0}, "subtotal": 200.0, "offset": false, "received": 1900.0}, "2026-06": {"reading": null, "use": {"bw_a3": 1032.0, "bw_a4": 0, "c_a3": 24.0, "c_a4": 0, "scan": 0}, "subtotal": 84.0, "offset": false, "received": 1784.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_12", "idx": "12", "name": "台中冠慶汽車-2F", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "224394", "ctype": "月租", "rent": 1700.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 6000.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-12-01", "end": "2026-11-30", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 1839.0, "bw_a4": 0, "c_a3": 213.0, "c_a4": 0, "scan": 0}, "subtotal": 753.0, "offset": false, "received": 2453.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 2140.0, "bw_a4": 0, "c_a3": 337.0, "c_a4": 0, "scan": 0}, "subtotal": 1180.0, "offset": false, "received": 4580.0}, "2026-04": {"reading": null, "use": {"bw_a3": 217.0, "bw_a4": 0, "c_a3": 1182.0, "c_a4": 0, "scan": 0}, "subtotal": 760.0, "offset": false, "received": 2460.0}, "2026-05": {"reading": null, "use": {"bw_a3": 1061.0, "bw_a4": 0, "c_a3": 262.0, "c_a4": 0, "scan": 0}, "subtotal": 917.0, "offset": false, "received": 2617.0}, "2026-06": {"reading": null, "use": {"bw_a3": 1021.0, "bw_a4": 0, "c_a3": 224.0, "c_a4": 0, "scan": 0}, "subtotal": 784.0, "offset": false, "received": 2484.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_13", "idx": "13", "name": "山線社區大學", "color": "彩色", "brand": "Fujifilm", "model": "C3371", "sn": "807528-WC6", "ctype": "月租", "rent": 3000.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.64, "p_bw_a4": 0.32, "p_c_a3": 5.0, "p_c_a4": 2.5, "p_scan": 0.32, "f_bw_a3": 10.0, "f_bw_a4": 4000.0, "f_c_a3": 10.0, "f_c_a4": 350.0, "start": "2026-03-01", "end": "2031-02-28", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 112.0, "bw_a4": 5678.0, "c_a3": 38.0, "c_a4": 604.0, "scan": 0}, "subtotal": 2810.0, "offset": false, "received": 6170.0}, "2026-02": {"reading": null, "use": {"bw_a3": 13.0, "bw_a4": 1050.0, "c_a3": 18.0, "c_a4": 190.0, "scan": 0}, "subtotal": 914.0, "offset": false, "received": 2594.0}, "2026-03": {"reading": null, "use": {"bw_a3": 31.0, "bw_a4": 1247.0, "c_a3": 28.0, "c_a4": 5.0, "scan": 0}, "subtotal": 13.0, "offset": false, "received": 3013.0}, "2026-04": {"reading": null, "use": {"bw_a3": 72.0, "bw_a4": 2172.0, "c_a3": 45.0, "c_a4": 450.0, "scan": 0}, "subtotal": 465.0, "offset": false, "received": 3465.0}, "2026-05": {"reading": null, "use": {"bw_a3": 168.0, "bw_a4": 2026.0, "c_a3": 2.0, "c_a4": 150.0, "scan": 0}, "subtotal": 101.0, "offset": false, "received": 3101.0}, "2026-06": {"reading": null, "use": {"bw_a3": 9.0, "bw_a4": 2354.0, "c_a3": 13.0, "c_a4": 144.0, "scan": 0}, "subtotal": 15.0, "offset": false, "received": 3015.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_14", "idx": "14", "name": "後驛大學", "color": "彩色", "brand": "Fujifilm", "model": "C3371", "sn": "805554", "ctype": "月租", "rent": 3000.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.64, "p_bw_a4": 0.32, "p_c_a3": 5.0, "p_c_a4": 2.5, "p_scan": 0.32, "f_bw_a3": 10.0, "f_bw_a4": 4000.0, "f_c_a3": 10.0, "f_c_a4": 350.0, "start": "2024-10-15", "end": "2026-12-31", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 79.0, "bw_a4": 8654.0, "c_a3": 11.0, "c_a4": 205.0, "scan": 0}, "subtotal": 247.0, "offset": false, "received": 6247.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 157.0, "bw_a4": 4494.0, "c_a3": 3.0, "c_a4": 61.0, "scan": 0}, "subtotal": 88.0, "offset": false, "received": 6088.0}, "2026-04": {"reading": null, "use": {"bw_a3": 16.0, "bw_a4": 2422.0, "c_a3": 2.0, "c_a4": 314.0, "scan": 0}, "subtotal": 4.0, "offset": false, "received": 3004.0}, "2026-05": {"reading": null, "use": {"bw_a3": 201.0, "bw_a4": 2827.0, "c_a3": 2.0, "c_a4": 90.0, "scan": 0}, "subtotal": 122.0, "offset": false, "received": 3122.0}, "2026-06": {"reading": null, "use": {"bw_a3": 104.0, "bw_a4": 4141.0, "c_a3": 2.0, "c_a4": 12.0, "scan": 0}, "subtotal": 105.0, "offset": false, "received": 3105.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_15", "idx": "15", "name": "基督喜信會-1F", "color": "彩色", "brand": "Fujifilm", "model": "C3374", "sn": "620359", "ctype": "月租", "rent": 1800.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 6.0, "p_c_a4": 3.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 5000.0, "f_c_a3": 0, "f_c_a4": 200.0, "start": "2024-05-13", "end": "2027-05-12", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 39.0, "bw_a4": 8486.0, "c_a3": 23.0, "c_a4": 296.0, "scan": 0}, "subtotal": 1495.0, "offset": false, "received": 3295.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 4546.0, "c_a3": 13.0, "c_a4": 255.0, "scan": 0}, "subtotal": 243.0, "offset": false, "received": 2043.0}, "2026-03": {"reading": null, "use": {"bw_a3": 5.0, "bw_a4": 6517.0, "c_a3": 1.0, "c_a4": 684.0, "scan": 0}, "subtotal": 1916.0, "offset": false, "received": 3716.0}, "2026-04": {"reading": null, "use": {"bw_a3": 14.0, "bw_a4": 7278.0, "c_a3": 32.0, "c_a4": 719.0, "scan": 0}, "subtotal": 2440.0, "offset": false, "received": 4240.0}, "2026-05": {"reading": null, "use": {"bw_a3": 14.0, "bw_a4": 4637.0, "c_a3": 35.0, "c_a4": 568.0, "scan": 0}, "subtotal": 1322.0, "offset": false, "received": 3122.0}, "2026-06": {"reading": null, "use": {"bw_a3": 4.0, "bw_a4": 3766.0, "c_a3": 15.0, "c_a4": 519.0, "scan": 0}, "subtotal": 1049.0, "offset": false, "received": 2849.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_16", "idx": "16", "name": "基督喜信會-3F", "color": "黑白", "brand": "HP", "model": "E72535dn", "sn": "CNC1M5S08Y", "ctype": "月租", "rent": 1500.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 4000.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-03-02", "end": "2028-03-01", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 120.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1500.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 231.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1500.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 577.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1500.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 830.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1500.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 2175.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1500.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 16.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 1500.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_17", "idx": "17", "name": "財團法人雙福社會福利慈善事業基金會", "color": "彩色", "brand": "Fujifilm", "model": "C3373", "sn": "820593", "ctype": "月租", "rent": 1800.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 6.0, "p_c_a4": 3.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 5000.0, "f_c_a3": 0, "f_c_a4": 200.0, "start": "2026-01-16", "end": "2031-01-15", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 3414.0, "c_a3": 0, "c_a4": 25.0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 2700.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 549.0, "c_a3": 0, "c_a4": 9.0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 1800.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 617.0, "c_a3": 0, "c_a4": 6.0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 1800.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1683.0, "c_a3": 0, "c_a4": 22.0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 1800.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 627.0, "c_a3": 0, "c_a4": 44.0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 1800.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_18", "idx": "18", "name": "尚明稅務記帳士事務所", "color": "黑白", "brand": "HP", "model": "E72535dn", "sn": "CNC1M5S08M", "ctype": "月租", "rent": 1000.0, "rent_tax": "in", "rent_offset": false, "p_bw_a3": 0.0, "p_bw_a4": 0.35, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 2500.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2023-01-01", "end": "2026-12-31", "meter": "雙月", "billing": "雙月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1313.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 2000.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 3311.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 2000.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 2163.0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 2000.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_19", "idx": "19", "name": "采居創意傢飾有限公司", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "220407", "ctype": "月租", "rent": 1500.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 1.3, "p_bw_a4": 0.65, "p_c_a3": 6.5, "p_c_a4": 13.0, "p_scan": 0.65, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-06-01", "end": "2028-05-31", "meter": "雙月", "billing": "雙月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 607.0, "c_a3": 0, "c_a4": 50.0, "scan": 0}, "subtotal": 720.0, "offset": true, "received": 2400.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 542.0, "c_a3": 0, "c_a4": 44.0, "scan": 0}, "subtotal": 638.0, "offset": true, "received": 2400.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 809.0, "c_a3": 0, "c_a4": 56.0, "scan": 0}, "subtotal": 890.0, "offset": true, "received": 2400.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_20", "idx": "20", "name": "笠翔國際貿易有限公司", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "221106", "ctype": "月租", "rent": 1500.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 6.0, "p_c_a4": 3.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-10-21", "end": "2028-10-20", "meter": "雙月", "billing": "雙月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 153.0, "c_a3": 8.0, "c_a4": 145.0, "scan": 0}, "subtotal": 529.0, "offset": true, "received": 3000.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 4851.0, "c_a3": 11.0, "c_a4": 212.0, "scan": 0}, "subtotal": 2157.0, "offset": true, "received": 3000.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1126.0, "c_a3": 32.0, "c_a4": 161.0, "scan": 0}, "subtotal": 1013.0, "offset": true, "received": 3000.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_21", "idx": "21", "name": "原笠國際", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "223912", "ctype": "月租", "rent": 1500.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 6.0, "p_c_a4": 3.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-07-09", "end": "2030-07-08", "meter": "雙月", "billing": "雙月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1102.0, "c_a3": 4.0, "c_a4": 242.0, "scan": 0}, "subtotal": 1081.0, "offset": true, "received": 3000.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1803.0, "c_a3": 15.0, "c_a4": 51.0, "scan": 0}, "subtotal": 784.0, "offset": true, "received": 3000.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1361.0, "c_a3": 37.0, "c_a4": 59.0, "scan": 0}, "subtotal": 807.0, "offset": true, "received": 3000.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_22", "idx": "22", "name": "定國骨科醫院", "color": "彩色", "brand": "Fujifilm", "model": "C3371", "sn": "806251", "ctype": "月租", "rent": 2500.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 5000.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2025-03-17", "end": "2028-03-16", "meter": "月", "billing": "半年結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 8.0, "bw_a4": 1288.0, "c_a3": 0, "c_a4": 66.0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1068.0, "c_a3": 0, "c_a4": 50.0, "scan": 0}, "subtotal": 1729.0, "offset": true, "received": 1729.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_23", "idx": "23", "name": "鋒達精密工業有限公司", "color": "黑白", "brand": "Lexmark", "model": "MX421ade", "sn": "701702030MC92", "ctype": "月租", "rent": 300.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.0, "p_bw_a4": 0.5, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.5, "f_bw_a3": 0, "f_bw_a4": 600.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2023-08-07", "end": "2026-08-06", "meter": "季", "billing": "年結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_24", "idx": "24", "name": "威廷精密有限公司", "color": "黑白", "brand": "Lexmark", "model": "MX321adn", "sn": "701701430M2W4", "ctype": "月租", "rent": 300.0, "rent_tax": "ex", "rent_offset": true, "p_bw_a3": 0.0, "p_bw_a4": 0.5, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.5, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2023-08-01", "end": "2026-08-31", "meter": "半年", "billing": "年結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": true, "received": 0.0}}}, {"id": "rt_seed_25", "idx": "25", "name": "恆翼國際", "color": "彩色", "brand": "Lexmark", "model": "CX552ade", "sn": "7529017149C6W", "ctype": "租機購碳", "rent": 500.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.0, "p_bw_a4": 0.0, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.0, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2020-10-28", "end": "2026-10-27", "meter": "-", "billing": "年結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_26", "idx": "26", "name": "三岩成光製造有限公司", "color": "黑白", "brand": "Fujifilm", "model": "M355df", "sn": "503438", "ctype": "租機購碳", "rent": 300.0, "rent_tax": "in", "rent_offset": false, "p_bw_a3": 0.0, "p_bw_a4": 0.0, "p_c_a3": 0.0, "p_c_a4": 0.0, "p_scan": 0.0, "f_bw_a3": 0, "f_bw_a4": 0, "f_c_a3": 0, "f_c_a4": 0, "start": "2026-03-10", "end": "2029-03-09", "meter": "-", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-02": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-03": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-04": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-05": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-06": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-07": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-08": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-09": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-10": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-11": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}, "2026-12": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 0, "c_a3": 0, "c_a4": 0, "scan": 0}, "subtotal": 0.0, "offset": false, "received": 0.0}}}, {"id": "rt_seed_27", "idx": "-", "name": "安芯人力資源有限公司", "color": "彩色", "brand": "Fujifilm", "model": "C3376", "sn": "700894", "ctype": "月租", "rent": 3000.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 10.0, "p_c_a4": 5.0, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 3000.0, "f_c_a3": 0, "f_c_a4": 300.0, "start": "2024-09-01", "end": "2025-11-30", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 5785.0, "c_a3": 0, "c_a4": 242.0, "scan": 0}, "subtotal": 975.0, "offset": false, "received": 3975.0}}}, {"id": "rt_seed_28", "idx": "-", "name": "皇鑫科技-茂盛板橋分院", "color": "彩色", "brand": "Fujifilm", "model": "C3373", "sn": "820593", "ctype": "月租", "rent": 2000.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.7, "p_bw_a4": 0.35, "p_c_a3": 7.0, "p_c_a4": 3.5, "p_scan": 0.35, "f_bw_a3": 0, "f_bw_a4": 3500.0, "f_c_a3": 0, "f_c_a4": 150.0, "start": "2024-06-01", "end": "2027-05-31", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 5.0, "bw_a4": 1933.0, "c_a3": 3.0, "c_a4": 165.0, "scan": 0}, "subtotal": 78.0, "offset": false, "received": 2078.0}}}, {"id": "rt_seed_29", "idx": "-", "name": "財團法人台灣喜信家庭關懷協會", "color": "彩色", "brand": "Fujifilm", "model": "SC2020", "sn": "223950", "ctype": "月租", "rent": 1500.0, "rent_tax": "ex", "rent_offset": false, "p_bw_a3": 0.6, "p_bw_a4": 0.3, "p_c_a3": 6.0, "p_c_a4": 3.0, "p_scan": 0.3, "f_bw_a3": 0, "f_bw_a4": 5000.0, "f_c_a3": 0, "f_c_a4": 0, "start": "2023-05-09", "end": "2026-05-08", "meter": "月", "billing": "月結", "note": "", "readings": {"2026-01": {"reading": null, "use": {"bw_a3": 0, "bw_a4": 1050.0, "c_a3": 0, "c_a4": 465.0, "scan": 0}, "subtotal": 1395.0, "offset": false, "received": 2895.0}}}];
+
+const RENTAL_METER_OPTS   = ['月', '雙月', '季', '半年', '年', '-'];
+const RENTAL_BILLING_OPTS = ['月結', '雙月結', '季結', '半年結', '年結'];
+const RENTAL_BRAND_OPTS   = ['Fujifilm', 'Lexmark', 'HP', 'Ricoh', 'Brother', 'Kyocera', 'Canon'];
+const RENTAL_CTYPE_OPTS   = ['月租', '租機購碳'];
+
+let rtSortState = { key: 'idx', dir: 'asc' };
+let rtYear = 2026; // 明細頁目前檢視的年度
+
+function rentalRent(r) {
+  const v = (r.rent == null || r.rent === '') ? null : +r.rent;
+  return { v, tax: r.rent_tax === 'in' ? 'in' : 'ex', label: r.rent_tax === 'in' ? '含稅' : '未稅' };
+}
+// 合約狀態：以「今天」為基準；到期前 120 天內視為即將到期
+function rentalStatus(r) {
+  if (!r.end) return { k: 'active', label: '生效中', cls: 'green' };
+  const end = new Date(r.end + 'T00:00:00'), base = new Date(today() + 'T00:00:00');
+  const days = (end - base) / 86400000;
+  if (days < 0) return { k: 'ended', label: '已結束', cls: 'red' };
+  if (days <= 90) return { k: 'expiring', label: '即將到期', cls: 'orange' };  // 到期前 3 個月內提醒
+  return { k: 'active', label: '生效中', cls: 'green' };
+}
+// 使用費：各類別 max(0, 本月用量 − 每月贈送) × 單張計費，掃描另計
+function rentalUsageFee(r, use) {
+  use = use || {};
+  const seg = (u, free, price) => Math.max(0, (+u || 0) - (+free || 0)) * (+price || 0);
+  return Math.round(
+    seg(use.bw_a3, r.f_bw_a3, r.p_bw_a3) + seg(use.bw_a4, r.f_bw_a4, r.p_bw_a4) +
+    seg(use.c_a3, r.f_c_a3, r.p_c_a3)   + seg(use.c_a4, r.f_c_a4, r.p_c_a4) +
+    (+use.scan || 0) * (+r.p_scan || 0)
+  );
+}
+function rentalMachine(r) { return [r.brand, r.model].filter(Boolean).join(' '); }
+function rentalRoc(iso) {
+  if (!iso || !iso.includes('-')) return iso || '—';
+  const [y, m, d] = iso.split('-'); return `${+y}/${+m}/${+d}`;
+}
+
+function rentalSortValue(r, key) {
+  switch (key) {
+    case 'idx': { const n = parseFloat(r.idx); return isNaN(n) ? 99999 : n; }
+    case 'name': return r.name || '';
+    case 'machine': return rentalMachine(r);
+    case 'color': return r.color || '';
+    case 'ctype': return r.ctype || '';
+    case 'rent': return rentalRent(r).v || 0;
+    case 'end': return r.end || '';
+    case 'cycle': return (r.meter || '') + (r.billing || '');
+    case 'status': return rentalStatus(r).k;
+    default: return '';
+  }
+}
+
+const RT_COLS = [
+  ['idx', '#'], ['name', '廠商名稱'], ['machine', '機台'], ['color', '類別'],
+  ['ctype', '合約'], ['rent', '月租'], ['end', '合約到期'], ['cycle', '抄表/結帳'], ['status', '狀態']
+];
+
+function viewRentals(v) {
+  const f = route.q;
+  const stat = {
+    total: DB.rentals.length,
+    active: DB.rentals.filter(r => rentalStatus(r).k !== 'ended').length,
+    mrr: DB.rentals.filter(r => rentalStatus(r).k !== 'ended').reduce((s, r) => s + (rentalRent(r).v || 0), 0),
+    expiring: DB.rentals.filter(r => rentalStatus(r).k === 'expiring').length
+  };
+  v.innerHTML = `
+    <div class="stats" style="margin-bottom:14px">
+      <div class="stat"><div class="k">合約總數</div><div class="v">${stat.total}<small>筆</small></div></div>
+      <div class="stat"><div class="k">生效中</div><div class="v">${stat.active}<small>筆</small></div></div>
+      <div class="stat"><div class="k">每月固定月租</div><div class="v">$${money(stat.mrr)}</div></div>
+      <div class="stat ${stat.expiring ? 'alert' : ''}"><div class="k">即將到期</div><div class="v">${stat.expiring}<small>筆 · 3個月內</small></div></div>
+    </div>
+    <div class="toolbar">
+      <div class="grow"><input class="inp" id="rts" placeholder="搜尋廠商 / 品牌 / 機型 / SN…" value="${esc(f.kw || '')}"></div>
+      <select class="inp" id="rtcolor" style="width:110px">
+        <option value="">全部類別</option>
+        <option value="彩色" ${f.color === '彩色' ? 'selected' : ''}>彩色</option>
+        <option value="黑白" ${f.color === '黑白' ? 'selected' : ''}>黑白</option>
+      </select>
+      <select class="inp" id="rtstatus" style="width:130px">
+        <option value="">全部狀態</option>
+        <option value="active" ${f.status === 'active' ? 'selected' : ''}>生效中</option>
+        <option value="expiring" ${f.status === 'expiring' ? 'selected' : ''}>即將到期</option>
+        <option value="ended" ${f.status === 'ended' ? 'selected' : ''}>已結束</option>
+      </select>
+      ${canEdit() ? `<button class="btn primary" onclick="editRental(null)">＋ 新增合約</button>` : ''}
+    </div>
+    <div class="card"><div class="tbl-wrap" id="rtlist"></div></div>`;
+
+  const run = () => {
+    const kw = document.getElementById('rts').value.trim().toLowerCase();
+    const color = document.getElementById('rtcolor').value;
+    const st = document.getElementById('rtstatus').value;
+    let list = DB.rentals.filter(r => {
+      if (color && r.color !== color) return false;
+      if (st && rentalStatus(r).k !== st) return false;
+      if (kw) { const s = (r.name + ' ' + rentalMachine(r) + ' ' + (r.sn || '')).toLowerCase(); if (!s.includes(kw)) return false; }
+      return true;
+    });
+    list = sortRows(list, rtSortState, rentalSortValue);
+    const wrap = document.getElementById('rtlist');
+    if (!DB.rentals.length) {
+      wrap.innerHTML = `<div class="empty"><div class="e">${icon('rental')}</div><h3>還沒有租賃合約</h3>
+        <p>新增第一筆印表機租賃合約</p>${canEdit() ? `<button class="btn primary" onclick="editRental(null)">＋ 新增合約</button>` : ''}</div>`;
+      return;
+    }
+    wrap.innerHTML = `<table class="tbl">
+      <thead><tr>${RT_COLS.map(([k, label]) =>
+        `<th class="sortable ${k === 'rent' ? 'r' : ''}" data-sortkey="${k}">${label}${sortArrow(rtSortState, k)}</th>`).join('')}</tr></thead>
+      <tbody>${list.map(r => {
+        const rent = rentalRent(r), s = rentalStatus(r);
+        const colorTag = r.color === '彩色'
+          ? `<span class="bdg blue plain">彩色</span>` : `<span class="bdg gray plain">黑白</span>`;
+        // 未稅／含稅 顏色區別：未稅=琥珀、含稅=靛藍
+        const taxTag = rent.v == null ? '' :
+          `<span class="bdg ${rent.tax === 'in' ? 'blue' : 'orange'} plain" style="height:16px;font-size:9px;margin-left:5px">${rent.label}</span>`;
+        return `<tr onclick="go('rental/${r.id}')" style="cursor:pointer">
+          <td class="nowrap" style="font-family:var(--mono);color:var(--text-2)">${esc(r.idx || '—')}</td>
+          <td class="nowrap"><b>${esc(r.name)}</b></td>
+          <td class="nowrap">${esc(rentalMachine(r))}<div class="muted" style="font-family:var(--mono);font-size:11px">SN ${esc(r.sn || '—')}</div></td>
+          <td>${colorTag}</td>
+          <td class="nowrap">${esc(r.ctype || '—')}</td>
+          <td class="r nowrap"><b>${rent.v == null ? '—' : '$' + money(rent.v)}</b>${taxTag}</td>
+          <td class="nowrap">${rentalRoc(r.end)}</td>
+          <td class="nowrap">${esc(r.meter || '—')} / ${esc(r.billing || '—')}</td>
+          <td><span class="bdg ${s.cls}">${s.label}</span></td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+    bindTableSort('rtlist', rtSortState, run);
+  };
+  run();
+  const deb = (fn) => { let t; return () => { clearTimeout(t); t = setTimeout(fn, 180); }; };
+  document.getElementById('rts').oninput = deb(run);
+  document.getElementById('rtcolor').onchange = run;
+  document.getElementById('rtstatus').onchange = run;
+}
+
+function editRental(id) {
+  if (!canEdit()) return toast('唯讀模式，無法編輯', 'err');
+  // 新合約的序號預設帶「目前最大號 + 1」，但仍可自行改成任何值（含非數字）
+  const nextIdx = (() => {
+    const nums = (DB.rentals || []).map(x => parseFloat(x.idx)).filter(n => !isNaN(n));
+    return nums.length ? String(Math.max(...nums) + 1) : '1';
+  })();
+  const r = id ? byId(DB.rentals, id) : {
+    id: null, idx: nextIdx, name: '', color: '彩色', brand: 'Fujifilm', model: '', sn: '', ctype: '月租',
+    rent: '', rent_tax: 'ex', rent_offset: false,
+    p_bw_a3: '', p_bw_a4: '', p_c_a3: '', p_c_a4: '', p_scan: '',
+    f_bw_a3: '', f_bw_a4: '', f_c_a3: '', f_c_a4: '',
+    start: '', end: '', meter: '月', billing: '月結', note: '', readings: {}
+  };
+  const opt = (arr, cur) => arr.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('');
+  const nv = x => (x == null || x === '') ? '' : x;
+  openModal({
+    title: id ? '編輯租賃合約' : '新增租賃合約',
+    bodyClass: 'wide',
+    body: `
+      <div class="grid g3">
+        <div class="field"><label>序號 #</label><input class="inp" data-f="idx" value="${esc(r.idx)}"></div>
+        <div class="field"><label class="req">廠商名稱</label><input class="inp" data-f="name" value="${esc(r.name)}" style="min-width:0"></div>
+        <div class="field"><label>類別</label><select class="inp" data-f="color">${opt(['彩色', '黑白'], r.color)}</select></div>
+      </div>
+      <div class="grid g3">
+        <div class="field"><label>品牌</label><input class="inp" data-f="brand" list="rtBrandList" value="${esc(r.brand)}"></div>
+        <div class="field"><label>機型</label><input class="inp" data-f="model" value="${esc(r.model)}"></div>
+        <div class="field"><label>SN 機身序號</label><input class="inp" data-f="sn" value="${esc(r.sn)}"></div>
+      </div>
+      <datalist id="rtBrandList">${RENTAL_BRAND_OPTS.map(b => `<option value="${esc(b)}">`).join('')}</datalist>
+      <div class="grid g3">
+        <div class="field"><label>合約類別</label><input class="inp" data-f="ctype" list="rtCtypeList" value="${esc(r.ctype)}"></div>
+        <div class="field"><label>月租價格</label>
+          <div style="display:flex;gap:6px">
+            <input class="inp" data-f="rent" type="number" step="1" value="${nv(r.rent)}" style="flex:1;min-width:0">
+            <select class="inp" data-f="rent_tax" style="width:82px">
+              <option value="ex" ${r.rent_tax !== 'in' ? 'selected' : ''}>未稅</option>
+              <option value="in" ${r.rent_tax === 'in' ? 'selected' : ''}>含稅</option>
+            </select>
+          </div></div>
+        <div class="field"><label>影印折抵月租</label>
+          <label style="display:flex;align-items:center;gap:8px;height:38px;font-weight:500">
+            <input type="checkbox" data-f="rent_offset" ${r.rent_offset ? 'checked' : ''}> 使用費可折抵月租</label></div>
+      </div>
+      <datalist id="rtCtypeList">${RENTAL_CTYPE_OPTS.map(b => `<option value="${esc(b)}">`).join('')}</datalist>
+      <div class="field" style="margin-bottom:6px"><label style="color:var(--primary);font-weight:700">單張計費 / 每月贈送張數</label></div>
+      <div class="tbl-wrap"><table class="tbl" style="font-size:12px">
+        <thead><tr><th></th><th class="r">黑白 A3</th><th class="r">黑白 A4</th><th class="r">彩色 A3</th><th class="r">彩色 A4</th><th class="r">掃描/傳真</th></tr></thead>
+        <tbody>
+          <tr><td>單張計費</td>
+            <td class="r"><input class="inp rtp" data-f="p_bw_a3" type="number" step="0.01" value="${nv(r.p_bw_a3)}"></td>
+            <td class="r"><input class="inp rtp" data-f="p_bw_a4" type="number" step="0.01" value="${nv(r.p_bw_a4)}"></td>
+            <td class="r"><input class="inp rtp" data-f="p_c_a3" type="number" step="0.01" value="${nv(r.p_c_a3)}"></td>
+            <td class="r"><input class="inp rtp" data-f="p_c_a4" type="number" step="0.01" value="${nv(r.p_c_a4)}"></td>
+            <td class="r"><input class="inp rtp" data-f="p_scan" type="number" step="0.01" value="${nv(r.p_scan)}"></td></tr>
+          <tr><td>每月贈送張數</td>
+            <td class="r"><input class="inp rtp" data-f="f_bw_a3" type="number" step="1" value="${nv(r.f_bw_a3)}"></td>
+            <td class="r"><input class="inp rtp" data-f="f_bw_a4" type="number" step="1" value="${nv(r.f_bw_a4)}"></td>
+            <td class="r"><input class="inp rtp" data-f="f_c_a3" type="number" step="1" value="${nv(r.f_c_a3)}"></td>
+            <td class="r"><input class="inp rtp" data-f="f_c_a4" type="number" step="1" value="${nv(r.f_c_a4)}"></td>
+            <td class="r">—</td></tr>
+        </tbody></table></div>
+      <div class="grid g2" style="margin-top:12px">
+        <div class="field"><label>合約起</label><input class="inp" data-f="start" type="date" value="${esc(r.start || '')}"></div>
+        <div class="field"><label>合約訖</label><input class="inp" data-f="end" type="date" value="${esc(r.end || '')}"></div>
+      </div>
+      <div class="grid g2">
+        <div class="field"><label>抄表週期</label><select class="inp" data-f="meter">${opt(RENTAL_METER_OPTS, r.meter)}</select></div>
+        <div class="field"><label>結帳週期</label><select class="inp" data-f="billing">${opt(RENTAL_BILLING_OPTS, r.billing)}</select></div>
+      </div>
+      <div class="field"><label>備註</label><textarea class="inp" data-f="note">${esc(r.note || '')}</textarea></div>`,
+    footer: `${id ? '<button class="btn danger left" data-del>刪除</button>' : ''}
+             <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-ok]').onclick = () => {
+        const o = {};
+        el.querySelectorAll('[data-f]').forEach(i => {
+          if (i.type === 'checkbox') o[i.dataset.f] = i.checked;
+          else if (i.type === 'number') o[i.dataset.f] = i.value === '' ? null : +i.value;
+          else o[i.dataset.f] = i.value.trim();
+        });
+        if (!o.name) return toast('請填廠商名稱', 'err');
+        if (id) { Object.assign(r, o); }
+        else { DB.rentals.push(Object.assign({ id: uid('rt'), readings: {} }, o)); }
+        save(); close(); render(); toast('已儲存', 'ok');
+      };
+      const d = el.querySelector('[data-del]');
+      if (d) d.onclick = () => confirmBox('刪除租賃合約',
+        `確定刪除「${esc(r.name)}」？<br>連同它的每月抄表與收費紀錄都會一起刪除，無法復原。`, () => {
+          DB.rentals = DB.rentals.filter(x => x.id !== id);
+          save(); close(); go('rentals'); toast('已刪除');
+        }, true);
+    }
+  });
+}
+
+// 明細頁：合約條件 + 指定年度的 12 個月抄表與收費
+function viewRentalDetail(v) {
+  const r = byId(DB.rentals, route.id);
+  document.getElementById('pageTitle').textContent = '印表機租賃';
+  if (!r) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這筆合約</h3><button class="btn" onclick="go('rentals')">← 回租賃清單</button></div>`; return; }
+  const rent = rentalRent(r), s = rentalStatus(r);
+  const priceStr = `黑白 A4 $${r.p_bw_a4 ?? '—'} / A3 $${r.p_bw_a3 ?? '—'}　彩色 A4 $${r.p_c_a4 ?? '—'} / A3 $${r.p_c_a3 ?? '—'}`;
+  const freeStr = `黑白 ${(+r.f_bw_a4 || 0) + (+r.f_bw_a3 || 0)} 張　彩色 ${(+r.f_c_a4 || 0) + (+r.f_c_a3 || 0)} 張`;
+  const kv = (k, val) => `<div class="rt-kv"><span>${k}</span><b>${val}</b></div>`;
+
+  const months = [];
+  for (let m = 1; m <= 12; m++) {
+    const ym = rtYear + '-' + String(m).padStart(2, '0');
+    months.push({ ym, m, rec: (r.readings || {})[ym] || null });
+  }
+  const yearReceived = months.reduce((sum, x) => sum + ((x.rec && +x.rec.received) || 0), 0);
+
+  v.innerHTML = `
+    <div style="margin-bottom:12px"><button class="btn sm ghost" onclick="go('rentals')">← 回租賃清單</button></div>
+    <div class="card" style="margin-bottom:14px"><div class="card-b" style="padding:16px 18px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:18px;font-weight:800">${esc(r.name)}</div>
+          <div class="muted" style="margin-top:3px">${esc(rentalMachine(r))} · <span style="font-family:var(--mono)">SN ${esc(r.sn || '—')}</span>
+            · <span class="bdg ${r.color === '彩色' ? 'blue' : 'gray'} plain">${esc(r.color)}</span>
+            · <span class="bdg ${s.cls}">${s.label}</span></div>
+        </div>
+        ${canEdit() ? `<button class="btn" onclick="editRental('${r.id}')">✎ 編輯合約</button>` : ''}
+      </div>
+      <div class="rt-kvs" style="margin-top:14px">
+        ${kv('合約類別', esc(r.ctype || '—'))}
+        ${kv('月租', rent.v == null ? '—' : `$${money(rent.v)} <span class="bdg ${rent.tax === 'in' ? 'blue' : 'orange'} plain" style="height:16px;font-size:9px">${rent.label}</span>`)}
+        ${kv('影印折抵月租', r.rent_offset ? '是' : '否')}
+        ${kv('合約起訖', `${rentalRoc(r.start)} ~ ${rentalRoc(r.end)}`)}
+        ${kv('抄表 / 結帳', `${esc(r.meter || '—')} / ${esc(r.billing || '—')}`)}
+        ${kv('單張計費', priceStr)}
+        ${kv('每月贈送', freeStr)}
+        ${kv('掃描/傳真', `$${r.p_scan ?? '—'} / 張`)}
+        ${r.note ? kv('備註', esc(r.note)) : ''}
+      </div>
+    </div></div>
+
+    <div class="card"><div class="card-b" style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-weight:700">抄表與收費紀錄</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn sm ghost" onclick="rtYear--;render()">‹</button>
+          <b style="font-family:var(--mono)">${rtYear}</b>
+          <button class="btn sm ghost" onclick="rtYear++;render()">›</button>
+        </div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl" style="font-size:12.5px">
+        <thead><tr>
+          <th>月份</th><th class="r">黑白張數</th><th class="r">彩色張數</th><th class="r">掃描</th>
+          <th class="r">使用小計</th><th class="c">月租折抵</th><th class="r">實收</th>${canEdit() ? '<th></th>' : ''}
+        </tr></thead>
+        <tbody>${months.map(x => {
+          const rec = x.rec, u = (rec && rec.use) || {};
+          const bw = (+u.bw_a3 || 0) + (+u.bw_a4 || 0), co = (+u.c_a3 || 0) + (+u.c_a4 || 0);
+          const empty = !rec;
+          return `<tr class="${empty ? '' : ''}" style="${empty ? 'color:var(--text-3)' : ''}">
+            <td><b>${x.m}月</b></td>
+            <td class="r">${empty ? '—' : (bw || 0).toLocaleString()}</td>
+            <td class="r">${empty ? '—' : (co || 0).toLocaleString()}</td>
+            <td class="r">${empty ? '—' : (+u.scan || 0).toLocaleString()}</td>
+            <td class="r">${rec && rec.subtotal != null ? '$' + money(rec.subtotal) : '—'}</td>
+            <td class="c">${rec && rec.offset ? '<span class="bdg green plain" style="height:16px;font-size:9px">折抵</span>' : '—'}</td>
+            <td class="r"><b>${rec && rec.received != null ? '$' + money(rec.received) : '—'}</b></td>
+            ${canEdit() ? `<td class="r"><button class="btn sm ghost" onclick="editRentalMonth('${r.id}','${x.ym}')">${empty ? '＋ 輸入' : '✎'}</button></td>` : ''}
+          </tr>`;
+        }).join('')}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--line-2);font-weight:800">
+          <td>${rtYear} 年度實收合計</td><td colspan="${canEdit() ? '5' : '5'}"></td><td class="r">$${money(yearReceived)}</td>${canEdit() ? '<td></td>' : ''}
+        </tr></tfoot>
+      </table></div>
+      <div class="muted" style="margin-top:8px;font-size:11px">輸入當月抄表讀數後，系統自動以「本月讀數 − 上月讀數」算出本月用量與使用費；實收金額可自行調整。</div>
+    </div></div>`;
+}
+
+// 單月抄表輸入：手動輸入當月累計讀數 → 自動算本月用量與使用費 → 實收（可改）
+function editRentalMonth(id, ym) {
+  if (!canEdit()) return toast('唯讀模式，無法編輯', 'err');
+  const r = byId(DB.rentals, id); if (!r) return;
+  r.readings = r.readings || {};
+  const rec = r.readings[ym] || { reading: null, use: {}, subtotal: null, offset: r.rent_offset, received: null };
+  // 上月（同一年或跨年前一個月）的累計讀數，用來算本月用量
+  const [yy, mm] = ym.split('-').map(Number);
+  const prevYm = mm === 1 ? `${yy - 1}-12` : `${yy}-${String(mm - 1).padStart(2, '0')}`;
+  const prev = r.readings[prevYm];
+  const prevReading = (prev && prev.reading) || null;
+  const nv = x => (x == null || x === '') ? '' : x;
+  const cats = [['bw_a3', '黑白 A3'], ['bw_a4', '黑白 A4'], ['c_a3', '彩色 A3'], ['c_a4', '彩色 A4'], ['scan', '掃描/傳真']];
+  const cur = rec.reading || {};
+  openModal({
+    title: `${ym.replace('-', '年')}月 抄表 — ${r.name}`,
+    body: `
+      <div class="banner" style="background:var(--primary-050);border:1px solid #C7D2FE;color:#3730A3;padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:12px">
+        ${prevReading ? '輸入本月累計讀數，系統自動算出本月用量與使用費。' :
+          '沒有上月讀數，可直接填「本月用量」（或先填累計讀數，之後月份就能自動相減）。'}
+      </div>
+      <div class="tbl-wrap"><table class="tbl" style="font-size:12px">
+        <thead><tr><th></th>${cats.map(c => `<th class="r">${c[1]}</th>`).join('')}</tr></thead>
+        <tbody>
+          <tr><td>上月累計讀數</td>${cats.map(c => `<td class="r muted">${prevReading && prevReading[c[0]] != null ? prevReading[c[0]] : '—'}</td>`).join('')}</tr>
+          <tr><td>本月累計讀數</td>${cats.map(c => `<td class="r"><input class="inp rtr" data-r="${c[0]}" type="number" step="1" value="${nv(cur[c[0]])}"></td>`).join('')}</tr>
+          <tr style="background:var(--bg-2)"><td><b>本月用量</b></td>${cats.map(c => `<td class="r"><b class="rtuse" data-u="${c[0]}">${rec.use && rec.use[c[0]] != null ? rec.use[c[0]] : 0}</b></td>`).join('')}</tr>
+        </tbody></table></div>
+      <div class="grid g3" style="margin-top:12px;align-items:end">
+        <div class="field"><label>使用小計（自動）</label><input class="inp" id="rtSub" type="number" value="${nv(rec.subtotal)}"></div>
+        <div class="field"><label>月租折抵</label>
+          <label style="display:flex;align-items:center;gap:8px;height:38px;font-weight:500">
+            <input type="checkbox" id="rtOff" ${rec.offset ? 'checked' : ''}> 使用費折抵月租</label></div>
+        <div class="field"><label>實收（可改）</label><input class="inp" id="rtRecv" type="number" value="${nv(rec.received)}"></div>
+      </div>
+      <div class="muted" style="font-size:11px">本月用量可手動填：直接改「本月用量」欄亦可（沒有累計讀數時）。</div>`,
+    footer: `${r.readings[ym] ? '<button class="btn danger left" data-clr>清除本月</button>' : ''}
+             <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
+    onMount(el, close) {
+      const useEls = {}; el.querySelectorAll('.rtuse').forEach(b => useEls[b.dataset.u] = b);
+      const readReadings = () => {
+        const o = {}; let any = false;
+        el.querySelectorAll('.rtr').forEach(i => { if (i.value !== '') { o[i.dataset.r] = +i.value; any = true; } });
+        return any ? o : null;
+      };
+      const recompute = () => {
+        const reading = readReadings();
+        const use = {};
+        cats.forEach(([k]) => {
+          if (reading && reading[k] != null && prevReading && prevReading[k] != null)
+            use[k] = Math.max(0, reading[k] - prevReading[k]);
+          else use[k] = (rec.use && rec.use[k] != null) ? rec.use[k] : 0;
+        });
+        // 若填了讀數但沒上月基準，本月用量先等於讀數（首次建立基準時可自行調整用量欄）
+        cats.forEach(([k]) => { useEls[k].textContent = use[k]; });
+        const sub = rentalUsageFee(r, use);
+        el.querySelector('#rtSub').value = sub;
+        const base = rentalRent(r).v || 0;
+        const off = el.querySelector('#rtOff').checked;
+        el.querySelector('#rtRecv').value = off ? Math.max(base, sub) : base + sub;
+        return use;
+      };
+      el.querySelectorAll('.rtr').forEach(i => i.oninput = recompute);
+      el.querySelector('#rtOff').onchange = recompute;
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-ok]').onclick = () => {
+        const reading = readReadings();
+        const use = {};
+        cats.forEach(([k]) => {
+          if (reading && reading[k] != null && prevReading && prevReading[k] != null)
+            use[k] = Math.max(0, reading[k] - prevReading[k]);
+          else use[k] = +useEls[k].textContent || 0;
+        });
+        r.readings[ym] = {
+          reading,
+          use,
+          subtotal: el.querySelector('#rtSub').value === '' ? null : +el.querySelector('#rtSub').value,
+          offset: el.querySelector('#rtOff').checked,
+          received: el.querySelector('#rtRecv').value === '' ? null : +el.querySelector('#rtRecv').value
+        };
+        save(); close(); render(); toast('已儲存', 'ok');
+      };
+      const clr = el.querySelector('[data-clr]');
+      if (clr) clr.onclick = () => { delete r.readings[ym]; save(); close(); render(); toast('已清除'); };
+    }
+  });
+}
+
 const ROUTES = [
   { k: 'dash',      t: '總覽',     ico: 'dash', tab: true  },
   { k: 'quotes',    t: '報價管理', ico: 'quote', tab: true  },
   { k: 'deliveries',t: '出貨管理', ico: 'delivery', tab: true  },
   { k: 'customers', t: '客戶管理', ico: 'customer', tab: true  },
+  { k: 'rentals',   t: '印表機租賃', ico: 'rental', tab: false, group: '主檔' },
   { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '主檔' },
   { k: 'users',     t: '業務管理', ico: 'user', tab: false, group: '主檔' },
   { k: 'suppliers', t: '常用代理商', ico: 'supplier', tab: false, group: '主檔' },
@@ -3681,6 +4133,7 @@ function render() {
     dash: viewDash, quotes: viewQuotes, quote: viewQuote,
     deliveries: viewDeliveries, delivery: viewDelivery,
     customers: viewCustomers, products: viewProducts,
+    rentals: viewRentals, rental: viewRentalDetail,
     suppliers: viewSuppliers, users: viewUsers, settings: viewSettings,
     accounts: viewAccounts
   })[route.k];
@@ -3736,7 +4189,7 @@ function renderNav() {
       html += `<div class="nav-group"><div class="nav-label">${r.group}</div></div>`;
       lastGroup = r.group;
     }
-    const active = route.k === r.k || (route.k === 'quote' && r.k === 'quotes') || (route.k === 'delivery' && r.k === 'deliveries');
+    const active = route.k === r.k || (route.k === 'quote' && r.k === 'quotes') || (route.k === 'delivery' && r.k === 'deliveries') || (route.k === 'rental' && r.k === 'rentals');
     const cnt = (r.k === 'deliveries' && pend) ? `<span class="count">${pend}</span>` : '';
     html += `<div class="nav-item ${active ? 'active' : ''}" onclick="go('${r.k}')">
                <span class="ico">${icon(r.ico)}</span><span>${r.t}</span>${cnt}</div>`;
