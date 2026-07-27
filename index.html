@@ -2852,11 +2852,11 @@ function initCostDefault() {
 /* ===========================================================
    浮動自動完成（品名 / 客戶共用）
    =========================================================== */
-let acHost = null, acSel = -1, acItems = [], acOpenedAt = 0;
+let acHost = null, acSel = -1, acItems = [], acOpenedAt = 0, acPick = null, acReopen = null;
 
 function closeFloatAC() {
   if (acHost) { acHost.remove(); acHost = null; }
-  acSel = -1; acItems = [];
+  acSel = -1; acItems = []; acPick = null; acReopen = null;
 }
 
 function floatAC(input, searchFn, pickFn) {
@@ -2913,22 +2913,12 @@ function floatAC(input, searchFn, pickFn) {
       }
     }
     acOpenedAt = Date.now(); // 記錄這次定位的時間，用來分辨接下來的捲動是不是面板自己造成的
+    // 記住「目前開著的這個面板」要用哪個函式重繪與帶入，讓文件層級的鍵盤處理不依賴焦點也能操作
+    acReopen = open; acPick = pickFn;
   };
   input.addEventListener('focus', () => { acSel = -1; open(); });
   input.addEventListener('input', () => { acSel = -1; open(); });
   input.addEventListener('blur', () => setTimeout(closeFloatAC, 120));
-  input.addEventListener('keydown', e => {
-    if (!acHost) return;
-    // 中文注音/拼音輸入法組字中，上下鍵是輸入法自己在選候選字，不要跟它搶，
-    // 不然會變成「打中文時上下鍵完全沒反應」——這是最容易忽略的自動完成元件通病
-    if (e.isComposing || e.keyCode === 229) return;
-    if (e.key === 'ArrowDown') { acSel = Math.min(acSel + 1, acItems.length - 1); e.preventDefault(); open(); }
-    else if (e.key === 'ArrowUp') { acSel = Math.max(acSel - 1, 0); e.preventDefault(); open(); }
-    else if (e.key === 'Enter') {
-      if (acSel >= 0) { e.preventDefault(); pickFn(acItems[acSel]); closeFloatAC(); }
-    }
-    else if (e.key === 'Escape') closeFloatAC();
-  });
 }
 // 捲動頁面（不是面板內部捲動）才關閉候選視窗，避免使用者在面板裡捲動找選項時視窗突然消失
 window.addEventListener('scroll', e => {
@@ -2937,6 +2927,27 @@ window.addEventListener('scroll', e => {
   closeFloatAC();
 }, true);
 window.addEventListener('resize', closeFloatAC);
+
+// 只要候選面板開著，就在「文件層級 + 捕獲階段」接管上下鍵／Enter／Esc，
+// 不管焦點在哪、滑鼠有沒有在面板裡，都由這裡控制選取，並且擋掉瀏覽器預設的捲動（拉霸）行為。
+// 用捕獲階段(true)確保比輸入框、數字欄位的預設處理更早攔到。
+document.addEventListener('keydown', e => {
+  if (!acHost || !acItems.length) return;
+  // 中文注音／拼音組字中，上下鍵是輸入法在選候選字，不要跟它搶
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.key === 'ArrowDown') {
+    acSel = acSel < acItems.length - 1 ? acSel + 1 : 0;   // 到底循環回第一筆
+    e.preventDefault(); e.stopPropagation(); if (acReopen) acReopen();
+  } else if (e.key === 'ArrowUp') {
+    acSel = acSel > 0 ? acSel - 1 : acItems.length - 1;   // 到頂循環到最後一筆
+    e.preventDefault(); e.stopPropagation(); if (acReopen) acReopen();
+  } else if (e.key === 'Enter') {
+    if (acSel >= 0 && acItems[acSel] && acPick) { e.preventDefault(); e.stopPropagation(); const row = acItems[acSel], pick = acPick; closeFloatAC(); pick(row); }
+  } else if (e.key === 'Escape') {
+    // 只關面板本身，不要讓 Esc 繼續傳到「關閉彈窗」的監聽
+    e.preventDefault(); e.stopPropagation(); closeFloatAC();
+  }
+}, true);
 
 /* ===========================================================
    圖示庫 —— 線條風格 SVG，內嵌不依賴外部圖示庫／CDN
