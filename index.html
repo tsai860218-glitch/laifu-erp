@@ -1495,6 +1495,9 @@ function fbInit() {
     firebase.initializeApp(FIREBASE_CONFIG);
     fbAuth = firebase.auth();
     fbDb = firebase.firestore();
+    // 明確要求「本機持久化」，讓登入狀態在重新整理／關掉分頁後仍保留，不用每次重新登入。
+    // （這本來就是 Firebase 網頁版的預設值，這裡明寫一次當保險，失敗也不影響後續流程。）
+    fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(e => console.warn('設定登入持久化失敗（不影響使用）', e));
   } catch (e) {
     console.error('Firebase 初始化失敗，改用本機模式', e);
     firstResolved = true; localFallback = true;
@@ -2018,8 +2021,17 @@ function save() {
     if (FIREBASE_ENABLED && fbUser) localStorage.setItem(PENDING_SYNC_KEY, '1');
   }
   catch (e) {
-    toast('本機儲存失敗：瀏覽器空間已滿。請到「設定」匯出備份後清理舊資料。', 'err');
+    // localStorage 每個網域上限約 5MB，整個資料庫序列化成一個鍵，加上公司 logo／印章／品牌圖
+    // 都是 base64 存在資料庫裡，累積久了最容易撐爆的就是這裡。
     console.error(e);
+    if (FIREBASE_ENABLED && fbUser) {
+      // 雲端是主要儲存，資料仍會同步上去，不會遺失——別叫使用者刪資料，只提醒本機離線快取滿了
+      toast('本機離線快取已滿，資料仍會同步到雲端（不影響儲存）。建議把公司 logo／印章換成較小的圖片以釋放空間。', 'err');
+      // 純本機模式才需要 PENDING 標記；雲端會直接排程同步，這裡不設 PENDING（因為本機根本沒寫成功）
+    } else {
+      // 純本機模式：localStorage 是唯一副本，滿了就真的存不進去，必須先清空間
+      toast('本機儲存失敗：瀏覽器空間已滿。請到「設定」匯出備份，並縮小公司 logo／印章圖片或清理舊資料。', 'err');
+    }
   }
   scheduleFirestoreSync();
   return true;
@@ -2888,7 +2900,17 @@ function floatAC(input, searchFn, pickFn) {
     });
     if (acSel >= 0) {
       const selEl = acHost.querySelector('.ac-item.sel');
-      if (selEl) selEl.scrollIntoView({ block: 'nearest' });
+      // 只捲動面板自己，不要用 scrollIntoView——它會連帶把整個頁面視窗捲一下，
+      // 而頁面一捲動就會觸發下面「捲動頁面即關閉候選視窗」的監聽，害面板被關掉，
+      // 表現出來就是「鍵盤上下鍵選擇沒反應」。手動捲面板就完全不會動到視窗。
+      if (selEl) {
+        const hd = acHost.querySelector('.ac-float-hd');
+        const hdH = hd ? hd.offsetHeight : 0;   // sticky 提示列會蓋住內容，往上捲時要多留它的高度
+        const itemTop = selEl.offsetTop, itemBottom = itemTop + selEl.offsetHeight;
+        if (itemTop - hdH < acHost.scrollTop) acHost.scrollTop = itemTop - hdH;
+        else if (itemBottom > acHost.scrollTop + acHost.clientHeight)
+          acHost.scrollTop = itemBottom - acHost.clientHeight;
+      }
     }
     acOpenedAt = Date.now(); // 記錄這次定位的時間，用來分辨接下來的捲動是不是面板自己造成的
   };
@@ -4965,7 +4987,13 @@ function fillFromProduct(it, p) {
     is_optional: !!c.is_optional, is_included: true,
     supplier_name: c.supplier_name || '', in_stock: c.in_stock !== false
   }));
-  if (!it.components.length && !it.supplier_name) it.supplier_name = '';
+  // 單一商品（非組合品）：把商品主檔的進貨廠商一起帶入。
+  // 主檔有設進貨廠商 → 視為需向廠商叫貨（in_stock=false），這樣進貨廠商欄位才會顯示並填入；
+  // 主檔沒設廠商就維持「公司有庫存」的預設，不強制顯示廠商欄。組合品的廠商在各組件裡逐項帶。
+  if (!it.components.length) {
+    it.supplier_name = p.default_supplier || '';
+    if (p.default_supplier) it.in_stock = false;
+  }
   save();
 }
 
@@ -6960,6 +6988,20 @@ function deliveryPaper(d) {
 let cSelected = new Set();
 let cFilteredList = [];
 
+let cSortState = { key: null, dir: 'asc' };
+function customerSortValue(c, key) {
+  switch (key) {
+    case 'name': return c.name || '';
+    case 'tax_id': return c.tax_id || '';
+    case 'site': { const d = defaultSite(c); return d ? (d.label || d.contact_person || '') : ''; }
+    case 'phone': { const d = defaultSite(c); return d ? (d.phone || '') : ''; }
+    case 'company': { const co = byId(DB.companies, c.default_company_id); return co ? (co.badge || co.code || '') : ''; }
+    case 'sales': { const u = c.default_sales_user_id ? byId(DB.users, c.default_sales_user_id) : null; return u ? u.name : ''; }
+    case 'quotes': return DB.quotes.filter(q => q.customer_id === c.id).length;
+    default: return '';
+  }
+}
+
 function viewCustomers(v) {
   cSelected.clear();
   v.innerHTML = `
@@ -6981,9 +7023,11 @@ function viewCustomers(v) {
       return (c.sites || []).some(s => (s.label + s.contact_person + s.phone + s.address).toLowerCase().includes(kw));
     });
     cFilteredList = list;
+    list = sortRows(list, cSortState, customerSortValue);
     const info = paginateList('customers', list, resetPage);
     const page = info.pageItems;
     const allChecked = page.length && page.every(c => cSelected.has(c.id));
+    const th = (key, label, cls) => `<th class="sortable ${cls || ''}" data-sortkey="${key}">${label}${sortArrow(cSortState, key)}</th>`;
     keepScroll('clist');
     document.getElementById('clist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('customer')}</div><h3>沒有客戶</h3>
@@ -6992,7 +7036,7 @@ function viewCustomers(v) {
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
               onclick="toggleSelAll('c', this.checked, ${esc(JSON.stringify(page.map(c => c.id)))})"></th>
-          <th>客戶名稱</th><th>統一編號</th><th>聯絡窗口／廠區</th><th>電話</th><th>預設公司</th><th>預設業務</th><th class="c">報價數</th>
+          ${th('name', '客戶名稱')}${th('tax_id', '統一編號')}${th('site', '聯絡窗口／廠區')}${th('phone', '電話')}${th('company', '預設公司')}${th('sales', '預設業務')}${th('quotes', '報價數', 'c')}
         </tr></thead><tbody>
         ${page.map(c => {
           const n = DB.quotes.filter(q => q.customer_id === c.id).length;
@@ -7013,6 +7057,7 @@ function viewCustomers(v) {
         }).join('')}</tbody></table>`;
     document.getElementById('cPageBar').innerHTML = list.length ? pageBarHtml('customers', info) : '';
     makeColumnsResizable('clist', 'customers');
+    bindTableSort('clist', cSortState, () => run());
     updateBulkBar('c');
   };
   registerPageRunner('customers', run);
