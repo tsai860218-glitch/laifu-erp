@@ -392,6 +392,7 @@ body.col-resizing *{cursor:col-resize!important}
 .fi-r .f-br{flex:0 0 96px}
 .fi-r .f-nm{flex:1;min-width:0;font-weight:500}
 .fi-r .f-sp{flex:1;min-width:0}
+textarea.f-sp{min-height:38px;line-height:1.5;resize:vertical;overflow:hidden;white-space:pre-wrap;font-family:inherit}
 .fi-r .f-un{flex:0 0 62px}
 .fi-r .f-src{flex:0 0 118px}
 .fi-r .f-cost{flex:0 0 92px}
@@ -498,7 +499,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-tbl .r{text-align:right;font-family:var(--mono)}
 .pp-tbl .item-brand{font-size:7.8pt;color:#333}
 .pp-tbl .pn{font-family:var(--mono);font-size:7.5pt;color:#333;word-break:break-all}
-.pp-tbl .sp{font-size:7.5pt;color:#333;margin-top:.4mm;line-height:1.35}
+.pp-tbl .sp{font-size:7.5pt;color:#333;margin-top:.4mm;line-height:1.35;white-space:pre-wrap}
 .pp-tbl tr.blank td{height:7.4mm}
 
 .pp-sum{display:flex;gap:4mm;margin-top:3mm;align-items:stretch}
@@ -562,7 +563,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-tbl .r{text-align:right;font-family:var(--mono)}
 .dp-tbl .pn{font-family:var(--mono);font-size:6.5pt;word-break:break-all}
 .dp-tbl .item-brand{font-size:6.8pt;color:#333}
-.dp-tbl .sp{font-size:6.5pt;color:#333;line-height:1.3}
+.dp-tbl .sp{font-size:6.5pt;color:#333;line-height:1.3;white-space:pre-wrap}
 .dp-tbl .asm-note-tag{font-size:6pt;background:#FFF2E5;color:#C2410C;border-radius:.6mm;padding:0 .8mm;margin-right:.6mm;font-weight:700}
 .dp-tbl .sm{font-size:6.5pt}
 .dp-tbl .mut{color:#888}
@@ -1867,7 +1868,7 @@ function firestoreListen() {
         else { if (lidx >= 0) larr[lidx] = data; else larr.push(data); }
         appliedAny = true;
       });
-      if (appliedAny) { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} }
+      if (appliedAny) { try { localStorage.setItem(KEY, slimCacheString()); } catch (e) {} }
       safeRerender(remoteChanges, col);
     });
   });
@@ -1880,7 +1881,7 @@ function firestoreListen() {
     Object.keys(remote).forEach(k => { merged[k] = Math.max(+merged[k] || 0, +remote[k] || 0); });
     DB.counters = merged;
     _lastSynced.counters = JSON.parse(JSON.stringify(remote));
-    try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {}
+    try { localStorage.setItem(KEY, slimCacheString()); } catch (e) {}
   });
   fbDb.collection('meta').doc('settings').onSnapshot(doc => {
     if (doc.metadata.hasPendingWrites || !doc.exists) return;
@@ -2024,8 +2025,10 @@ function promptOperator(force) {
 
 // 本機離線快取字串：有雲端時把公司大圖（base64 的 logo/印章/品牌圖）拿掉，快取才不會撐爆
 // localStorage（正本在雲端，重整後圖片會補回來）。純本機模式圖片是唯一副本，照原樣保留。
-function slimCacheString() {
-  if (!(FIREBASE_ENABLED && fbUser)) return JSON.stringify(DB);
+function slimCacheString(force) {
+  // force=true 一律去掉公司大圖（用於「完整版塞不下」時的退路）；
+  // 否則沿用原規則：有設定雲端就精簡（正本在雲端），純本機保留完整。
+  if (!force && !FIREBASE_ENABLED) return JSON.stringify(DB);
   const slim = Object.assign({}, DB, {
     companies: (DB.companies || []).map(c =>
       Object.assign({}, c, { logo_url: '', stamp_url: '', brand_logos: [] }))
@@ -2044,6 +2047,16 @@ function restoreCompanyImagesFrom(remote) {
     if ((!c.brand_logos || !c.brand_logos.length) && Array.isArray(r.brand_logos) && r.brand_logos.length)
       c.brand_logos = r.brand_logos.slice();
   });
+}
+
+// 本機空間已滿的提醒：同一個分頁最多只跳一次紅字，避免每次存檔都洗畫面
+let _quotaWarned = false;
+function warnQuotaOnce(dataSaved) {
+  if (_quotaWarned) return;
+  _quotaWarned = true;
+  toast(dataSaved
+    ? '本機空間已滿：資料已保留，但公司 logo／印章可能沒存進本機。建議到「設定」把 logo／印章換成較小的圖片。'
+    : '本機空間已滿，存檔失敗。請到「設定」匯出備份，並縮小公司 logo／印章圖片或清理舊資料。', 'err');
 }
 
 function save() {
@@ -2071,15 +2084,20 @@ function save() {
   const cloudOn = FIREBASE_ENABLED && fbUser;
   try {
     localStorage.setItem(KEY, slimCacheString());
-    if (cloudOn) localStorage.setItem(PENDING_SYNC_KEY, '1');
+    if (cloudOn) { try { localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (_) {} }
   }
   catch (e) {
     console.error(e);
-    if (cloudOn) {
-      // 已經去掉大圖還是滿（極少見）：資料仍會同步到雲端，不會遺失，這裡就不打擾使用者了
+    if (FIREBASE_ENABLED) {
+      // 有設定雲端：主要寫入已是精簡版（不含大圖）還爆，代表資料本身超過瀏覽器上限。
+      // 雲端才是正本，資料不會遺失，這裡靜默清掉過大的舊快取即可，不打擾使用者。
+      try { localStorage.removeItem(KEY); } catch (_) {}
     } else {
-      // 純本機模式：localStorage 是唯一副本，滿了就真的存不進去，必須先清空間
-      toast('本機儲存失敗：瀏覽器空間已滿。請到「設定」匯出備份，並縮小公司 logo／印章圖片或清理舊資料。', 'err');
+      // 純本機模式：主要寫入是完整版（含圖片）。退一步只存「不含圖片」的精簡版，
+      // 至少把其他資料保住；並提醒一次（同一個分頁不重複洗紅字）。
+      let saved = false;
+      try { localStorage.setItem(KEY, slimCacheString(true)); saved = true; } catch (_) {}
+      warnQuotaOnce(saved);
     }
   }
   scheduleFirestoreSync();
@@ -3992,7 +4010,7 @@ function viewRentalDetail(v) {
       </div>
       <div class="tbl-wrap"><table class="tbl" style="font-size:12.5px">
         <thead><tr>
-          <th>月份</th><th class="r">黑白張數</th><th class="r">彩色張數</th><th class="r">掃描</th>
+          <th>月份</th><th class="r">黑白張數</th>${mono ? '' : '<th class="r">彩色張數</th>'}<th class="r">掃描</th>
           <th class="r">使用小計</th><th class="c">月租折抵</th><th class="r">實收</th>${canEdit() ? '<th></th>' : ''}
         </tr></thead>
         <tbody>${months.map(x => {
@@ -4002,7 +4020,7 @@ function viewRentalDetail(v) {
           return `<tr class="${empty ? '' : ''}" style="${empty ? 'color:var(--text-3)' : ''}">
             <td><b>${x.m}月</b></td>
             <td class="r">${empty ? '—' : (bw || 0).toLocaleString()}</td>
-            <td class="r">${empty ? '—' : (co || 0).toLocaleString()}</td>
+            ${mono ? '' : `<td class="r">${empty ? '—' : (co || 0).toLocaleString()}</td>`}
             <td class="r">${empty ? '—' : (+u.scan || 0).toLocaleString()}</td>
             <td class="r">${rec && rec.subtotal != null ? '$' + money(rec.subtotal) : '—'}</td>
             <td class="c">${rec && rec.offset ? '<span class="bdg green plain" style="height:16px;font-size:9px">折抵</span>' : '—'}</td>
@@ -4011,7 +4029,7 @@ function viewRentalDetail(v) {
           </tr>`;
         }).join('')}</tbody>
         <tfoot><tr style="border-top:2px solid var(--line-2);font-weight:800">
-          <td>${rtYear} 年度實收合計</td><td colspan="${canEdit() ? '5' : '5'}"></td><td class="r">$${money(yearReceived)}</td>${canEdit() ? '<td></td>' : ''}
+          <td>${rtYear} 年度實收合計</td><td colspan="${mono ? '4' : '5'}"></td><td class="r">$${money(yearReceived)}</td>${canEdit() ? '<td></td>' : ''}
         </tr></tfoot>
       </table></div>
       <div class="muted" style="margin-top:8px;font-size:11px">輸入當月抄表讀數後，系統自動以「本月讀數 − 上月讀數」算出本月用量與使用費；實收金額可自行調整。</div>
@@ -4030,7 +4048,10 @@ function editRentalMonth(id, ym) {
   const prev = r.readings[prevYm];
   const prevReading = (prev && prev.reading) || null;
   const nv = x => (x == null || x === '') ? '' : x;
-  const cats = [['bw_a3', '黑白 A3'], ['bw_a4', '黑白 A4'], ['c_a3', '彩色 A3'], ['c_a4', '彩色 A4'], ['scan', '掃描/傳真']];
+  const mono = r.color === '黑白';
+  // 黑白機種：單月抄表視窗只顯示黑白 A3/A4 與掃描，隱藏彩色欄
+  const cats = [['bw_a3', '黑白 A3'], ['bw_a4', '黑白 A4'], ['c_a3', '彩色 A3'], ['c_a4', '彩色 A4'], ['scan', '掃描/傳真']]
+    .filter(c => !mono || !c[0].startsWith('c_'));
   const cur = rec.reading || {};
   openModal({
     title: `${ym.replace('-', '年')}月 抄表 — ${r.name}`,
@@ -5691,15 +5712,13 @@ function drawItems() {
       it[k] = e.target.type === 'checkbox' ? e.target.checked
             : (e.target.type === 'number' ? (+e.target.value || 0) : e.target.value);
       // 清空品名 → 解除與主檔的連結，讓這一列變回可重新搜尋、重新選取主檔的自由列
-      // （否則會殘留舊的 product_id：單價被鎖、還顯示「主檔」，等於得新增一列才能重挑）
-      if (k === 'name' && it.product_id && !e.target.value.trim()) {
-        it.product_id = null;
-        save(); drawItems();
-        const again = box.querySelector(`[data-fi="${it.id}"][data-k="name"]`);
-        if (again) again.focus();
-        return;
-      }
+      if (k === 'name' && it.product_id && !e.target.value.trim()) it.product_id = null;
       save();
+      // 料號 / 品名一有變動，就即時更新「＋ 存入主檔 / 主檔」狀態（只換那一小塊，不重繪整列、不打斷輸入）
+      if (k === 'name' || k === 'part_no') {
+        const w = document.getElementById('fimaster-' + it.id);
+        if (w) w.innerHTML = itemMasterWidget(it, editable);
+      }
       if (k === 'default_cost') drawTotals();
       if (k === 'in_stock') drawItems();
     });
@@ -5801,20 +5820,6 @@ function drawItems() {
   if (editable) {
     box.querySelectorAll('[data-ac]').forEach(inp => {
       const it = byId(q.items, inp.dataset.ac);
-      // 目前的料號＋品名是否對應到某個內建產品
-      const matchState = () => {
-        const nm = (it.name || '').trim(), pn = (it.part_no || '').trim();
-        const m = p => !!p && nm !== '' && (p.name || '').trim() === nm && (p.part_no || '').trim() === pn;
-        const linked = it.product_id ? byId(DB.products, it.product_id) : null;
-        return m(linked) || DB.products.some(p => p.is_active && m(p));
-      };
-      let wasIn = matchState();
-      // 改完料號/品名離開欄位時，若「是否對應主檔」的狀態變了就重繪，
-      // 讓「＋ 存入主檔」按鈕（或「主檔」標籤）即時出現/消失。狀態沒變則不重繪，不打斷輸入。
-      inp.addEventListener('change', () => {
-        const nowIn = matchState();
-        if (nowIn !== wasIn) drawItems(); else wasIn = nowIn;
-      });
       floatAC(inp,
         kw => {
           if (!kw) return [];
@@ -5835,6 +5840,25 @@ function drawItems() {
     });
   }
   drawTotals();
+  box.querySelectorAll('textarea.f-sp').forEach(t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; });
+}
+
+// 這一列目前的料號＋品名是否對應到某個內建產品（用於「＋ 存入主檔 / 主檔」的即時判斷）
+function itemMatchesMaster(it) {
+  const nm = (it.name || '').trim(), pn = (it.part_no || '').trim();
+  if (!nm) return false;
+  const m = p => !!p && (p.name || '').trim() === nm && (p.part_no || '').trim() === pn;
+  const linked = it.product_id ? byId(DB.products, it.product_id) : null;
+  return m(linked) || DB.products.some(p => p.is_active && m(p));
+}
+// 依目前內容決定顯示「＋ 存入主檔」按鈕或「主檔」標籤：
+// 只要有品名、且目前料號＋品名不對應任何內建產品（含帶入後被修改、或整段刪掉重打），就給按鈕。
+function itemMasterWidget(it, editable) {
+  if (itemMatchesMaster(it))
+    return '<span class="bdg green plain" style="height:20px;font-size:10px">主檔</span>';
+  if (editable && (it.name || '').trim())
+    return `<button class="btn sm ghost" onclick="saveFreeToMaster('${it.id}')" title="下次報價就能直接搜到">＋ 存入主檔</button>`;
+  return '';
 }
 
 function itemRow(it, n, editable, taxIncl, inclAmt) {
@@ -5843,13 +5867,6 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
   const hasBom = it.components && it.components.length;
   const open = bomOpen[it.id];
   const priceEditable = editable && (DB.settings.allow_price_edit || !it.product_id);
-  // 「已對應內建產品」以目前的料號＋品名是否仍與主檔某個產品一致來判斷（而非只看 product_id）。
-  // 這樣即使原本從主檔帶入、之後又手動改掉或刪除料號/品名，只要不再對應內建產品，
-  // 就會顯示「＋ 存入主檔」，可把修改後的內容新增為新產品。
-  const _nm = (it.name || '').trim(), _pn = (it.part_no || '').trim();
-  const _matches = p => !!p && _nm !== '' && (p.name || '').trim() === _nm && (p.part_no || '').trim() === _pn;
-  const _linked = it.product_id ? byId(DB.products, it.product_id) : null;
-  const inMaster = _matches(_linked) || DB.products.some(p => p.is_active && _matches(p));
   const refProduct = it.product_id ? byId(DB.products, it.product_id) : null;
   const refPrice = refProduct ? refProduct.list_price : 0;
 
@@ -5865,10 +5882,11 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
             placeholder="請輸入料號或品名搜尋" value="${esc(it.name || '')}" autocomplete="off" ${D}>
         </div>
         <div class="fi-r">
-          <input class="inp f-sp" data-fi="${it.id}" data-k="spec" placeholder="規格" value="${esc(it.spec || '')}" ${D}>
+          <textarea class="inp f-sp" data-fi="${it.id}" data-k="spec" placeholder="規格（可換行，每行一項）" rows="1" ${D}
+            oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'">${esc(it.spec || '')}</textarea>
           <input class="inp f-un" data-fi="${it.id}" data-k="unit" placeholder="單位" value="${esc(it.unit || '')}" ${D}>
         </div>
-        ${itemMeta(it, editable, inMaster)}
+        ${itemMeta(it, editable)}
         ${hasBom ? `<button class="bom-toggle" onclick="toggleBom('${it.id}')">
           ${open ? '▾' : '▸'} 內部組成 ${it.components.filter(c => c.is_included !== false).length} 項${costOn ? '' : '（成本已隱藏）'}</button>` : ''}
         ${!hasBom ? `<button class="bom-toggle" onclick="toggleAsm('${it.id}')">
@@ -5896,7 +5914,7 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
 }
 
 // 內部資訊：來源 / 成本 / 代理商（自由輸入 + 常用帶入）
-function itemMeta(it, editable, inMaster) {
+function itemMeta(it, editable) {
   const D = editable ? '' : 'disabled';
   if (it.components && it.components.length) {
     return `<div class="fi-meta"><div class="fi-r" style="flex:1">
@@ -5921,9 +5939,7 @@ function itemMeta(it, editable, inMaster) {
                    title="把這個廠商加進常用清單">＋常用</button>` : ''}`)
         : `<span class="fi-lock">成本與廠商已隱藏</span>`}
     </div>
-    ${editable && !inMaster && (it.name || '').trim()
-      ? `<button class="btn sm ghost" onclick="saveFreeToMaster('${it.id}')" title="下次報價就能直接搜到">＋ 存入主檔</button>`
-      : (inMaster ? '<span class="bdg green plain" style="height:20px;font-size:10px">主檔</span>' : '')}
+    <span class="fi-master" id="fimaster-${it.id}">${itemMasterWidget(it, editable)}</span>
   </div>`;
 }
 
@@ -6137,7 +6153,7 @@ function openSaveFreeToMasterModal(id) {
         <div class="field"><label>品牌</label><input class="inp" data-f="brand" value="${esc(it.brand || '')}"></div>
       </div>
       <div class="field"><label class="req">品名</label><input class="inp" data-f="name" value="${esc(it.name)}"></div>
-      <div class="field"><label>規格</label><input class="inp" data-f="spec" value="${esc(it.spec || '')}"></div>
+      <div class="field"><label>規格</label><textarea class="inp" data-f="spec" rows="2" placeholder="可換行，每行一項">${esc(it.spec || '')}</textarea></div>
       <div class="grid g3">
         <div class="field"><label>單位</label><input class="inp" data-f="unit" value="${esc(it.unit || '台')}"></div>
         <div class="field"><label>牌價（未稅）</label><input class="inp num" type="number" data-f="list_price" value="${it.unit_price}"></div>
