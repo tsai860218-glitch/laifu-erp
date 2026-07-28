@@ -584,6 +584,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-kv-row .dp-kv.half{flex:1;min-width:0}
 .dp-kv span{color:#666;flex:0 0 13mm}
 .dp-kv b{font-weight:700;min-width:0;word-break:break-word}
+.dp-kv b.dp-note-hl{color:#D0021B;font-weight:800;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .dp-sum-r{flex:0 0 46mm;border:.4pt solid #7A8AA5;border-radius:1mm;overflow:hidden;align-self:flex-start}
 .dp-sl{display:flex;justify-content:space-between;padding:.7mm 1.6mm;font-size:7.3pt;border-bottom:.4pt solid #DDD}
 .dp-sl span{color:#555}
@@ -2647,7 +2648,7 @@ const SHIP_INIT_STATUS = {
   '其他':        'pending_delivery'
 };
 function shipInitStatus(method) { return SHIP_INIT_STATUS[method] || 'pending_delivery'; }
-const INVOICE_METHODS = ['隨貨', '通知後開立'];
+const INVOICE_METHODS = ['隨貨', '通知後開立', '郵寄正本', '其他'];
 const PAY_METHODS     = ['現金', '匯款', '即期支票', '附回郵', '月結', '貨到付款'];
 
 /* ===========================================================
@@ -6684,7 +6685,7 @@ function exportDeliveriesExcel() {
       '開單人員': d.created_by || '',
       '狀態': DS[d.status] ? DS[d.status].label : d.status,
       '送貨方式': d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : (d.shipping_method || ''),
-      '發票方式': d.invoice_method || '',
+      '發票方式': d.invoice_method === '其他' ? (d.invoice_method_other || '其他') : (d.invoice_method || ''),
       '付款方式': d.payment_method || '',
       '已開發票': d.invoiced ? '是' : '否',
       '發票號碼': d.invoice_no || '',
@@ -6818,6 +6819,9 @@ function viewDelivery(v) {
             <div class="field ${d.shipping_method === '其他' ? '' : 'hide'}" id="shipOther">
               <label>配送方式說明</label>
               <input class="inp" data-d="shipping_method_other" value="${esc(d.shipping_method_other || '')}" ${editable ? '' : 'disabled'}></div>
+            <div class="field ${d.invoice_method === '其他' ? '' : 'hide'}" id="invOther">
+              <label>發票方式說明</label>
+              <input class="inp" data-d="invoice_method_other" value="${esc(d.invoice_method_other || '')}" placeholder="請說明發票方式" ${editable ? '' : 'disabled'}></div>
             <div class="grid g2">
               <div class="field"><label>附件</label>
                 <textarea class="inp" data-d="attachment" ${editable ? '' : 'disabled'}>${esc(d.attachment || '')}</textarea></div>
@@ -6855,6 +6859,8 @@ function viewDelivery(v) {
     save();
     if (el.dataset.d === 'shipping_method')
       document.getElementById('shipOther').classList.toggle('hide', el.value !== '其他');
+    if (el.dataset.d === 'invoice_method')
+      document.getElementById('invOther').classList.toggle('hide', el.value !== '其他');
   }));
 
   drawDvItems(); drawDvTotals();
@@ -7513,11 +7519,11 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
             <div class="dp-kv half"><span>送貨地址</span><b>${esc(d.ship_address || c.address || '')}</b></div>
             <div class="dp-kv half"><span>交貨單位</span><b>${esc(d.delivery_target || '—')}${d.delivery_contact ? '　聯絡人：' + esc(d.delivery_contact) : ''}</b></div>
           </div>
-          <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method || '')}</b></div>
+          <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method === '其他' ? (d.invoice_method_other || '其他') : (d.invoice_method || ''))}</b></div>
           <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
           ${d.invoice_note ? `<div class="dp-kv"><span>發票備註</span><b>${esc(d.invoice_note)}</b></div>` : ''}
           ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
-          ${d.note ? `<div class="dp-kv"><span>備註</span><b>${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
+          ${d.note ? `<div class="dp-kv"><span>備註</span><b class="dp-note-hl">${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
         </div>
         <div class="dp-sum-r">
           <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
