@@ -2618,9 +2618,7 @@ const DS = {
 // 初始狀態由「配送方式」決定（見 SHIP_INIT_STATUS）：貨到公司／貨到公司組裝／業務親送＝待配送；
 // 代理商直送／貨運＝已出貨。流程本身固定三態，跟品項是否需組裝／叫貨無關。
 function dsFlow(dv) {
-  // 代理商直送／貨運：一開單就是已出貨，流程只有 已出貨 ▸ 結案；其餘：待配送 ▸ 已出貨 ▸ 結案。
-  // 以「配送方式」決定（而非當前狀態），這樣推進到已出貨後，步驟條仍能顯示走過的待配送。
-  if (dv && shipInitStatus(dv.shipping_method) === 'shipped') return ['shipped', 'closed'];
+  // 一律：待配送 ▸ 已出貨 ▸ 結案（開單一律待配送，配送方式不影響流程）
   return ['pending_delivery', 'shipped', 'closed'];
 }
 // 主列 + BOM 子列（出貨要看的所有實體）
@@ -3963,8 +3961,8 @@ function viewRentalDetail(v) {
     : `黑白 A4 $${pv(r.p_bw_a4)} / A3 $${pv(r.p_bw_a3)}　彩色 A4 $${pv(r.p_c_a4)} / A3 $${pv(r.p_c_a3)}`;
   // 每月贈送張數拆成四項分開顯示（黑白機種只顯示黑白 A3/A4）
   const freeStr = mono
-    ? `黑白 A3 ${+r.f_bw_a3 || 0}　黑白 A4 ${+r.f_bw_a4 || 0} 張`
-    : `黑白 A3 ${+r.f_bw_a3 || 0}　黑白 A4 ${+r.f_bw_a4 || 0}　彩色 A3 ${+r.f_c_a3 || 0}　彩色 A4 ${+r.f_c_a4 || 0} 張`;
+    ? `黑白：A3 ${+r.f_bw_a3 || 0} 張、A4 ${+r.f_bw_a4 || 0} 張`
+    : `黑白：A3 ${+r.f_bw_a3 || 0} 張、A4 ${+r.f_bw_a4 || 0} 張　　彩色：A3 ${+r.f_c_a3 || 0} 張、A4 ${+r.f_c_a4 || 0} 張`;
   const kv = (k, val) => `<div class="rt-kv"><span>${k}</span><b>${val}</b></div>`;
 
   const months = [];
@@ -6243,7 +6241,7 @@ function startDelivery(qid) {
         <select class="inp" data-f="shipping_method" id="dvShip">
           ${SHIP_METHODS.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
         </select>
-        <div class="hint" id="dvShipHint">貨到公司／貨到公司組裝／業務親送 → 開單後為「待配送」；代理商直送／貨運 → 開單即「已出貨」。</div></div>
+        <div class="hint" id="dvShipHint">開立後狀態為「待配送」，配送完成再推進到「已出貨」、最後「結案」。</div></div>
       <div class="field" id="dvShipOtherWrap" style="display:none"><label>其他配送方式說明</label>
         <input class="inp" data-f="shipping_method_other" placeholder="請說明配送方式"></div>
       <div class="field"><label>備註</label>
@@ -6255,10 +6253,7 @@ function startDelivery(qid) {
       const hint = el.querySelector('#dvShipHint');
       const syncShip = () => {
         otherWrap.style.display = shipSel.value === '其他' ? '' : 'none';
-        const init = shipInitStatus(shipSel.value);
-        hint.textContent = init === 'shipped'
-          ? '此配送方式開單即為「已出貨」。'
-          : '此配送方式開單後為「待配送」，配送完成再推進到「已出貨」。';
+        hint.textContent = '開立後狀態為「待配送」，配送完成再推進到「已出貨」、最後「結案」。';
       };
       shipSel.onchange = syncShip; syncShip();
       el.querySelector('[data-no]').onclick = close;
@@ -6312,9 +6307,8 @@ function makeDelivery(q, co, o) {
     invoiced: false, invoice_date: '', invoice_no: '', customer_po: '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
-  // 初始狀態由配送方式決定：代理商直送／貨運＝已出貨；其餘＝待配送
-  dv.status = shipInitStatus(dv.shipping_method);
-  if (dv.status === 'shipped') dv.shipped_at = new Date().toISOString();
+  // 一律以「待配送」開單；配送方式只作記錄，不再影響初始狀態
+  dv.status = 'pending_delivery';
   DB.deliveries.push(dv);
   save();
   _quoteDirty = { id: null, at: 0 }; // 這是剛確認過的動作，不是不小心離開，不要再跳一次確認
