@@ -221,6 +221,8 @@ body.col-resizing *{cursor:col-resize!important}
 .rt-kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;border-bottom:1px dashed var(--line);padding-bottom:6px;min-width:0}
 .rt-kv span{color:var(--text-2);white-space:nowrap}
 .rt-kv b{font-weight:700;text-align:right;min-width:0}
+.rtp{width:66px;text-align:right}
+.rt-price-tbl.mono .rt-cc{display:none}
 @media(max-width:640px){.rt-kvs{grid-template-columns:1fr}}
 
 /* Stats */
@@ -3860,7 +3862,7 @@ function editRental(id) {
         <div class="field"><label>合約類別</label><input class="inp" data-f="ctype" list="rtCtypeList" value="${esc(r.ctype)}"></div>
         <div class="field"><label>月租價格</label>
           <div style="display:flex;gap:6px">
-            <input class="inp" data-f="rent" type="number" step="1" value="${nv(r.rent)}" style="flex:1;min-width:0">
+            <input class="inp" data-f="rent" type="number" step="1" value="${nv(r.rent)}" style="flex:1;min-width:82px">
             <select class="inp" data-f="rent_tax" style="width:82px">
               <option value="ex" ${r.rent_tax !== 'in' ? 'selected' : ''}>未稅</option>
               <option value="in" ${r.rent_tax === 'in' ? 'selected' : ''}>含稅</option>
@@ -3872,20 +3874,20 @@ function editRental(id) {
       </div>
       <datalist id="rtCtypeList">${RENTAL_CTYPE_OPTS.map(b => `<option value="${esc(b)}">`).join('')}</datalist>
       <div class="field" style="margin-bottom:6px"><label style="color:var(--primary);font-weight:700">單張計費 / 每月贈送張數</label></div>
-      <div class="tbl-wrap"><table class="tbl" style="font-size:12px">
-        <thead><tr><th></th><th class="r">黑白 A3</th><th class="r">黑白 A4</th><th class="r">彩色 A3</th><th class="r">彩色 A4</th><th class="r">掃描/傳真</th></tr></thead>
+      <div class="tbl-wrap"><table class="tbl rt-price-tbl ${r.color === '黑白' ? 'mono' : ''}" id="rtPriceTbl" style="font-size:12px">
+        <thead><tr><th></th><th class="r">黑白 A3</th><th class="r">黑白 A4</th><th class="r rt-cc">彩色 A3</th><th class="r rt-cc">彩色 A4</th><th class="r">掃描/傳真</th></tr></thead>
         <tbody>
           <tr><td>單張計費</td>
             <td class="r"><input class="inp rtp" data-f="p_bw_a3" type="number" step="0.01" value="${nv(r.p_bw_a3)}"></td>
             <td class="r"><input class="inp rtp" data-f="p_bw_a4" type="number" step="0.01" value="${nv(r.p_bw_a4)}"></td>
-            <td class="r"><input class="inp rtp" data-f="p_c_a3" type="number" step="0.01" value="${nv(r.p_c_a3)}"></td>
-            <td class="r"><input class="inp rtp" data-f="p_c_a4" type="number" step="0.01" value="${nv(r.p_c_a4)}"></td>
+            <td class="r rt-cc"><input class="inp rtp" data-f="p_c_a3" type="number" step="0.01" value="${nv(r.p_c_a3)}"></td>
+            <td class="r rt-cc"><input class="inp rtp" data-f="p_c_a4" type="number" step="0.01" value="${nv(r.p_c_a4)}"></td>
             <td class="r"><input class="inp rtp" data-f="p_scan" type="number" step="0.01" value="${nv(r.p_scan)}"></td></tr>
           <tr><td>每月贈送張數</td>
             <td class="r"><input class="inp rtp" data-f="f_bw_a3" type="number" step="1" value="${nv(r.f_bw_a3)}"></td>
             <td class="r"><input class="inp rtp" data-f="f_bw_a4" type="number" step="1" value="${nv(r.f_bw_a4)}"></td>
-            <td class="r"><input class="inp rtp" data-f="f_c_a3" type="number" step="1" value="${nv(r.f_c_a3)}"></td>
-            <td class="r"><input class="inp rtp" data-f="f_c_a4" type="number" step="1" value="${nv(r.f_c_a4)}"></td>
+            <td class="r rt-cc"><input class="inp rtp" data-f="f_c_a3" type="number" step="1" value="${nv(r.f_c_a3)}"></td>
+            <td class="r rt-cc"><input class="inp rtp" data-f="f_c_a4" type="number" step="1" value="${nv(r.f_c_a4)}"></td>
             <td class="r">—</td></tr>
         </tbody></table></div>
       <div class="grid g2" style="margin-top:12px">
@@ -3901,6 +3903,13 @@ function editRental(id) {
              <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
     onMount(el, close) {
       el.querySelector('[data-no]').onclick = close;
+      // 黑白機種：單張計費/贈送張數表只顯示黑白＋掃描，彩色欄自動隱藏；切換類別即時反映
+      const colorSel = el.querySelector('[data-f="color"]');
+      const priceTbl = el.querySelector('#rtPriceTbl');
+      if (colorSel && priceTbl) {
+        const syncMono = () => priceTbl.classList.toggle('mono', colorSel.value === '黑白');
+        colorSel.onchange = syncMono; syncMono();
+      }
       el.querySelector('[data-ok]').onclick = () => {
         const o = {};
         el.querySelectorAll('[data-f]').forEach(i => {
@@ -3929,8 +3938,15 @@ function viewRentalDetail(v) {
   document.getElementById('pageTitle').textContent = '印表機租賃';
   if (!r) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這筆合約</h3><button class="btn" onclick="go('rentals')">← 回租賃清單</button></div>`; return; }
   const rent = rentalRent(r), s = rentalStatus(r);
-  const priceStr = `黑白 A4 $${r.p_bw_a4 ?? '—'} / A3 $${r.p_bw_a3 ?? '—'}　彩色 A4 $${r.p_c_a4 ?? '—'} / A3 $${r.p_c_a3 ?? '—'}`;
-  const freeStr = `黑白 ${(+r.f_bw_a4 || 0) + (+r.f_bw_a3 || 0)} 張　彩色 ${(+r.f_c_a4 || 0) + (+r.f_c_a3 || 0)} 張`;
+  const mono = r.color === '黑白';
+  const pv = x => (x == null || x === '') ? '—' : x;
+  const priceStr = mono
+    ? `黑白 A4 $${pv(r.p_bw_a4)} / A3 $${pv(r.p_bw_a3)}`
+    : `黑白 A4 $${pv(r.p_bw_a4)} / A3 $${pv(r.p_bw_a3)}　彩色 A4 $${pv(r.p_c_a4)} / A3 $${pv(r.p_c_a3)}`;
+  // 每月贈送張數拆成四項分開顯示（黑白機種只顯示黑白 A3/A4）
+  const freeStr = mono
+    ? `黑白 A3 ${+r.f_bw_a3 || 0}　黑白 A4 ${+r.f_bw_a4 || 0} 張`
+    : `黑白 A3 ${+r.f_bw_a3 || 0}　黑白 A4 ${+r.f_bw_a4 || 0}　彩色 A3 ${+r.f_c_a3 || 0}　彩色 A4 ${+r.f_c_a4 || 0} 張`;
   const kv = (k, val) => `<div class="rt-kv"><span>${k}</span><b>${val}</b></div>`;
 
   const months = [];
@@ -5785,6 +5801,20 @@ function drawItems() {
   if (editable) {
     box.querySelectorAll('[data-ac]').forEach(inp => {
       const it = byId(q.items, inp.dataset.ac);
+      // 目前的料號＋品名是否對應到某個內建產品
+      const matchState = () => {
+        const nm = (it.name || '').trim(), pn = (it.part_no || '').trim();
+        const m = p => !!p && nm !== '' && (p.name || '').trim() === nm && (p.part_no || '').trim() === pn;
+        const linked = it.product_id ? byId(DB.products, it.product_id) : null;
+        return m(linked) || DB.products.some(p => p.is_active && m(p));
+      };
+      let wasIn = matchState();
+      // 改完料號/品名離開欄位時，若「是否對應主檔」的狀態變了就重繪，
+      // 讓「＋ 存入主檔」按鈕（或「主檔」標籤）即時出現/消失。狀態沒變則不重繪，不打斷輸入。
+      inp.addEventListener('change', () => {
+        const nowIn = matchState();
+        if (nowIn !== wasIn) drawItems(); else wasIn = nowIn;
+      });
       floatAC(inp,
         kw => {
           if (!kw) return [];
@@ -5813,7 +5843,13 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
   const hasBom = it.components && it.components.length;
   const open = bomOpen[it.id];
   const priceEditable = editable && (DB.settings.allow_price_edit || !it.product_id);
-  const inMaster = !!it.product_id;
+  // 「已對應內建產品」以目前的料號＋品名是否仍與主檔某個產品一致來判斷（而非只看 product_id）。
+  // 這樣即使原本從主檔帶入、之後又手動改掉或刪除料號/品名，只要不再對應內建產品，
+  // 就會顯示「＋ 存入主檔」，可把修改後的內容新增為新產品。
+  const _nm = (it.name || '').trim(), _pn = (it.part_no || '').trim();
+  const _matches = p => !!p && _nm !== '' && (p.name || '').trim() === _nm && (p.part_no || '').trim() === _pn;
+  const _linked = it.product_id ? byId(DB.products, it.product_id) : null;
+  const inMaster = _matches(_linked) || DB.products.some(p => p.is_active && _matches(p));
   const refProduct = it.product_id ? byId(DB.products, it.product_id) : null;
   const refPrice = refProduct ? refProduct.list_price : 0;
 
