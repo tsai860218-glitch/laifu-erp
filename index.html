@@ -802,14 +802,10 @@ body.st-q-completed .main{background:#F8F5FC}
 body.st-q-expired .main{background:#FFF4F4}
 body.st-q-cancelled .main{background:#F5F5F5}
 
-/* 出貨：待叫貨→已叫貨→待組裝→已組裝→待配送→已出貨→已完成 */
-body.st-d-pending_order .main{background:#FFF3F3}
-body.st-d-ordered .main{background:#FFF8EC}
-body.st-d-pending_assembly .main{background:#FFF6E9}
-body.st-d-assembled .main{background:#EEF5FF}
-body.st-d-pending_delivery .main{background:#F1F4FF}
-body.st-d-shipped .main{background:#EEFAFA}
-body.st-d-completed .main{background:#F0FBF4}
+/* 出貨：待配送→已出貨→結案 */
+body.st-d-pending_delivery .main{background:#FFF6E9}
+body.st-d-shipped .main{background:#EEF5FF}
+body.st-d-closed .main{background:#F0FBF4}
 
 /* ============================================================
    總覽表：可排序表頭 + 公司配色列
@@ -1930,8 +1926,28 @@ function safeRerender(changes, col) {
     return;
   }
   if (col && !relevantToCurrentView(col)) return;
+  scheduleRemoteRender();
+}
+
+// 使用者是不是正在輸入（游標在輸入框/下拉/可編輯區裡）
+function isEditingFocus() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const t = el.tagName;
+  return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || el.isContentEditable === true;
+}
+// 遠端同步觸發的重繪：如果使用者正在打字（或自動完成面板開著），先不要重繪，
+// 等他停手/離開欄位再繪，避免多人同時使用時「打到一半畫面跳掉、游標亂跑」。
+function scheduleRemoteRender() {
   clearTimeout(_renderDebounce);
-  _renderDebounce = setTimeout(render, 400);
+  const tryRender = () => {
+    if (isEditingFocus() || (typeof acHost !== 'undefined' && acHost) || (typeof modalStack !== 'undefined' && modalStack.length)) {
+      _renderDebounce = setTimeout(tryRender, 800);   // 還在輸入/有彈窗，晚點再試
+      return;
+    }
+    render();
+  };
+  _renderDebounce = setTimeout(tryRender, 400);
 }
 
 
@@ -1945,7 +1961,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 15;                    // ← 每次改結構就 +1
+const SCHEMA_V = 16;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -2493,6 +2509,20 @@ function migrate(db) {
     }
   }
 
+  if (v < 16) {
+    // 出貨流程簡化：待叫貨/已叫貨/待組裝/已組裝/待配送 → 待配送；已出貨 → 已出貨；已完成 → 結案
+    const MAP = {
+      pending_order: 'pending_delivery', ordered: 'pending_delivery',
+      pending_assembly: 'pending_delivery', assembled: 'pending_delivery',
+      pending_delivery: 'pending_delivery', shipped: 'shipped',
+      completed: 'closed', closed: 'closed', cancelled: 'cancelled'
+    };
+    (db.deliveries || []).forEach(d => {
+      d.status = MAP[d.status] || 'pending_delivery';
+      if (d.completed_at && !d.closed_at) d.closed_at = d.completed_at;
+    });
+  }
+
   db.rentals = db.rentals || [];
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
@@ -2536,7 +2566,7 @@ function companyColor(co) {
 }
 
 // 動作按鈕配色（登記下單／開立出貨單／狀態推進），避免相鄰按鈕顏色混淆
-const ACTION_COLOR = { order: 'act-teal', create: 'act-indigo', shipped: 'act-orange', completed: 'act-green' };
+const ACTION_COLOR = { order: 'act-teal', create: 'act-indigo', shipped: 'act-orange', completed: 'act-green', closed: 'act-green' };
 
 /* ===========================================================
    §7 狀態機
@@ -2558,27 +2588,22 @@ const ORDER_METHODS = {
 };
 
 const DS = {
-  pending_order:    { label: '待叫貨', color: 'red'    },
-  ordered:          { label: '已叫貨', color: 'orange' },
-  pending_assembly: { label: '待組裝', color: 'orange' },
-  assembled:        { label: '已組裝', color: 'blue'   },
   pending_delivery: { label: '待配送', color: 'orange' },
-  shipped:          { label: '已出貨', color: 'green'  },
-  completed:        { label: '已完成', color: 'green'  },
+  shipped:          { label: '已出貨', color: 'blue'   },
+  closed:           { label: '結案',   color: 'green'  },
   cancelled:        { label: '已取消', color: 'gray'   }
 };
 
-// 無需組裝 → 跳過組裝兩態；全部有庫 → 跳過叫貨
+// 簡化後的出貨流程：待配送 ▸ 已出貨 ▸ 結案。
+// 初始狀態由「配送方式」決定（見 SHIP_INIT_STATUS）：貨到公司／貨到公司組裝／業務親送＝待配送；
+// 代理商直送／貨運＝已出貨。流程本身固定三態，跟品項是否需組裝／叫貨無關。
 function dsFlow(dv) {
-  const needAsm = allLines(dv).some(i => i.need_assembly);
-  const needBuy = allLines(dv).some(i => !i.in_stock);
-  const f = [];
-  if (needBuy) f.push('pending_order', 'ordered');
-  if (needAsm) f.push('pending_assembly', 'assembled');
-  f.push('pending_delivery', 'shipped', 'completed');
-  return f;
+  // 代理商直送／貨運：一開單就是已出貨，流程只有 已出貨 ▸ 結案；其餘：待配送 ▸ 已出貨 ▸ 結案。
+  // 以「配送方式」決定（而非當前狀態），這樣推進到已出貨後，步驟條仍能顯示走過的待配送。
+  if (dv && shipInitStatus(dv.shipping_method) === 'shipped') return ['shipped', 'closed'];
+  return ['pending_delivery', 'shipped', 'closed'];
 }
-// 主列 + BOM 子列（採購要看的所有實體）
+// 主列 + BOM 子列（出貨要看的所有實體）
 function allLines(dv) {
   const out = [];
   (dv.items || []).forEach(i => {
@@ -2593,7 +2618,17 @@ function dsNext(dv) {
 }
 function dsFirst(dv) { return dsFlow(dv)[0]; }
 
-const SHIP_METHODS    = ['貨運', '代理商直送', '公司親送', '客戶自取', '其他'];
+// 六種配送方式，以及每種對應的初始出貨狀態
+const SHIP_METHODS    = ['代理商直送', '貨到公司', '貨到公司組裝', '貨運', '業務親送', '其他'];
+const SHIP_INIT_STATUS = {
+  '代理商直送': 'shipped',          // 廠商直接送到客戶，開單即已出貨
+  '貨運':       'shipped',          // 走貨運，開單即已出貨
+  '貨到公司':     'pending_delivery',
+  '貨到公司組裝': 'pending_delivery', // 組裝併入待配送，不另立組裝狀態
+  '業務親送':     'pending_delivery',
+  '其他':        'pending_delivery'
+};
+function shipInitStatus(method) { return SHIP_INIT_STATUS[method] || 'pending_delivery'; }
 const INVOICE_METHODS = ['隨貨', '通知後開立'];
 const PAY_METHODS     = ['現金', '匯款', '即期支票', '附回郵', '月結', '貨到付款'];
 
@@ -3661,6 +3696,32 @@ function rentalRoc(iso) {
   const [y, m, d] = iso.split('-'); return `${+y}/${+m}/${+d}`;
 }
 
+// 租賃月報匯出 Excel：以目前檢視年度，一列一合約，帶合約資料與 1~12 月實收與年度合計
+function exportRentalReport() {
+  if (!DB.rentals || !DB.rentals.length) return toast('目前沒有租賃合約可匯出', 'err');
+  const year = rtYear;
+  const rows = DB.rentals.map(r => {
+    const rent = rentalRent(r), s = rentalStatus(r);
+    const row = {
+      '序號': r.idx || '', '廠商名稱': r.name || '', '機台': rentalMachine(r), 'SN': r.sn || '',
+      '類別': r.color || '', '合約類別': r.ctype || '',
+      '月租': rent.v == null ? '' : rent.v, '稅別': rent.v == null ? '' : rent.label,
+      '抄表': r.meter || '', '結帳': r.billing || '',
+      '合約起': rentalRoc(r.start), '合約訖': rentalRoc(r.end), '狀態': s.label
+    };
+    let yearSum = 0;
+    for (let m = 1; m <= 12; m++) {
+      const rec = (r.readings || {})[year + '-' + String(m).padStart(2, '0')];
+      const recv = rec && rec.received != null ? rec.received : null;
+      row[m + '月實收'] = recv == null ? '' : recv;
+      if (recv != null) yearSum += recv;
+    }
+    row['年度實收合計'] = yearSum;
+    return row;
+  });
+  exportExcelRows(rows, year + '租賃月報', '印表機租賃月報_' + year + '.xlsx');
+}
+
 function rentalSortValue(r, key) {
   switch (key) {
     case 'idx': { const n = parseFloat(r.idx); return isNaN(n) ? 99999 : n; }
@@ -3710,6 +3771,8 @@ function viewRentals(v) {
         <option value="ended" ${f.status === 'ended' ? 'selected' : ''}>已結束</option>
       </select>
       ${canEdit() ? `<button class="btn primary" onclick="editRental(null)">＋ 新增合約</button>` : ''}
+      ${columnsButton('rtlist')}
+      <button class="btn" onclick="exportRentalReport()">⬇ 匯出月報 Excel</button>
     </div>
     <div class="card"><div class="tbl-wrap" id="rtlist"></div></div>`;
 
@@ -3753,6 +3816,7 @@ function viewRentals(v) {
         </tr>`;
       }).join('')}</tbody></table>`;
     bindTableSort('rtlist', rtSortState, run);
+    applyColVis('rtlist');
   };
   run();
   const deb = (fn) => { let t; return () => { clearTimeout(t); t = setTimeout(fn, 180); }; };
@@ -4150,6 +4214,7 @@ function render() {
   // 同一頁的重繪也要保留表格的橫向捲動位置，理由跟上面保留垂直位置一樣：
   // 使用者可能正把捲軸拉在右邊操作後面的欄位，被彈回最左邊就沒辦法用了
   const scrolls = isNavigation ? null : snapshotScrolls();
+  const winY = isNavigation ? 0 : window.scrollY;   // 同頁重繪（含遠端同步觸發）保留整頁捲動位置，避免列表跳動
   try { fn(v); }
   catch (e) {
     console.error(e);
@@ -4158,6 +4223,7 @@ function render() {
   }
   restoreScrolls(scrolls);
   if (isNavigation) window.scrollTo(0, 0);
+  else if (winY) window.scrollTo(0, winY);
 }
 
 // 報價/出貨單「詳情頁」依目前所在的步驟給不同底色，且刻意避開跟當下會出現的
@@ -4165,8 +4231,7 @@ function render() {
 // 讓按鈕在畫面上夠明顯，同時每個步驟一眼就能分辨。
 const STAGE_CLASSES = [
   'st-q-draft', 'st-q-sent', 'st-q-signed', 'st-q-completed', 'st-q-expired', 'st-q-cancelled',
-  'st-d-pending_order', 'st-d-ordered', 'st-d-pending_assembly', 'st-d-assembled',
-  'st-d-pending_delivery', 'st-d-shipped', 'st-d-completed'
+  'st-d-pending_delivery', 'st-d-shipped', 'st-d-closed'
 ];
 function applyStageColor() {
   document.body.classList.remove(...STAGE_CLASSES);
@@ -4181,7 +4246,7 @@ function applyStageColor() {
 
 function renderNav() {
   markExpired();
-  const pend = DB.deliveries.filter(d => d.status === 'pending_order').length;
+  const pend = DB.deliveries.filter(d => d.status === 'pending_delivery').length;
   const nav = document.getElementById('nav');
   let html = '', lastGroup = null;
   ROUTES.filter(r => !r.adminOnly || isAdmin()).forEach(r => {
@@ -4244,7 +4309,11 @@ function viewDash(v) {
   const toShip = DB.quotes.filter(q => q.status === 'signed'
     && !DB.deliveries.some(d => d.quote_id === q.id && d.status !== 'cancelled')).length;
   const shippedToday = DB.deliveries.filter(d => d.shipped_at && d.shipped_at.slice(0, 10) === td).length;
-  const pendingOrder = DB.deliveries.filter(d => d.status === 'pending_order').length;
+  const pendingDeliver = DB.deliveries.filter(d => d.status === 'pending_delivery').length;
+  // 印表機租賃：本月應收月租（生效中合約的月租合計）與 3 個月內即將到期數
+  const rtActive = (DB.rentals || []).filter(r => rentalStatus(r).k !== 'ended');
+  const rtMonthly = rtActive.reduce((s, r) => s + (rentalRent(r).v || 0), 0);
+  const rtExpiring = (DB.rentals || []).filter(r => rentalStatus(r).k === 'expiring').length;
 
   const mQuotes = DB.quotes.filter(q => (q.quote_date || '').slice(0, 7) === ym && !isDraftNo(q.quote_no));
   const mDeals = mQuotes.filter(q => ['signed', 'partially_shipped', 'completed'].includes(q.status));
@@ -4254,11 +4323,10 @@ function viewDash(v) {
 
   const noOrder = DB.quotes.filter(q => q.status === 'sent' && q.sent_at && (Date.now() - new Date(q.sent_at)) > 7 * 864e5);
   const expSoon = DB.quotes.filter(q => q.status === 'sent' && q.valid_until && q.valid_until >= td && q.valid_until <= addDays(td, 3));
-  const stuck = DB.deliveries.filter(d => d.status === 'pending_order' && d.created_at && (Date.now() - new Date(d.created_at)) > 2 * 864e5);
   const alerts = [];
   if (noOrder.length) alerts.push({ c: 'red', t: `${noOrder.length} 張報價已送出超過 7 天未下單`, h: 'quotes?status=sent' });
   if (expSoon.length) alerts.push({ c: 'red', t: `${expSoon.length} 張報價 3 天內到期`, h: 'quotes?status=sent' });
-  if (stuck.length) alerts.push({ c: 'orange', t: `${stuck.length} 張出貨單待叫貨超過 2 天`, h: 'deliveries?status=pending_order' });
+  if (rtExpiring) alerts.push({ c: 'orange', t: `${rtExpiring} 筆租賃合約 3 個月內到期`, h: 'rentals?status=expiring' });
 
   v.innerHTML = `
     ${alerts.length ? `<div class="sec-title">待辦提醒</div>
@@ -4270,7 +4338,13 @@ function viewDash(v) {
       <div class="stat click" onclick="go('quotes')"><div class="k">今日新增報價</div><div class="v">${todayQuotes}<small>張</small></div></div>
       <div class="stat click ${toShip ? 'alert' : ''}" onclick="go('quotes?status=signed')"><div class="k">已下單待開出貨</div><div class="v">${toShip}<small>張</small></div></div>
       <div class="stat click" onclick="go('deliveries')"><div class="k">今日已出貨</div><div class="v">${shippedToday}<small>張</small></div></div>
-      <div class="stat click ${pendingOrder ? 'alert' : ''}" onclick="go('deliveries?status=pending_order')"><div class="k">待叫貨</div><div class="v">${pendingOrder}<small>張</small></div></div>
+      <div class="stat click ${pendingDeliver ? 'alert' : ''}" onclick="go('deliveries?status=pending_delivery')"><div class="k">待配送</div><div class="v">${pendingDeliver}<small>張</small></div></div>
+    </div>
+
+    <div class="sec-title">印表機租賃</div>
+    <div class="stats">
+      <div class="stat click" onclick="go('rentals')"><div class="k">本月應收月租</div><div class="v">$${money(rtMonthly)}</div></div>
+      <div class="stat click ${rtExpiring ? 'alert' : ''}" onclick="go('rentals?status=expiring')"><div class="k">即將到期</div><div class="v">${rtExpiring}<small>筆 · 3個月內</small></div></div>
     </div>
 
     <div class="sec-title">本月（${ym.replace('-', ' / ')}）</div>
@@ -4566,6 +4640,85 @@ const Q_COLS = [
   ['created_by', '建立人員'], ['edit_log', '異動紀錄']
 ];
 
+/* ===========================================================
+   表格自訂欄位顯示/隱藏 —— 每個人各自記住（存這台瀏覽器的 localStorage），不上雲端、不影響別人
+   用 nth-child 注入 CSS 隱藏對應的 th/td；欄位定義與表格內 td 的順序一一對應。
+   =========================================================== */
+const CUST_COLS = [
+  ['name', '客戶名稱'], ['tax_id', '統一編號'], ['site', '聯絡窗口／廠區'], ['phone', '電話'],
+  ['company', '預設公司'], ['sales', '預設業務'], ['quotes', '報價數']
+];
+const PROD_COLS = [
+  ['fav', '★ 我的最愛'], ['part_no', '料號'], ['name', '品名'], ['brand', '品牌'], ['category', '分類'],
+  ['supplier', '進貨廠商'], ['cost', '成本'], ['price', '牌價'], ['bom', 'BOM'], ['note', '備註']
+];
+// 用函式做延遲查表：D_COLS / RT_COLS 定義在檔案後面，執行期呼叫時它們都已初始化
+function getColDefs(id) {
+  return ({
+    qlist: Q_COLS,
+    dlist: (typeof D_COLS !== 'undefined' ? D_COLS : []),
+    rtlist: (typeof RT_COLS !== 'undefined' ? RT_COLS : []),
+    clist: CUST_COLS,
+    plist: PROD_COLS
+  })[id] || [];
+}
+function colStoreKey(id) { return 'erp_cols_hidden_' + id; }
+function getHiddenCols(id) {
+  try { return new Set(JSON.parse(localStorage.getItem(colStoreKey(id)) || '[]')); }
+  catch (e) { return new Set(); }
+}
+function setHiddenCols(id, set) {
+  try { localStorage.setItem(colStoreKey(id), JSON.stringify([...set])); } catch (e) {}
+}
+function applyColVis(wrapId) {
+  const cols = getColDefs(wrapId);
+  const styleId = 'colvis-style-' + wrapId;
+  let style = document.getElementById(styleId);
+  const wrap = document.getElementById(wrapId);
+  const table = wrap && wrap.querySelector('table');
+  if (!table) { if (style) style.textContent = ''; return; }
+  const thCount = table.querySelectorAll('thead th').length;
+  const offset = Math.max(0, thCount - cols.length); // 前置欄（例如勾選框）造成的位移
+  const hidden = getHiddenCols(wrapId);
+  const rules = [];
+  cols.forEach(([k], i) => {
+    if (hidden.has(k)) {
+      const n = i + offset + 1; // nth-child 從 1 起算
+      rules.push(`#${wrapId} table th:nth-child(${n}),#${wrapId} table td:nth-child(${n}){display:none}`);
+    }
+  });
+  if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
+  style.textContent = rules.join('');
+}
+function columnsButton(wrapId) {
+  const n = getHiddenCols(wrapId).size;
+  return `<button class="btn" onclick="openColumnsMenu('${wrapId}')" title="自訂顯示欄位">▦ 欄位${n ? `（隱藏 ${n}）` : ''}</button>`;
+}
+function openColumnsMenu(wrapId) {
+  const cols = getColDefs(wrapId);
+  const hidden = getHiddenCols(wrapId);
+  openModal({
+    title: '自訂顯示欄位',
+    body: `<div class="muted" style="margin-bottom:10px;font-size:12px">勾選要顯示的欄位。這只影響你自己這台裝置，不會改到別人的畫面。</div>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        ${cols.map(([k, label]) => `<label style="display:flex;align-items:center;gap:8px;font-weight:500">
+          <input type="checkbox" data-colk="${k}" ${hidden.has(k) ? '' : 'checked'}> ${esc(label)}</label>`).join('')}
+      </div>`,
+    footer: `<button class="btn" data-no>取消</button>
+             <button class="btn" data-reset>全部顯示</button>
+             <button class="btn primary" data-ok>套用</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-reset]').onclick = () => { setHiddenCols(wrapId, new Set()); close(); render(); };
+      el.querySelector('[data-ok]').onclick = () => {
+        const hide = new Set();
+        el.querySelectorAll('[data-colk]').forEach(c => { if (!c.checked) hide.add(c.dataset.colk); });
+        setHiddenCols(wrapId, hide); close(); render();
+      };
+    }
+  });
+}
+
 let qSelected = new Set();
 let qFilteredList = [];
 
@@ -4597,7 +4750,7 @@ function quoteTable(list, opts) {
         : `${esc(names[0])} <span class="muted">等${names.length}項</span>`;
       return `<tr class="co-row" style="border-left-color:${cc}" onclick="go('quote/${q.id}')">
         ${sel ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="q-sel" ${qSelected.has(q.id) ? 'checked' : ''} onchange="toggleQSel('${q.id}', this.checked)"></td>` : ''}
-        <td class="no nowrap">${esc(q.quote_no)}${q.revision > 1 ? `<span class="bdg gray plain" style="height:16px;font-size:9px;margin-left:4px">版次 ${q.revision}</span>` : ''}</td>
+        <td class="no nowrap">${esc(q.quote_no)}</td>
         <td class="nowrap">${esc(q.customer_snapshot?.name || '—')}<div class="muted">${esc((q.customer_snapshot?.site_label ? '(' + q.customer_snapshot.site_label + ') ' : '') + (q.customer_snapshot?.contact_person || ''))}</div></td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
         <td class="nowrap"><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.badge || co?.code || '?')}</span></td>
@@ -4654,6 +4807,7 @@ function viewQuotes(v) {
       <input class="inp" type="date" id="qd1" style="width:150px" value="${esc(f.d1 || '')}">
       <input class="inp" type="date" id="qd2" style="width:150px" value="${esc(f.d2 || '')}">
       <button class="btn" onclick="go('quotes')">清除</button>
+      ${columnsButton('qlist')}
       <button class="btn" onclick="exportQuotesExcel()">⬇ 匯出 Excel</button>
       <button class="btn" onclick="document.getElementById('qImpFile').click()">⬆ 匯入 Excel</button>
       <a href="javascript:void(0)" onclick="downloadQuoteImportTemplate()" style="font-size:12px;color:var(--text-3);white-space:nowrap">下載範本</a>
@@ -4694,6 +4848,7 @@ function viewQuotes(v) {
     document.getElementById('qPageBar').innerHTML = list.length ? pageBarHtml('quotes', info) : '';
     bindTableSort('qlist', qSortState, run);
     makeColumnsResizable('qlist', 'quotes');
+    applyColVis('qlist');
     updateBulkBar('q');
   };
   registerPageRunner('quotes', run);
@@ -5241,7 +5396,8 @@ function markOrdered(id) {
         q.status = 'signed';
         appendEditLog(q, '登記下單');
         saveNow(); close(); render();
-        toast('已登記下單，可以開立出貨單了', 'ok');
+        toast('已登記下單，接著開立出貨單', 'ok');
+        startDelivery(q.id);   // 登記下單後自動跳出「開立出貨單」視窗
       };
     }
   });
@@ -5518,6 +5674,15 @@ function drawItems() {
       const it = byId(q.items, e.target.dataset.fi), k = e.target.dataset.k;
       it[k] = e.target.type === 'checkbox' ? e.target.checked
             : (e.target.type === 'number' ? (+e.target.value || 0) : e.target.value);
+      // 清空品名 → 解除與主檔的連結，讓這一列變回可重新搜尋、重新選取主檔的自由列
+      // （否則會殘留舊的 product_id：單價被鎖、還顯示「主檔」，等於得新增一列才能重挑）
+      if (k === 'name' && it.product_id && !e.target.value.trim()) {
+        it.product_id = null;
+        save(); drawItems();
+        const again = box.querySelector(`[data-fi="${it.id}"][data-k="name"]`);
+        if (again) again.focus();
+        return;
+      }
       save();
       if (k === 'default_cost') drawTotals();
       if (k === 'in_stock') drawItems();
@@ -6020,10 +6185,30 @@ function startDelivery(qid) {
           </select>
           <div class="hint">開單人不一定是業務，也可能是行政</div></div>
       </div>
-      <div class="field"><label>出貨日期</label>
-        <input class="inp" type="date" data-f="delivery_date" value="${today()}"></div>`,
+      <div class="field"><label>出貨日期（開立日期）</label>
+        <input class="inp" type="date" data-f="delivery_date" value="${today()}"></div>
+      <div class="field"><label>配送方式</label>
+        <select class="inp" data-f="shipping_method" id="dvShip">
+          ${SHIP_METHODS.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
+        </select>
+        <div class="hint" id="dvShipHint">貨到公司／貨到公司組裝／業務親送 → 開單後為「待配送」；代理商直送／貨運 → 開單即「已出貨」。</div></div>
+      <div class="field" id="dvShipOtherWrap" style="display:none"><label>其他配送方式說明</label>
+        <input class="inp" data-f="shipping_method_other" placeholder="請說明配送方式"></div>
+      <div class="field"><label>備註</label>
+        <textarea class="inp" data-f="note" rows="2" placeholder="出貨單備註（可留空）"></textarea></div>`,
     footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>開立出貨單</button>`,
     onMount(el, close) {
+      const shipSel = el.querySelector('#dvShip');
+      const otherWrap = el.querySelector('#dvShipOtherWrap');
+      const hint = el.querySelector('#dvShipHint');
+      const syncShip = () => {
+        otherWrap.style.display = shipSel.value === '其他' ? '' : 'none';
+        const init = shipInitStatus(shipSel.value);
+        hint.textContent = init === 'shipped'
+          ? '此配送方式開單即為「已出貨」。'
+          : '此配送方式開單後為「待配送」，配送完成再推進到「已出貨」。';
+      };
+      shipSel.onchange = syncShip; syncShip();
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
         const o = {};
@@ -6065,17 +6250,19 @@ function makeDelivery(q, co, o) {
     sales_user_id: o.sales_user_id || q.sales_user_id || null,
     created_by: o.created_by || '',
     delivery_date: o.delivery_date || today(),
-    status: 'pending_order',
+    status: 'pending_delivery',
     delivery_target: '', ship_address: (q.customer_snapshot && q.customer_snapshot.address) || '',
-    shipping_method: '貨運', shipping_method_other: '',
-    invoice_method: '隨貨', payment_method: '月結', attachment: '', note: DEFAULT_DELIVERY_NOTE,
+    shipping_method: o.shipping_method || '貨到公司', shipping_method_other: o.shipping_method_other || '',
+    invoice_method: '隨貨', payment_method: '月結', attachment: '', note: (o.note != null && o.note !== '') ? o.note : DEFAULT_DELIVERY_NOTE,
     no_invoice: false, invoice_copies: 3,
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '開立出貨單' }],
     invoiced: false, invoice_date: '', invoice_no: '', customer_po: '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
-  dv.status = dsFirst(dv);
+  // 初始狀態由配送方式決定：代理商直送／貨運＝已出貨；其餘＝待配送
+  dv.status = shipInitStatus(dv.shipping_method);
+  if (dv.status === 'shipped') dv.shipped_at = new Date().toISOString();
   DB.deliveries.push(dv);
   save();
   _quoteDirty = { id: null, at: 0 }; // 這是剛確認過的動作，不是不小心離開，不要再跳一次確認
@@ -6087,7 +6274,7 @@ function syncQuoteStatus(q) {
   if (q.status === 'cancelled') return;
   const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled');
   if (!dvs.length) { if (q.status !== 'draft' && q.status !== 'sent') q.status = 'signed'; return; }
-  q.status = dvs.every(d => d.status === 'completed') ? 'completed' : 'signed';
+  q.status = dvs.every(d => d.status === 'closed') ? 'completed' : 'signed';
 }
 
 /* ===========================================================
@@ -6242,6 +6429,7 @@ function viewDeliveries(v) {
         ${DB.users.map(u => `<option value="${u.id}" ${f.sales === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
       </select>
       <button class="btn" onclick="go('deliveries')">清除</button>
+      ${columnsButton('dlist')}
       <button class="btn" onclick="exportDeliveriesExcel()">⬇ 匯出 Excel</button>
       <button class="btn" onclick="document.getElementById('dImpFile').click()">⬆ 匯入 Excel</button>
       <a href="javascript:void(0)" onclick="downloadDeliveryImportTemplate()" style="font-size:12px;color:var(--text-3);white-space:nowrap">下載範本</a>
@@ -6316,6 +6504,7 @@ function viewDeliveries(v) {
     document.getElementById('dPageBar').innerHTML = list.length ? pageBarHtml('deliveries', info) : '';
     bindTableSort('dlist', dSortState, run);
     makeColumnsResizable('dlist', 'deliveries');
+    applyColVis('dlist');
     updateBulkBar('d');
     drawDSumBar(list); // 統計列用完整篩選結果，不是只算當前頁
   };
@@ -6499,7 +6688,7 @@ function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
   if (!d) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張出貨單</h3></div>`; return; }
   DE = d;
-  const editable = canEdit() && !['shipped', 'completed', 'cancelled'].includes(d.status);
+  const editable = canEdit() && !['shipped', 'closed', 'cancelled'].includes(d.status);
   const c = d.customer_snapshot || {};
   const nxt = dsNext(d);
   const flow = dsFlow(d);
@@ -6604,19 +6793,13 @@ function viewDelivery(v) {
         </div>
         <div class="btn-row">
           ${nxt && d.status !== 'cancelled'
-            ? `<button class="btn ${nxt === 'shipped' ? ACTION_COLOR.shipped : nxt === 'completed' ? ACTION_COLOR.completed : 'primary'} lg" style="flex:1" onclick="advance('${d.id}')">→ ${DS[nxt].label}</button>` : ''}
-          ${!['completed', 'cancelled'].includes(d.status)
+            ? `<button class="btn ${nxt === 'shipped' ? ACTION_COLOR.shipped : nxt === 'closed' ? ACTION_COLOR.closed : 'primary'} lg" style="flex:1" onclick="advance('${d.id}')">→ ${DS[nxt].label}</button>` : ''}
+          ${!['closed', 'cancelled'].includes(d.status)
             ? `<button class="btn danger" onclick="cancelDelivery('${d.id}')">作廢</button>` : ''}
         </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteDelivery('${d.id}')">🗑 刪除出貨單</button>
         </div>
-        ${!flow.includes('pending_order')
-          ? `<div class="banner ok" style="margin:0"><span class="bi">✓</span><div>
-             全部品項公司都有庫存，已自動跳過「待叫貨／已叫貨」。</div></div>` : ''}
-        ${!flow.includes('pending_assembly')
-          ? `<div class="banner info" style="margin:0"><span class="bi">ℹ</span><div>
-             此單無需組裝品項，已自動跳過「待組裝／已組裝」。</div></div>` : ''}
       </div>
     </div>
     ${supDatalist()}`;
@@ -6635,7 +6818,7 @@ function viewDelivery(v) {
    「是否有庫」：有庫打勾就好；沒有就填廠商+成本（未稅/含稅可切換），
    廠商/成本欄位永遠可編輯，因為可能一開始以為有庫，後來才發現要跟廠商叫貨 */
 function drawDvItems() {
-  const d = DE, editable = canEdit() && !['shipped', 'completed', 'cancelled'].includes(d.status);
+  const d = DE, editable = canEdit() && !['shipped', 'closed', 'cancelled'].includes(d.status);
   const D = editable ? '' : 'disabled';
   const stockColW = 168;
 
@@ -6866,6 +7049,7 @@ function advance(id) {
   const n = dsNext(d); if (!n) return;
   d.status = n;
   if (n === 'shipped') d.shipped_at = new Date().toISOString();
+  if (n === 'closed') d.closed_at = new Date().toISOString();
   const q = byId(DB.quotes, d.quote_id);
   if (q) syncQuoteStatus(q);
   saveNow(); render(); toast('狀態已更新為「' + DS[n].label + '」', 'ok');
@@ -7090,7 +7274,6 @@ function quotePaper(q) {
         <div class="pp-title-box">
           <div class="pp-title">報　價　單</div>
           <div class="pp-no">${esc(q.quote_no)}</div>
-          ${q.revision > 1 ? `<div class="pp-rev">版次 ${q.revision}</div>` : ''}
         </div>
       </div>
 
@@ -7471,6 +7654,7 @@ function viewCustomers(v) {
   v.innerHTML = `
     <div class="toolbar">
       <div class="grow"><input class="inp" id="cs" placeholder="搜尋客戶名 / 統編 / 聯絡人 / 電話 / 廠區…"></div>
+      ${columnsButton('clist')}
       <button class="btn primary" onclick="editCustomer(null)">＋ 新增客戶</button>
     </div>
     <div class="bulk-bar" id="cBulkBar" style="display:none">
@@ -7521,6 +7705,7 @@ function viewCustomers(v) {
         }).join('')}</tbody></table>`;
     document.getElementById('cPageBar').innerHTML = list.length ? pageBarHtml('customers', info) : '';
     makeColumnsResizable('clist', 'customers');
+    applyColVis('clist');
     bindTableSort('clist', cSortState, () => run());
     updateBulkBar('c');
   };
@@ -7760,6 +7945,7 @@ function viewProducts(v) {
         <option value="">全部進貨廠商</option>${[...new Set(DB.products.map(p => p.default_supplier).filter(Boolean))].sort().map(s => `<option ${s === fs.sup ? 'selected' : ''}>${esc(s)}</option>`).join('')}
       </select>
       <button class="btn ghost" onclick="manageCategories()">管理分類</button>
+      ${columnsButton('plist')}
       <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button>
     </div>
     <div class="bulk-bar" id="pBulkBar" style="display:none">
@@ -7828,6 +8014,7 @@ function viewProducts(v) {
     document.getElementById('pPageBar').innerHTML = list.length ? pageBarHtml('products', info) : '';
     makeColumnsResizable('plist', 'products');
     bindTableSort('plist', pSortState, () => run());
+    applyColVis('plist');
     updateBulkBar('p');
   };
   ['ps', 'pSubCat', 'psup'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
@@ -7969,7 +8156,7 @@ function editProduct(id) {
     body: `
       <div class="grid g3">
         <div class="field"><label>料號（Part No.）</label><input class="inp" data-f="part_no" value="${esc(p.part_no || '')}" placeholder="可用來搜尋整張單"></div>
-        <div class="field"><label>品牌</label><input class="inp" data-f="brand" value="${esc(p.brand)}"></div>
+        <div class="field"><label>品牌</label><input class="inp" list="brandList" data-f="brand" value="${esc(p.brand)}" placeholder="可打字／選既有品牌"></div>
         <div class="field"><label>分類</label>
           <select class="inp" id="pcatSel">
             <option value="">未分類</option>${catOptions()}
@@ -8004,7 +8191,9 @@ function editProduct(id) {
         <div class="card"><div class="card-h"><h2>內部組成</h2>
           <div class="right"><button class="btn sm" id="addComp">＋ 新增組成</button></div></div>
           <div class="card-b tight"><div id="compList"></div></div></div>
-      </div>`,
+      </div>
+      ${supDatalist()}
+      <datalist id="brandList">${[...new Set((DB.products || []).map(x => (x.brand || '').trim()).filter(Boolean))].sort().map(b => `<option value="${esc(b)}">`).join('')}</datalist>`,
     footer: `${id ? '<button class="btn danger left" data-del>刪除</button>' : ''}
              <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
     onMount(el, close) {
