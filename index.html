@@ -2650,6 +2650,24 @@ const SHIP_INIT_STATUS = {
 function shipInitStatus(method) { return SHIP_INIT_STATUS[method] || 'pending_delivery'; }
 const INVOICE_METHODS = ['隨貨', '通知後開立', '郵寄正本', '其他'];
 const PAY_METHODS     = ['現金', '匯款', '即期支票', '附回郵', '月結', '貨到付款'];
+// 付款方式選項：優先用設定裡的自訂清單（可自行新增預設），沒有就用內建清單；'其他' 為特殊自填項，另外附加
+function payMethodOptions() {
+  const list = (DB.settings && Array.isArray(DB.settings.pay_methods) && DB.settings.pay_methods.length)
+    ? DB.settings.pay_methods : PAY_METHODS;
+  return list.filter(m => m && m !== '其他');
+}
+// 把「其他」自填的內容存成預設付款方式選項（存 DB.settings，會隨雲端同步、全公司共用）
+function addPayMethodPreset() {
+  const inp = document.querySelector('#payOther [data-d="payment_method_other"]');
+  const name = inp ? inp.value.trim() : '';
+  if (!name) return toast('請先在說明欄填付款方式', 'err');
+  const list = payMethodOptions().slice();
+  if (!list.includes(name)) list.push(name);
+  DB.settings.pay_methods = list;
+  const d = (typeof DE !== 'undefined') ? DE : null;
+  if (d) { d.payment_method = name; d.payment_method_other = ''; }   // 選為目前付款方式並清掉自填欄
+  save(); render(); toast(`已加入預設付款方式：${name}`, 'ok');
+}
 
 /* ===========================================================
    §6 金額計算
@@ -6686,7 +6704,7 @@ function exportDeliveriesExcel() {
       '狀態': DS[d.status] ? DS[d.status].label : d.status,
       '送貨方式': d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : (d.shipping_method || ''),
       '發票方式': d.invoice_method === '其他' ? (d.invoice_method_other || '其他') : (d.invoice_method || ''),
-      '付款方式': d.payment_method || '',
+      '付款方式': d.payment_method === '其他' ? (d.payment_method_other || '其他') : (d.payment_method || ''),
       '已開發票': d.invoiced ? '是' : '否',
       '發票號碼': d.invoice_no || '',
       '客戶PO單號': d.customer_po || '',
@@ -6807,7 +6825,8 @@ function viewDelivery(v) {
                 </select></div>
               <div class="field"><label>付款方式</label>
                 <select class="inp" data-d="payment_method" ${editable ? '' : 'disabled'}>
-                  ${PAY_METHODS.map(m => `<option ${m === d.payment_method ? 'selected' : ''}>${m}</option>`).join('')}
+                  ${payMethodOptions().map(m => `<option ${m === d.payment_method ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+                  <option ${d.payment_method === '其他' ? 'selected' : ''}>其他</option>
                 </select></div>
               <div class="field"><label>發票備註</label>
                 <input class="inp" data-d="invoice_note" value="${esc(d.invoice_note || '')}" placeholder="印在出貨單發票欄位，選填" ${editable ? '' : 'disabled'}></div>
@@ -6822,11 +6841,19 @@ function viewDelivery(v) {
             <div class="field ${d.invoice_method === '其他' ? '' : 'hide'}" id="invOther">
               <label>發票方式說明</label>
               <input class="inp" data-d="invoice_method_other" value="${esc(d.invoice_method_other || '')}" placeholder="請說明發票方式" ${editable ? '' : 'disabled'}></div>
+            <div class="field ${d.payment_method === '其他' ? '' : 'hide'}" id="payOther">
+              <label>付款方式說明</label>
+              <div style="display:flex;gap:6px">
+                <input class="inp" data-d="payment_method_other" value="${esc(d.payment_method_other || '')}" placeholder="請說明付款方式" style="flex:1;min-width:0" ${editable ? '' : 'disabled'}>
+                ${editable ? `<button class="btn" style="white-space:nowrap" onclick="addPayMethodPreset()" title="把這個付款方式存成下拉預設選項">＋ 存為預設</button>` : ''}
+              </div></div>
             <div class="grid g2">
               <div class="field"><label>附件</label>
                 <textarea class="inp" data-d="attachment" ${editable ? '' : 'disabled'}>${esc(d.attachment || '')}</textarea></div>
               <div class="field"><label>備註</label>
-                <textarea class="inp" data-d="note" ${editable ? '' : 'disabled'}>${esc(d.note || '')}</textarea></div>
+                <textarea class="inp" data-d="note" ${editable ? '' : 'disabled'}>${esc(d.note || '')}</textarea>
+                <label class="fi-chk" style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--text-2);font-weight:500">
+                  <input type="checkbox" data-d="note_red" ${d.note_red ? 'checked' : ''} ${editable ? '' : 'disabled'}> 備註以醒目紅色字體列印</label></div>
             </div>
           </div>
         </div>
@@ -6861,6 +6888,8 @@ function viewDelivery(v) {
       document.getElementById('shipOther').classList.toggle('hide', el.value !== '其他');
     if (el.dataset.d === 'invoice_method')
       document.getElementById('invOther').classList.toggle('hide', el.value !== '其他');
+    if (el.dataset.d === 'payment_method')
+      document.getElementById('payOther').classList.toggle('hide', el.value !== '其他');
   }));
 
   drawDvItems(); drawDvTotals();
@@ -7520,10 +7549,10 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
             <div class="dp-kv half"><span>交貨單位</span><b>${esc(d.delivery_target || '—')}${d.delivery_contact ? '　聯絡人：' + esc(d.delivery_contact) : ''}</b></div>
           </div>
           <div class="dp-kv"><span>發票方式</span><b>${esc(d.invoice_method === '其他' ? (d.invoice_method_other || '其他') : (d.invoice_method || ''))}</b></div>
-          <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method || '')}</b></div>
+          <div class="dp-kv"><span>付款方式</span><b>${esc(d.payment_method === '其他' ? (d.payment_method_other || '其他') : (d.payment_method || ''))}</b></div>
           ${d.invoice_note ? `<div class="dp-kv"><span>發票備註</span><b>${esc(d.invoice_note)}</b></div>` : ''}
           ${d.attachment ? `<div class="dp-kv"><span>附件</span><b>${esc(d.attachment)}</b></div>` : ''}
-          ${d.note ? `<div class="dp-kv"><span>備註</span><b class="dp-note-hl">${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
+          ${d.note ? `<div class="dp-kv"><span>備註</span><b class="${d.note_red ? 'dp-note-hl' : ''}">${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
         </div>
         <div class="dp-sum-r">
           <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
