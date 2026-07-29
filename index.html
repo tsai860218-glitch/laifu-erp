@@ -600,6 +600,13 @@ body.cost-on.mobile .cost-warn{display:flex}
 
 /* 總計/簽名區固定貼在紙張底部，不管表格內容多少都不會跟著漂移 */
 .dp-bottom{position:absolute;left:9mm;right:9mm;bottom:7mm}
+/* 急件紅字戳記：貼在總結區右上角（如出貨單附圖位置） */
+.dp-urgent{
+  position:absolute;top:-6mm;right:0;
+  color:#D0021B;font-weight:800;font-size:12pt;letter-spacing:.14em;
+  border:1.2pt solid #D0021B;border-radius:1mm;padding:.4mm 2.4mm;background:#fff;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;
+}
 .dp-sb{flex:1;min-height:6mm}
 .dp-sb span{font-size:6pt;color:#666;font-weight:700;display:block;padding-bottom:.6mm;border-bottom:.4pt solid #ccc}
 .dp-sb b{font-size:7.5pt;display:block;margin-top:1mm}
@@ -2560,8 +2567,7 @@ function migrate(db) {
 
 // 新出貨單備註預設帶入的付款說明（固定文字起點，之後可自行編輯／刪改）
 const DEFAULT_DELIVERY_NOTE =
-  '請附報價單、廠商訂單等相關資料，任何問題請寫於訂單空白處，勿口頭告知！謝謝～\n' +
-  '本單急件：我已於＿月＿日＿時:＿＿ LINE先通知協理';
+  '請附報價單、廠商訂單等相關資料，任何問題請寫於訂單空白處，勿口頭告知！謝謝～';
 
 // 客戶的預設聯絡窗口／廠區
 function defaultSite(c) {
@@ -4168,6 +4174,11 @@ const ROUTES = [
 
 let route = { k: 'dash', id: null, q: {} };
 
+// 出貨單詳情的「編輯／唯讀」狀態：只存在這次瀏覽階段，不寫進資料、也不上雲端。
+// 每次重新打開一張出貨單一律回到唯讀，要改東西才按「編輯」。
+var dvEditFor = null;    // 目前正在編輯的出貨單 id（null＝全部唯讀）
+var dvSnapshot = null;   // 進入編輯前的內容備份，供「取消」還原
+
 function parseHash() {
   const h = location.hash.slice(1) || 'dash';
   const [path, qs] = h.split('?');
@@ -4239,6 +4250,13 @@ function render() {
       }, 30);
       return;
     }
+  }
+
+  // 離開某張出貨單詳情頁（切到別張單或別的頁面）時，清掉編輯狀態，
+  // 下次再打開一律回到唯讀。留在同一張單重繪（例如按下「編輯」）則不清。
+  if (prevRoute && prevRoute.k === 'delivery' &&
+      !(route.k === 'delivery' && route.id === prevRoute.id)) {
+    dvEditFor = null; dvSnapshot = null;
   }
   _lastRoute = route;
 
@@ -6759,6 +6777,40 @@ let DE = null;
 let dBomOpen = {};
 let dvAsmOpen = {};
 
+/* ---------- 出貨單「唯讀 / 編輯」切換 ----------
+   結案（closed）或作廢（cancelled）之前都可以編輯；預設一律唯讀，
+   按「編輯」才解開欄位，改完按「存檔」鎖回唯讀，或按「取消」還原。 */
+// 這張單「允許」被編輯嗎？（有權限 且 還沒結案／作廢）
+function dvCanEdit(d) { return canEdit() && !['closed', 'cancelled'].includes(d.status); }
+// 這張單「現在正處於」編輯中嗎？（允許編輯 且 已按下編輯鈕）
+function dvEditing(d) { return dvCanEdit(d) && dvEditFor === d.id; }
+
+function dvStartEdit(id) {
+  const d = byId(DB.deliveries, id);
+  if (!d) return;
+  if (!dvCanEdit(d)) return toast('這張單已結案／作廢，無法編輯', 'err');
+  dvSnapshot = JSON.parse(JSON.stringify(d));  // 備份，供「取消」還原
+  dvEditFor = id;
+  render();
+}
+function dvSaveEdit(id) {
+  dvEditFor = null; dvSnapshot = null;
+  saveNow(); render();
+  toast('已存檔', 'ok');
+}
+function dvCancelEdit(id) {
+  const finish = () => {
+    if (dvSnapshot) {
+      const i = DB.deliveries.findIndex(x => x.id === id);
+      if (i >= 0) DB.deliveries[i] = dvSnapshot;   // 還原成進入編輯前的內容
+    }
+    dvEditFor = null; dvSnapshot = null;
+    saveNow(); render();
+    toast('已取消編輯，內容已還原');
+  };
+  confirmBox('取消編輯', '要放棄剛剛的修改，還原成進入編輯前的內容嗎？', finish, true);
+}
+
 // 送貨地址候選清單：這張單原本客戶的地址 + 客戶主檔裡其他站點/廠區的地址（如果追得到客戶主檔）
 function shipAddrOptions(d) {
   const addrs = new Set();
@@ -6773,7 +6825,9 @@ function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
   if (!d) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張出貨單</h3></div>`; return; }
   DE = d;
-  const editable = canEdit() && !['closed', 'cancelled'].includes(d.status);
+  const canEditThis = dvCanEdit(d);     // 是否「允許」編輯（未結案／作廢 + 有權限）
+  const editable = dvEditing(d);         // 是否「正在」編輯（已按下編輯鈕）
+  const roView = canEditThis && !editable;  // 允許編輯、但目前停在唯讀檢視
   const c = d.customer_snapshot || {};
   const nxt = dsNext(d);
   const flow = dsFlow(d);
@@ -6791,6 +6845,10 @@ function viewDelivery(v) {
     </div>
     ${d._legacy ? `<div class="banner warn"><span class="bi">⚠</span><div>
       <b>舊格式出貨單</b>　這張是改版前建立的，明細為 BOM 零件層級、沒有單價。保留供查閱，不建議再編輯。</div></div>` : ''}
+    ${roView ? `<div class="banner" style="background:var(--gray-bg);border:1px solid var(--line-2);color:var(--text-1)"><span class="bi">🔒</span><div>
+      <b>唯讀檢視中</b>　結案前都可以修改。要改內容請按右側的「<b>✎ 編輯</b>」，改完按「<b>存檔</b>」。</div></div>` : ''}
+    ${editable ? `<div class="banner info"><span class="bi">✎</span><div>
+      <b>編輯中</b>　欄位已解鎖，可直接修改。改完記得按右側「<b>存檔</b>」，或按「取消」還原成原本內容。</div></div>` : ''}
 
     <div class="editor">
       <div>
@@ -6854,6 +6912,8 @@ function viewDelivery(v) {
                 <input type="checkbox" data-d="no_invoice" ${d.no_invoice ? 'checked' : ''} ${editable ? '' : 'disabled'}> 不開發票</label></div>
               <div class="field"><label>發票聯數</label>
                 <input class="inp num" type="number" min="1" max="9" data-d="invoice_copies" value="${d.invoice_copies || 3}" ${editable ? '' : 'disabled'}></div>
+              <div class="field"><label class="fi-chk" style="font-size:13px;color:var(--red);font-weight:700;margin-top:22px">
+                <input type="checkbox" data-d="urgent" ${d.urgent ? 'checked' : ''} ${editable ? '' : 'disabled'}> 🔴 急件（列印時右上角紅字標示）</label></div>
             </div>
             <div class="field ${d.shipping_method === '其他' ? '' : 'hide'}" id="shipOther">
               <label>配送方式說明</label>
@@ -6880,6 +6940,12 @@ function viewDelivery(v) {
       </div>
 
       <div class="side">
+        ${canEditThis ? `<div class="btn-row">
+          ${editable
+            ? `<button class="btn primary lg" style="flex:1" onclick="dvSaveEdit('${d.id}')">✓ 存檔</button>
+               <button class="btn lg" onclick="dvCancelEdit('${d.id}')">取消</button>`
+            : `<button class="btn lg" style="flex:1" onclick="dvStartEdit('${d.id}')">✎ 編輯</button>`}
+        </div>` : ''}
         <div class="total" id="dvTotal"></div>
         <div class="cost-panel" id="dvCost"></div>
         <div class="btn-row">
@@ -6919,7 +6985,7 @@ function viewDelivery(v) {
    「是否有庫」：有庫打勾就好；沒有就填廠商+成本（未稅/含稅可切換），
    廠商/成本欄位永遠可編輯，因為可能一開始以為有庫，後來才發現要跟廠商叫貨 */
 function drawDvItems() {
-  const d = DE, editable = canEdit() && !['closed', 'cancelled'].includes(d.status);
+  const d = DE, editable = dvEditing(d);
   const D = editable ? '' : 'disabled';
   const stockColW = 168;
 
@@ -7558,6 +7624,7 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
 
     ${includeSummary ? `
     <div class="dp-bottom">
+      ${d.urgent ? '<div class="dp-urgent">急件</div>' : ''}
       <div class="dp-sum">
         <div class="dp-sum-l">
           <div class="dp-kv-row">
