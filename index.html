@@ -767,7 +767,7 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 .asm-hd .asm-qty,.asm-hd .asm-cost{text-align:center}
 .asm-hd .asm-tax-sp{flex:0 0 30px}
 .asm-hd .asm-del-sp{flex:0 0 22px}
-.asm-stocked{font-size:10.5px;color:var(--green);font-weight:600;flex:0 0 auto}
+.asm-stocked{font-size:10.5px;color:var(--green);font-weight:600;flex:0 0 96px;display:flex;align-items:center}
 .asm-empty{font-size:11px;color:var(--text-3);padding:6px 0}
 .asm-row .inp{height:28px;font-size:12px}
 .asm-row .del{flex:0 0 22px;height:22px;border:none;background:transparent;color:var(--red);
@@ -6047,9 +6047,9 @@ function assemblyBox(it, editable) {
         <label class="asm-chk"><input type="checkbox" data-ai="${it.id}|${a.id}" data-k="in_stock" ${a.in_stock ? 'checked' : ''} ${D}> 有庫</label>
         ${a.in_stock
           ? '<span class="asm-stocked">✓ 庫存</span>'
-          : `<input class="inp asm-sup" list="supList" data-ai="${it.id}|${a.id}" data-k="supplier_name" placeholder="廠商" value="${esc(a.supplier_name || '')}" ${D}>
-             <input class="inp num asm-cost" type="number" data-ai="${it.id}|${a.id}" data-k="cost" placeholder="成本" value="${a.cost || 0}" ${D}>
-             <button class="taxbtn" data-ai="${it.id}|${a.id}" data-aitax ${D}>${COST_TAX[a.cost_tax || 'ex']}</button>`}
+          : `<input class="inp asm-sup" list="supList" data-ai="${it.id}|${a.id}" data-k="supplier_name" placeholder="廠商" value="${esc(a.supplier_name || '')}" ${D}>`}
+        <input class="inp num asm-cost" type="number" data-ai="${it.id}|${a.id}" data-k="cost" placeholder="成本" value="${a.cost || 0}" ${D}>
+        <button class="taxbtn" data-ai="${it.id}|${a.id}" data-aitax ${D}>${COST_TAX[a.cost_tax || 'ex']}</button>
         ${editable ? `<button class="del" onclick="delAssemblyItem('${it.id}','${a.id}')" aria-label="刪除">×</button>` : ''}
       </div>`).join('') : '<div class="asm-empty">還沒有配件</div>'}
     ${editable ? `<button class="btn sm ghost" style="margin-top:6px" onclick="addAssemblyItem('${it.id}')">＋ 新增配件</button>` : ''}
