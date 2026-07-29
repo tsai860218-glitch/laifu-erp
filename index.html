@@ -221,6 +221,8 @@ body.col-resizing *{cursor:col-resize!important}
 .rt-kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;border-bottom:1px dashed var(--line);padding-bottom:6px;min-width:0}
 .rt-kv span{color:var(--text-2);white-space:nowrap}
 .rt-kv b{font-weight:700;text-align:right;min-width:0}
+.cust-def-box{background:#F0F7FF;border:1px solid #BBD8F5;border-radius:10px;padding:12px 14px;margin:16px 0}
+.cust-def-box .def-h{font-size:12px;font-weight:800;color:#1D4ED8;margin-bottom:10px}
 .rtp{width:66px;text-align:right}
 .rt-price-tbl.mono .rt-cc{display:none}
 @media(max-width:640px){.rt-kvs{grid-template-columns:1fr}}
@@ -7855,7 +7857,8 @@ function editCustomer(id) {
         <div class="hint">之後幫這位客戶開新報價單，業務欄位會自動帶入這裡設定的人（可以再改）。</div></div>
       <div class="field"><label>備註</label><textarea class="inp" data-f="note">${esc(c.note || '')}</textarea></div>
 
-      <div class="sec-title" style="margin:16px 0 8px">出貨單預設（開立出貨單時自動帶入，仍可再改）</div>
+      <div class="cust-def-box">
+      <div class="def-h">出貨單預設（開立出貨單時自動帶入，仍可再改）</div>
       <div class="grid g2">
         <div class="field"><label>預設發票方式</label>
           <select class="inp" data-f="default_invoice_method">
@@ -7875,6 +7878,7 @@ function editCustomer(id) {
           <input class="inp" data-f="default_delivery_target" value="${esc(c.default_delivery_target || '')}" placeholder="開立出貨單時自動帶入（選填）"></div>
         <div class="field"><label>預設交貨單位聯絡人</label>
           <input class="inp" data-f="default_delivery_contact" value="${esc(c.default_delivery_contact || '')}" placeholder="例：王小姐 0912-345-678（選填）"></div>
+      </div>
       </div>
 
       <div class="sec-title" style="margin:16px 0 8px">聯絡窗口／廠區</div>
