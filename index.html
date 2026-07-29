@@ -529,7 +529,9 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-foot{position:absolute;left:15mm;right:15mm;bottom:7mm}
 .pp-brands{display:flex;gap:3mm;align-items:center;flex-wrap:wrap;justify-content:space-between;
   padding-bottom:1.6mm;margin-bottom:1.4mm;border-bottom:.4pt solid #DDD;width:100%}
-.pp-brands img{height:8mm;max-width:26mm;object-fit:contain}
+.pp-brands img{height:8mm;max-width:34mm;object-fit:contain}
+.pp-brands.single{display:block;border-bottom:none;padding-bottom:0;margin-bottom:1mm}
+.pp-brands.single img{width:100%;height:auto;max-width:100%;max-height:22mm}
 .pp-foot-l,.pp-foot-r{font-size:7pt;color:#888;display:inline-block}
 .pp-foot-l{float:left}
 .pp-foot-r{float:right;font-family:var(--mono)}
@@ -6771,7 +6773,7 @@ function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
   if (!d) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張出貨單</h3></div>`; return; }
   DE = d;
-  const editable = canEdit() && !['shipped', 'closed', 'cancelled'].includes(d.status);
+  const editable = canEdit() && !['closed', 'cancelled'].includes(d.status);
   const c = d.customer_snapshot || {};
   const nxt = dsNext(d);
   const flow = dsFlow(d);
@@ -6917,7 +6919,7 @@ function viewDelivery(v) {
    「是否有庫」：有庫打勾就好；沒有就填廠商+成本（未稅/含稅可切換），
    廠商/成本欄位永遠可編輯，因為可能一開始以為有庫，後來才發現要跟廠商叫貨 */
 function drawDvItems() {
-  const d = DE, editable = canEdit() && !['shipped', 'closed', 'cancelled'].includes(d.status);
+  const d = DE, editable = canEdit() && !['closed', 'cancelled'].includes(d.status);
   const D = editable ? '' : 'disabled';
   const stockColW = 168;
 
@@ -7448,7 +7450,7 @@ function quotePaper(q) {
         </div>` : ''}
 
       <div class="pp-foot">
-        ${last && (co.brand_logos || []).length ? `<div class="pp-brands">
+        ${last && (co.brand_logos || []).length ? `<div class="pp-brands${co.brand_logos.length === 1 ? ' single' : ''}">
           ${co.brand_logos.map(b => `<img src="${b}" alt="">`).join('')}
         </div>` : ''}
         <div class="pp-foot-l">${esc(co.name)}　${esc(q.quote_no)}</div>
