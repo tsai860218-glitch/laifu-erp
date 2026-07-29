@@ -753,7 +753,7 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 /* 組裝配件清單（報價明細內、可展開，客戶看不到只印出貨單） */
 .asm-box{grid-column:1/-1;background:#FFF8F1;border:1px dashed #F5C89B;
   border-radius:var(--r-sm);padding:10px 12px;margin-top:6px}
-.asm-box-h{font-size:11px;font-weight:700;color:#C2410C;margin-bottom:6px}
+.asm-box-h{font-size:12.5px;font-weight:700;color:#C2410C;margin-bottom:6px}
 .asm-row{display:flex;gap:5px;align-items:center;padding:5px 0;border-bottom:1px solid #F5E0C4}
 .asm-row:last-child{border-bottom:none}
 .asm-pn{flex:0 0 76px;font-family:var(--mono);font-size:11px!important}
@@ -765,6 +765,8 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 .asm-hd{display:flex;gap:5px;align-items:center;padding:1px 0 3px;font-size:10px;color:var(--text-3);font-weight:600}
 .asm-hd>span{min-width:0}
 .asm-hd .asm-qty,.asm-hd .asm-cost{text-align:center}
+.asm-hd .asm-tax-sp{flex:0 0 30px}
+.asm-hd .asm-del-sp{flex:0 0 22px}
 .asm-stocked{font-size:10.5px;color:var(--green);font-weight:600;flex:0 0 auto}
 .asm-empty{font-size:11px;color:var(--text-3);padding:6px 0}
 .asm-row .inp{height:28px;font-size:12px}
@@ -6035,6 +6037,7 @@ function assemblyBox(it, editable) {
         <span class="asm-pn"></span><span class="asm-name"></span>
         <span class="asm-qty">數量</span><span class="asm-chk"></span>
         <span class="asm-sup">廠商</span><span class="asm-cost">成本</span>
+        <span class="asm-tax-sp"></span>${editable ? '<span class="asm-del-sp"></span>' : ''}
       </div>` : ''}
     ${rows.length ? rows.map(a => `
       <div class="asm-row">
