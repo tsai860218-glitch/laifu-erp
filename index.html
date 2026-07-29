@@ -6320,6 +6320,7 @@ function makeDelivery(q, co, o) {
     }))
   }));
 
+  const cust = q.customer_id ? byId(DB.customers, q.customer_id) : null;
   const dv = {
     id: uid('d'), delivery_no: nextNo('D', co.code), quote_id: q.id, quote_no: q.quote_no,
     company_id: q.company_id, customer_snapshot: JSON.parse(JSON.stringify(q.customer_snapshot)),
@@ -6327,9 +6328,14 @@ function makeDelivery(q, co, o) {
     created_by: o.created_by || '',
     delivery_date: o.delivery_date || today(),
     status: 'pending_delivery',
-    delivery_target: '', ship_address: (q.customer_snapshot && q.customer_snapshot.address) || '',
+    delivery_target: (cust && cust.default_delivery_target) || '',
+    delivery_contact: (cust && cust.default_delivery_contact) || '',
+    ship_address: (q.customer_snapshot && q.customer_snapshot.address) || '',
     shipping_method: o.shipping_method || '貨到公司', shipping_method_other: o.shipping_method_other || '',
-    invoice_method: '隨貨', payment_method: '月結', attachment: '', note: (o.note != null && o.note !== '') ? o.note : DEFAULT_DELIVERY_NOTE,
+    invoice_method: (cust && cust.default_invoice_method) || '隨貨',
+    payment_method: (cust && cust.default_payment_method) || '月結',
+    invoice_note: (cust && cust.default_invoice_note) || '',
+    attachment: '', note: (o.note != null && o.note !== '') ? o.note : DEFAULT_DELIVERY_NOTE,
     no_invoice: false, invoice_copies: 3,
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '開立出貨單' }],
@@ -7848,6 +7854,28 @@ function editCustomer(id) {
         </select>
         <div class="hint">之後幫這位客戶開新報價單，業務欄位會自動帶入這裡設定的人（可以再改）。</div></div>
       <div class="field"><label>備註</label><textarea class="inp" data-f="note">${esc(c.note || '')}</textarea></div>
+
+      <div class="sec-title" style="margin:16px 0 8px">出貨單預設（開立出貨單時自動帶入，仍可再改）</div>
+      <div class="grid g2">
+        <div class="field"><label>預設發票方式</label>
+          <select class="inp" data-f="default_invoice_method">
+            <option value="">（沿用系統預設）</option>
+            ${INVOICE_METHODS.map(mm => `<option ${mm === c.default_invoice_method ? 'selected' : ''}>${esc(mm)}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>預設付款方式</label>
+          <select class="inp" data-f="default_payment_method">
+            <option value="">（沿用系統預設）</option>
+            ${payMethodOptions().map(mm => `<option ${mm === c.default_payment_method ? 'selected' : ''}>${esc(mm)}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="field"><label>預設發票備註</label>
+        <input class="inp" data-f="default_invoice_note" value="${esc(c.default_invoice_note || '')}" placeholder="開立出貨單時自動帶入發票備註（選填）"></div>
+      <div class="grid g2">
+        <div class="field"><label>預設交貨單位</label>
+          <input class="inp" data-f="default_delivery_target" value="${esc(c.default_delivery_target || '')}" placeholder="開立出貨單時自動帶入（選填）"></div>
+        <div class="field"><label>預設交貨單位聯絡人</label>
+          <input class="inp" data-f="default_delivery_contact" value="${esc(c.default_delivery_contact || '')}" placeholder="例：王小姐 0912-345-678（選填）"></div>
+      </div>
 
       <div class="sec-title" style="margin:16px 0 8px">聯絡窗口／廠區</div>
       <div class="banner info" style="margin-bottom:10px"><span class="bi">ℹ</span><div>
