@@ -757,11 +757,14 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 .asm-row{display:flex;gap:5px;align-items:center;padding:5px 0;border-bottom:1px solid #F5E0C4}
 .asm-row:last-child{border-bottom:none}
 .asm-pn{flex:0 0 76px;font-family:var(--mono);font-size:11px!important}
-.asm-name{flex:1.4;min-width:0}
-.asm-qty,.asm-price,.asm-cost{flex:0 0 64px}
-.asm-sup{flex:1;min-width:0}
+.asm-name{flex:2.6;min-width:0}
+.asm-qty,.asm-cost{flex:0 0 60px}
+.asm-sup{flex:0 0 96px;min-width:0}
 .asm-chk{display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--text-2);
-  white-space:nowrap;cursor:pointer;flex:0 0 auto}
+  white-space:nowrap;cursor:pointer;flex:0 0 52px}
+.asm-hd{display:flex;gap:5px;align-items:center;padding:1px 0 3px;font-size:10px;color:var(--text-3);font-weight:600}
+.asm-hd>span{min-width:0}
+.asm-hd .asm-qty,.asm-hd .asm-cost{text-align:center}
 .asm-stocked{font-size:10.5px;color:var(--green);font-weight:600;flex:0 0 auto}
 .asm-empty{font-size:11px;color:var(--text-3);padding:6px 0}
 .asm-row .inp{height:28px;font-size:12px}
@@ -6008,7 +6011,7 @@ function addAssemblyItem(id) {
   it.assembly_items = it.assembly_items || [];
   it.assembly_items.push({
     id: uid('ai'), part_no: '', name: '', qty: 1, unit_price: 0,
-    in_stock: true, supplier_name: '', cost: 0, cost_tax: 'ex'
+    in_stock: false, supplier_name: '', cost: 0, cost_tax: 'ex'
   });
   asmOpen[id] = true;
   save(); drawItems();
@@ -6028,12 +6031,16 @@ function assemblyBox(it, editable) {
   const rows = it.assembly_items || [];
   return `<div class="asm-box">
     <div class="asm-box-h">組裝配件（客戶看不到，只印在出貨單）</div>
+    ${rows.length ? `<div class="asm-hd">
+        <span class="asm-pn"></span><span class="asm-name"></span>
+        <span class="asm-qty">數量</span><span class="asm-chk"></span>
+        <span class="asm-sup">廠商</span><span class="asm-cost">成本</span>
+      </div>` : ''}
     ${rows.length ? rows.map(a => `
       <div class="asm-row">
         <input class="inp asm-pn" data-ai="${it.id}|${a.id}" data-k="part_no" placeholder="料號" value="${esc(a.part_no || '')}" ${D}>
         <input class="inp asm-name" data-ai="${it.id}|${a.id}" data-k="name" placeholder="品名" value="${esc(a.name || '')}" ${D}>
         <input class="inp num asm-qty" type="number" step="1" min="0" data-ai="${it.id}|${a.id}" data-k="qty" placeholder="數量" value="${a.qty}" ${D}>
-        <input class="inp num asm-price" type="number" step="0.01" min="0" data-ai="${it.id}|${a.id}" data-k="unit_price" placeholder="單價(不計價)" value="${a.unit_price}" title="組裝配件不跟客戶另外收錢：這裡填的單價不會計入報價金額，出貨單上也會印 0。要記成本請填右邊的「成本」欄。" ${D}>
         <label class="asm-chk"><input type="checkbox" data-ai="${it.id}|${a.id}" data-k="in_stock" ${a.in_stock ? 'checked' : ''} ${D}> 有庫</label>
         ${a.in_stock
           ? '<span class="asm-stocked">✓ 庫存</span>'
