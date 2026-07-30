@@ -4392,7 +4392,7 @@ function topCustomersThisYear(n) {
     if (!q.quote_date || q.quote_date.slice(0, 4) !== yr) return;
     if (!['signed', 'partially_shipped', 'completed'].includes(q.status)) return;
     const name = q.customer_snapshot?.name || '—';
-    totals[name] = (totals[name] || 0) + calcQuote(q).total;
+    totals[name] = (totals[name] || 0) + quoteTotals(q).total;
   });
   return Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, n || 5);
 }
@@ -4412,7 +4412,7 @@ function viewDash(v) {
   const mQuotes = DB.quotes.filter(q => (q.quote_date || '').slice(0, 7) === ym && !isDraftNo(q.quote_no));
   const mDeals = mQuotes.filter(q => ['signed', 'partially_shipped', 'completed'].includes(q.status));
   const mShip = DB.deliveries.filter(d => (d.delivery_date || '').slice(0, 7) === ym).length;
-  const dealAmt = mDeals.reduce((s, q) => s + calcQuote(q).total, 0);
+  const dealAmt = mDeals.reduce((s, q) => s + quoteTotals(q).total, 0);
   const rate = mQuotes.length ? Math.round(mDeals.length / mQuotes.length * 100) : 0;
 
   const noOrder = DB.quotes.filter(q => q.status === 'sent' && q.sent_at && (Date.now() - new Date(q.sent_at)) > 7 * 864e5);
@@ -4709,7 +4709,7 @@ function supDatalist() {
 let qSortState = { key: 'created_at', dir: 'desc' };
 
 function quoteSortValue(q, key) {
-  const t = calcQuote(q);
+  const t = quoteTotals(q);
   switch (key) {
     case 'quote_no': return q.quote_no || '';
     case 'customer': return q.customer_snapshot?.name || '';
@@ -4833,7 +4833,7 @@ function quoteTable(list, opts) {
         : `<th class="sortable ${k === 'amount' ? 'r' : ''}" data-sortkey="${k}">${label}${sortArrow(qSortState, k)}</th>`).join('')}
     </tr></thead><tbody>
     ${sorted.map(q => {
-      const t = calcQuote(q);
+      const t = quoteTotals(q);
       const co = byId(DB.companies, q.company_id);
       const cc = companyColor(co);
       const exp = q.status === 'sent' && q.valid_until && q.valid_until <= addDays(today(), 3);
@@ -5086,7 +5086,7 @@ function exportQuotesExcel() {
   const list = qFilteredList;
   if (!list.length) return toast('目前沒有資料可以匯出', 'err');
   const rows = list.map(q => {
-    const t = calcQuote(q);
+    const t = quoteTotals(q);
     const co = byId(DB.companies, q.company_id);
     const names = q.items.filter(i => (i.name || '').trim())
       .map(i => `${i.name}${i.brand ? '(' + i.brand + ')' : ''} x${i.qty}`).join('；');
@@ -6105,11 +6105,26 @@ const toIncl = ex => Math.round((+ex || 0) * taxMul() * 100) / 100;   // 未稅 
 const toEx = inc => (+inc || 0) / taxMul();                            // 含稅 → 未稅（存檔用）
 const isTaxInclQuote = q => q && q.price_display === 'tax_included';
 
+// 一張報價單對外顯示的「未稅／稅額／含稅總計」的單一計算來源。
+// ・含稅模式：以各列含稅小計（用未四捨五入的未稅計算）的加總為總計，未稅與稅額由含稅回推，
+//   這樣列表、編輯器、PDF 三邊完全一致，也不會出現「客戶談好含稅 4000、系統卻顯示 4001」。
+// ・一般（未稅＋稅分開）模式：沿用 calcDoc（未稅加總 → 稅 → 含稅）。
+function quoteTotals(q) {
+  if (isTaxInclQuote(q)) {
+    const items = (q.items || []).filter(i => (i.name || '').trim());
+    const rate = DB.settings.tax_rate || 0.05;
+    const total = taxInclusiveAmounts(items, rate).reduce((s, x) => s + x, 0);
+    const subtotal = round0(total / (1 + rate));
+    return { subtotal, tax: total - subtotal, total };
+  }
+  return calcDoc(q);
+}
+
 // 含稅模式下，每一列的小計要跟 PDF 完全一致（PDF 會把四捨五入的尾差補到最後一項），
 // 不然畫面上加起來跟印出來的總計會差個一兩塊，業務會以為算錯
 function inclLineAmounts(q) {
   const items = (q.items || []).filter(i => (i.name || '').trim());
-  const t = calcQuote(q);
+  const t = quoteTotals(q);
   const amts = taxInclusiveAmounts(items, DB.settings.tax_rate || 0.05, t.total);
   const map = {};
   items.forEach((it, i) => { map[it.id] = amts[i]; });
@@ -6132,7 +6147,7 @@ function refreshAmount(it) {
 }
 
 function drawTotals() {
-  const q = QE, t = calcQuote(q);
+  const q = QE, t = quoteTotals(q);
   q.subtotal = t.subtotal; q.tax = t.tax; q.total = t.total;
 
   const tb = document.getElementById('totalBox');
@@ -6167,7 +6182,7 @@ function drawTotals() {
 
 function mobileSticky(q) {
   if (!isMobile() || route.k !== 'quote') return;
-  const t = calcQuote(q);
+  const t = quoteTotals(q);
   document.body.classList.add('has-sticky');
   document.getElementById('stickyTotal').innerHTML = `
     <div style="flex:1">
@@ -7412,16 +7427,17 @@ function doPreview(html, size) {
    §14.1 A4 報價單
    =========================================================== */
 // 「只顯示含稅價格」模式：逐項含稅金額四捨五入，尾差回補最後一項，
-// 確保明細加總跟總計對得上
+// 確保明細加總跟總計對得上。
+// 重點：含稅金額一律用「未四捨五入的未稅」× 含稅係數再四捨五入一次，
+// 不能先把未稅那一列四捨五入成整數再乘——否則像含稅 4000 會被墊高成 4001
+//（4000/1.05=3809.52，若先進位成 3810 → 3810×1.05=4000.5 → 4001）。
 function taxInclusiveAmounts(items, taxRate, grandTotal) {
-  let acc = 0;
-  const amts = items.map(it => {
-    const inc = round0(lineAmount(it.qty, it.unit_price) * (1 + taxRate));
-    acc += inc;
-    return inc;
-  });
-  const drift = grandTotal - acc;
-  if (amts.length && drift !== 0) amts[amts.length - 1] += drift;
+  const amts = items.map(it => round0((+it.qty || 0) * (+it.unit_price || 0) * (1 + taxRate)));
+  if (grandTotal != null) {
+    const acc = amts.reduce((s, x) => s + x, 0);
+    const drift = grandTotal - acc;
+    if (amts.length && drift !== 0) amts[amts.length - 1] += drift;
+  }
   return amts;
 }
 
@@ -7429,7 +7445,7 @@ function quotePaper(q) {
   const co = q.company_snapshot || snapCompany(byId(DB.companies, q.company_id));
   const c = q.customer_snapshot || {};
   const items = (q.items || []).filter(i => (i.name || '').trim());
-  const t = calcQuote(q);
+  const t = quoteTotals(q);
   const taxRate = DB.settings.tax_rate || 0.05;
   const taxIncluded = q.price_display === 'tax_included';
   const inclAmts = taxIncluded ? taxInclusiveAmounts(items, taxRate, t.total) : null;
