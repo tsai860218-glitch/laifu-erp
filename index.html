@@ -1938,6 +1938,14 @@ function relevantToCurrentView(col) {
 }
 
 let _renderDebounce = null;
+// 記錄使用者最近一次「主動操作」的時間（捲動、滑鼠/觸控按下、打字、滾輪、滑動）。
+// 用途：多裝置同時線上時，別人的即時更新如果剛好在你正在操作的當下進來，
+// 先壓著不要整頁重繪，等你停手再套用，避免「正在看／正在編輯的那一列在眼前被擠走、畫面跳掉」。
+let _lastUserActivity = 0;
+try {
+  ['scroll', 'wheel', 'pointerdown', 'keydown', 'touchmove', 'touchstart'].forEach(ev =>
+    window.addEventListener(ev, () => { _lastUserActivity = Date.now(); }, { passive: true, capture: true }));
+} catch (e) {}
 // 別人剛好在改我正在看的這一筆時，不要整頁重繪打斷輸入，改成提示就好；
 // 跟目前畫面無關的變動不重繪；短時間內多筆變動合併成一次重繪，避免連環閃爍
 function safeRerender(changes, col) {
@@ -1959,15 +1967,17 @@ function isEditingFocus() {
   const t = el.tagName;
   return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || el.isContentEditable === true;
 }
-// 遠端同步觸發的重繪：如果使用者正在打字（或自動完成面板開著），先不要重繪，
-// 等他停手/離開欄位再繪，避免多人同時使用時「打到一半畫面跳掉、游標亂跑」。
+// 遠端同步觸發的重繪：如果使用者正在打字（或自動完成面板開著、有彈窗），或最近 1.5 秒內
+// 還在捲動／點擊等操作，先不要重繪，等他停手再繪，避免多人同時使用時
+// 「操作到一半畫面跳掉、正在看的那列被擠走、游標亂跑」。
 function scheduleRemoteRender() {
   clearTimeout(_renderDebounce);
   const tryRender = () => {
-    if (isEditingFocus() || (typeof acHost !== 'undefined' && acHost) || (typeof modalStack !== 'undefined' && modalStack.length)) {
-      _renderDebounce = setTimeout(tryRender, 800);   // 還在輸入/有彈窗，晚點再試
-      return;
-    }
+    const busy = isEditingFocus()
+      || (typeof acHost !== 'undefined' && acHost)
+      || (typeof modalStack !== 'undefined' && modalStack.length)
+      || (Date.now() - _lastUserActivity < 1500);
+    if (busy) { _renderDebounce = setTimeout(tryRender, 700); return; }
     render();
   };
   _renderDebounce = setTimeout(tryRender, 400);
