@@ -8776,7 +8776,7 @@ function editCompany(id) {
       el.querySelector('#logoF').onchange = e => { if (e.target.files[0]) readImg(e.target.files[0], d => { logo = d; drawAll(); }, 400); };
       el.querySelector('#stampF').onchange = e => { if (e.target.files[0]) readImg(e.target.files[0], d => { stamp = d; drawAll(); }, 400); };
       el.querySelector('#brandF').onchange = e => {
-        [...e.target.files].forEach(f => readImg(f, d => { brands.push(d); drawAll(); }, 240));
+        [...e.target.files].forEach(f => readImg(f, d => { brands.push(d); drawAll(); }, 2400));
       };
       el.querySelector('#logoClr').onclick = () => { logo = ''; drawAll(); };
       el.querySelector('#stampClr').onclick = () => { stamp = ''; drawAll(); };
