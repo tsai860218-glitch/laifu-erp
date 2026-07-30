@@ -358,7 +358,7 @@ body.col-resizing *{cursor:col-resize!important}
 }
 .irow .idx,.irow .del{padding-top:6px}
 .irow.head{
-  background:var(--bg);font-size:11px;font-weight:600;color:var(--text-2);
+  background:var(--bg);font-size:12.5px;font-weight:600;color:var(--text-2);
   padding:8px 12px;letter-spacing:.03em;position:sticky;top:56px;z-index:5;
 }
 .irow:last-child{border-bottom:none}
@@ -374,23 +374,23 @@ body.col-resizing *{cursor:col-resize!important}
   background:#FEF3C7;color:#92400E;border-bottom:1px solid #FDE68A;
   padding:7px 12px;font-size:11.5px;font-weight:600;display:flex;gap:6px;align-items:center;
 }
-.irow .idx{color:var(--text-3);font-family:var(--mono);font-size:12px;text-align:center}
+.irow .idx{color:var(--text-3);font-family:var(--mono);font-size:13px;text-align:center}
 .irow .nm{min-width:0}
 .irow .nm .t{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.irow .nm .s{font-size:11px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.irow .amt{text-align:right;font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums}
+.irow .nm .s{font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.irow .amt{text-align:right;font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums;font-size:14px}
 .irow .del{color:var(--text-3);cursor:pointer;background:none;border:none;font-size:16px;
   padding:2px 5px;border-radius:5px;line-height:1}
 .irow .del:hover{background:var(--red-bg);color:var(--red)}
-.irow .inp{height:30px;font-size:13px}
+.irow .inp{height:31px;font-size:14px}
 .irow .mfield label{display:none} /* 桌面版上方已經有「數量／未稅單價」欄位標題，這裡不用重複顯示，避免比其他欄位多一行造成對不齊 */
 .bom-toggle{
-  font-size:11px;color:var(--primary);cursor:pointer;font-weight:600;
-  background:none;border:none;padding:2px 0;margin-top:2px;
+  font-size:13.5px;color:var(--primary);cursor:pointer;font-weight:700;
+  background:none;border:none;padding:3px 0;margin-top:3px;text-decoration:underline;
 }
 .fi{display:flex;flex-direction:column;gap:5px}
 .fi-r{display:flex;gap:5px;align-items:center}
-.fi-r .inp{height:29px;font-size:12.5px}
+.fi-r .inp{height:31px;font-size:14px}
 .fi-r .f-br{flex:0 0 96px}
 .fi-r .f-nm{flex:1;min-width:0;font-weight:500}
 .fi-r .f-sp{flex:1;min-width:0}
@@ -404,9 +404,9 @@ textarea.f-sp{min-height:38px;line-height:1.5;resize:vertical;overflow:hidden;wh
   background:var(--bg);border:1px dashed var(--line-2);
 }
 body.cost-on .fi-meta{background:var(--orange-bg);border-color:#FDBA74;border-style:solid}
-.fi-lock{font-size:11px;color:var(--text-3);padding:2px 0}
+.fi-lock{font-size:12px;color:var(--text-3);padding:2px 0}
 .fi-tag{
-  flex:0 0 auto;font-size:10px;font-weight:700;color:var(--text-3);
+  flex:0 0 auto;font-size:11px;font-weight:700;color:var(--text-3);
   letter-spacing:.03em;white-space:nowrap;
 }
 .bom-box{
@@ -671,7 +671,7 @@ body.printing .print-root{
 .fi{display:flex;flex-direction:column;gap:5px}
 .fi-r{display:flex;gap:5px;align-items:center}
 .fi-r .inp{height:30px;font-size:12.5px}
-.f-pn{flex:0 0 108px;font-family:var(--mono);font-size:11.5px!important}
+.f-pn{flex:0 0 108px;font-family:var(--mono);font-size:13px!important}
 .f-br{flex:0 0 92px}
 .f-nm{flex:1;min-width:0;font-weight:600}
 .f-sp{flex:1;min-width:0}
@@ -684,7 +684,7 @@ body.cost-on .fi-meta{background:#FFF8F1;border-color:#F5C89B}
 .fi-tag{font-size:10px;font-weight:700;color:var(--text-3);flex:0 0 auto}
 body.cost-on .fi-tag{color:var(--orange)}
 .fi-lock{font-size:11px;color:var(--text-3);flex:0 0 auto}
-.fi-chk{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-2);
+.fi-chk{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text-2);
   white-space:nowrap;cursor:pointer;flex:0 0 auto}
 body:not(.cost-on) .fi-meta .f-cost,
 body:not(.cost-on) .fi-meta .f-sup{display:none}
@@ -762,29 +762,30 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 .inv-field{border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:var(--bg)}
 
 /* 報價明細：需搭配組裝配件（僅出貨單顯示） */
-/* 組裝配件清單（報價明細內、可展開，客戶看不到只印出貨單） */
-.asm-box{grid-column:1/-1;background:#FFF8F1;border:1px dashed #F5C89B;
+/* 組裝配件清單（報價明細內、可展開，客戶看不到只印出貨單）：藍底，欄位格式比照報價明細 */
+.asm-box{grid-column:1/-1;background:#EFF5FF;border:1px dashed #93C5FD;
   border-radius:var(--r-sm);padding:10px 12px;margin-top:6px}
-.asm-box-h{font-size:15px;font-weight:800;color:#C2410C;margin-bottom:7px;letter-spacing:.02em}
-.asm-row{display:flex;gap:5px;align-items:center;padding:5px 0;border-bottom:1px solid #F5E0C4}
+.asm-box-h{font-size:15px;font-weight:800;color:#1D4ED8;margin-bottom:7px;letter-spacing:.02em}
+.asm-row{display:flex;flex-direction:column;gap:5px;padding:8px 0;border-bottom:1px solid #DBEAFE}
 .asm-row:last-child{border-bottom:none}
-.asm-pn{flex:0 0 76px;font-family:var(--mono);font-size:11px!important}
-.asm-name{flex:2.6;min-width:0}
-.asm-qty{flex:0 0 60px}
-.asm-cost{flex:0 0 128px}
-.asm-sup{flex:0 0 92px;min-width:0}
-.asm-chk{display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--text-2);
-  white-space:nowrap;cursor:pointer;flex:0 0 52px}
-.asm-hd{display:flex;gap:5px;align-items:center;padding:1px 0 3px;font-size:10px;color:var(--text-3);font-weight:600}
-.asm-hd>span{min-width:0}
-.asm-hd .asm-qty,.asm-hd .asm-cost{text-align:center}
-.asm-hd .asm-tax-sp{flex:0 0 30px}
-.asm-hd .asm-del-sp{flex:0 0 22px}
-.asm-stocked{font-size:10.5px;color:var(--green);font-weight:600;flex:0 0 92px;display:flex;align-items:center}
-.asm-empty{font-size:11px;color:var(--text-3);padding:6px 0}
-.asm-row .inp{height:28px;font-size:12px}
-.asm-row .del{flex:0 0 22px;height:22px;border:none;background:transparent;color:var(--red);
-  font-size:16px;cursor:pointer;border-radius:5px}
+.asm-fr{display:flex;gap:5px;align-items:center}
+.asm-row .inp{height:31px;font-size:14px}
+.asm-pn{flex:0 0 108px;font-family:var(--mono);font-size:13px!important}
+.asm-br{flex:0 0 92px}
+.asm-nm{flex:1;min-width:0}
+.asm-sp{flex:1;min-width:0}
+textarea.asm-sp{min-height:34px;line-height:1.5;resize:vertical;overflow:hidden;white-space:pre-wrap;font-family:inherit;padding-top:6px}
+.asm-ctrl{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.asm-cl{font-size:12px;color:var(--text-3);font-weight:600;white-space:nowrap}
+.asm-qty{flex:0 0 70px}
+.asm-cost{flex:0 0 110px}
+.asm-sup{flex:0 0 150px;min-width:0}
+.asm-chk{display:flex;align-items:center;gap:3px;font-size:12px;color:var(--text-2);
+  white-space:nowrap;cursor:pointer;flex:0 0 auto}
+.asm-stocked{font-size:12px;color:var(--green);font-weight:600;flex:0 0 150px;display:flex;align-items:center}
+.asm-empty{font-size:12.5px;color:var(--text-3);padding:6px 0}
+.asm-row .del{flex:0 0 24px;height:24px;border:none;background:transparent;color:var(--red);
+  font-size:16px;cursor:pointer;border-radius:5px;margin-left:auto}
 .asm-row .del:hover{background:var(--red-50)}
 
 /* 出貨總覽表：已開發票勾選+日期(內嵌在表格列裡) */
@@ -5796,7 +5797,7 @@ function drawItems() {
   // 組裝配件的料號/品名自動完成：搜尋過去在任何一張報價單用過的配件（不管當時是哪個商品底下的），
   // 選了就把料號/品名/廠商/成本一次帶入這一列，不用每次手動重打一樣的料
   if (editable) {
-    box.querySelectorAll('.asm-pn,.asm-name').forEach(inp => {
+    box.querySelectorAll('.asm-pn,.asm-nm').forEach(inp => {
       floatAC(inp,
         kw => {
           if (!kw) return [];
@@ -5840,13 +5841,13 @@ function drawItems() {
           const row = item.row;
           if (row.src === 'product') {
             const p = row.p;
-            a.part_no = p.part_no || ''; a.name = p.name || '';
+            a.part_no = p.part_no || ''; a.brand = p.brand || ''; a.name = p.name || ''; a.spec = p.spec || '';
             a.supplier_name = p.default_supplier || ''; a.cost = p.default_cost || 0;
             a.cost_tax = 'ex';
             save(); drawItems(); toast(`已帶入 ${p.name}`);
           } else {
             const src = row.a;
-            a.part_no = src.part_no || ''; a.name = src.name || '';
+            a.part_no = src.part_no || ''; a.brand = src.brand || ''; a.name = src.name || ''; a.spec = src.spec || '';
             a.supplier_name = src.supplier_name || ''; a.cost = src.cost || 0;
             a.cost_tax = src.cost_tax || 'ex';
             save(); drawItems(); toast(`已帶入 ${src.name || src.part_no}`);
@@ -6036,7 +6037,7 @@ function addAssemblyItem(id) {
   const it = byId(QE.items, id);
   it.assembly_items = it.assembly_items || [];
   it.assembly_items.push({
-    id: uid('ai'), part_no: '', name: '', qty: 1, unit_price: 0,
+    id: uid('ai'), part_no: '', brand: '', name: '', spec: '', qty: 1, unit_price: 0,
     in_stock: false, supplier_name: '', cost: 0, cost_tax: 'ex'
   });
   asmOpen[id] = true;
@@ -6057,24 +6058,29 @@ function assemblyBox(it, editable) {
   const rows = it.assembly_items || [];
   return `<div class="asm-box">
     <div class="asm-box-h">組裝配件（客戶看不到，只印在出貨單）</div>
-    ${rows.length ? `<div class="asm-hd">
-        <span class="asm-pn"></span><span class="asm-name"></span>
-        <span class="asm-qty">數量</span><span class="asm-chk"></span>
-        <span class="asm-sup">廠商</span><span class="asm-cost">成本</span>
-        <span class="asm-tax-sp"></span>${editable ? '<span class="asm-del-sp"></span>' : ''}
-      </div>` : ''}
     ${rows.length ? rows.map(a => `
       <div class="asm-row">
-        <input class="inp asm-pn" data-ai="${it.id}|${a.id}" data-k="part_no" placeholder="料號" value="${esc(a.part_no || '')}" ${D}>
-        <input class="inp asm-name" data-ai="${it.id}|${a.id}" data-k="name" placeholder="品名" value="${esc(a.name || '')}" ${D}>
-        <input class="inp num asm-qty" type="number" step="1" min="0" data-ai="${it.id}|${a.id}" data-k="qty" placeholder="數量" value="${a.qty}" ${D}>
-        <label class="asm-chk"><input type="checkbox" data-ai="${it.id}|${a.id}" data-k="in_stock" ${a.in_stock ? 'checked' : ''} ${D}> 有庫</label>
-        ${a.in_stock
-          ? '<span class="asm-stocked">✓ 庫存</span>'
-          : `<input class="inp asm-sup" list="supList" data-ai="${it.id}|${a.id}" data-k="supplier_name" placeholder="廠商" value="${esc(a.supplier_name || '')}" ${D}>`}
-        <input class="inp num asm-cost" type="number" data-ai="${it.id}|${a.id}" data-k="cost" placeholder="成本" value="${a.cost || 0}" ${D}>
-        <button class="taxbtn" data-ai="${it.id}|${a.id}" data-aitax ${D}>${COST_TAX[a.cost_tax || 'ex']}</button>
-        ${editable ? `<button class="del" onclick="delAssemblyItem('${it.id}','${a.id}')" aria-label="刪除">×</button>` : ''}
+        <div class="asm-fr">
+          <input class="inp asm-pn" data-ai="${it.id}|${a.id}" data-k="part_no" placeholder="料號" value="${esc(a.part_no || '')}" autocomplete="off" ${D}>
+          <input class="inp asm-br" data-ai="${it.id}|${a.id}" data-k="brand" placeholder="品牌" value="${esc(a.brand || '')}" ${D}>
+          <input class="inp asm-nm" data-ai="${it.id}|${a.id}" data-k="name" placeholder="品名" value="${esc(a.name || '')}" autocomplete="off" ${D}>
+        </div>
+        <div class="asm-fr">
+          <textarea class="inp asm-sp" data-ai="${it.id}|${a.id}" data-k="spec" placeholder="規格（可換行，每行一項）" rows="1" ${D}
+            oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'">${esc(a.spec || '')}</textarea>
+        </div>
+        <div class="asm-ctrl">
+          <span class="asm-cl">數量</span>
+          <input class="inp num asm-qty" type="number" step="1" min="0" data-ai="${it.id}|${a.id}" data-k="qty" value="${a.qty}" ${D}>
+          <label class="asm-chk"><input type="checkbox" data-ai="${it.id}|${a.id}" data-k="in_stock" ${a.in_stock ? 'checked' : ''} ${D}> 有庫</label>
+          ${a.in_stock
+            ? '<span class="asm-stocked">✓ 庫存出貨</span>'
+            : `<input class="inp asm-sup" list="supList" data-ai="${it.id}|${a.id}" data-k="supplier_name" placeholder="廠商" value="${esc(a.supplier_name || '')}" ${D}>`}
+          <span class="asm-cl">成本</span>
+          <input class="inp num asm-cost" type="number" data-ai="${it.id}|${a.id}" data-k="cost" value="${a.cost || 0}" ${D}>
+          <button class="taxbtn" data-ai="${it.id}|${a.id}" data-aitax ${D}>${COST_TAX[a.cost_tax || 'ex']}</button>
+          ${editable ? `<button class="del" onclick="delAssemblyItem('${it.id}','${a.id}')" aria-label="刪除">×</button>` : ''}
+        </div>
       </div>`).join('') : '<div class="asm-empty">還沒有配件</div>'}
     ${editable ? `<button class="btn sm ghost" style="margin-top:6px" onclick="addAssemblyItem('${it.id}')">＋ 新增配件</button>` : ''}
   </div>`;
@@ -6331,7 +6337,7 @@ function makeDelivery(q, co, o) {
     cost_tax: 'ex',
     need_assembly: false,
     assembly_items: (it.assembly_items || []).map(a => ({
-      id: uid('ai'), part_no: a.part_no || '', name: a.name, qty: a.qty, unit_price: a.unit_price,
+      id: uid('ai'), part_no: a.part_no || '', brand: a.brand || '', name: a.name, spec: a.spec || '', qty: a.qty, unit_price: a.unit_price,
       in_stock: a.in_stock, supplier_name: a.supplier_name, cost: a.cost, cost_tax: a.cost_tax || 'ex'
     })),
     is_manual: false,
@@ -7568,8 +7574,8 @@ function dpItemRowsHtml(i, rowNo, rg) {
   // 各列小計相加就等於下面的總計（總計來自 calcDoc()，本來就只算主商品）。
   // 品名、料號、數量，以及右邊那欄的廠商與成本（未稅/含稅）照印，採購跟倉管要的都還在。
   const asm = hasAsm ? i.assembly_items.map(a => `<tr class="cmp" data-rg="${rg}">
-    <td></td><td></td>
-    <td class="ind">└ <span class="asm-note-tag">⚠ 組裝配件</span> ${esc(a.name)}${a.part_no ? ` <span class="mut">(${esc(a.part_no)})</span>` : ''}</td>
+    <td></td><td class="item-brand">${esc(a.brand || '')}</td>
+    <td class="ind">└ <span class="asm-note-tag">⚠ 組裝配件</span> ${esc(a.name)}${a.spec ? `<div class="sp">${esc(a.spec)}</div>` : ''}${a.part_no ? `<div class="sp">料號：${esc(a.part_no)}</div>` : ''}</td>
     <td class="r">0</td><td class="r">${moneyD(a.qty)}</td>
     <td class="r">0</td>
     <td class="stockcol">${dpStockCell(a)}</td>
