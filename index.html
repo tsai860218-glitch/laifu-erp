@@ -601,11 +601,11 @@ body.cost-on.mobile .cost-warn{display:flex}
 
 /* 總計/簽名區固定貼在紙張底部，不管表格內容多少都不會跟著漂移 */
 .dp-bottom{position:absolute;left:9mm;right:9mm;bottom:7mm}
-/* 急件紅字戳記：貼在「出貨資訊框」右上角（如出貨單附圖位置） */
+/* 急件紅字戳記：落在「出貨資訊框」內側右上角（灰色框內） */
 .dp-urgent{
-  position:absolute;top:-4mm;right:-1mm;
-  color:#D0021B;font-weight:800;font-size:12pt;letter-spacing:.14em;
-  border:1.2pt solid #D0021B;border-radius:1mm;padding:.4mm 2.4mm;background:#fff;
+  position:absolute;top:1.4mm;right:1.6mm;
+  color:#D0021B;font-weight:800;font-size:11pt;letter-spacing:.12em;
+  border:1pt solid #D0021B;border-radius:1mm;padding:.3mm 1.8mm;background:#fff;
   -webkit-print-color-adjust:exact;print-color-adjust:exact;
 }
 .dp-sb{flex:1;min-height:6mm}
@@ -765,7 +765,7 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 /* 組裝配件清單（報價明細內、可展開，客戶看不到只印出貨單） */
 .asm-box{grid-column:1/-1;background:#FFF8F1;border:1px dashed #F5C89B;
   border-radius:var(--r-sm);padding:10px 12px;margin-top:6px}
-.asm-box-h{font-size:12.5px;font-weight:700;color:#C2410C;margin-bottom:6px}
+.asm-box-h{font-size:15px;font-weight:800;color:#C2410C;margin-bottom:7px;letter-spacing:.02em}
 .asm-row{display:flex;gap:5px;align-items:center;padding:5px 0;border-bottom:1px solid #F5E0C4}
 .asm-row:last-child{border-bottom:none}
 .asm-pn{flex:0 0 76px;font-family:var(--mono);font-size:11px!important}
@@ -6942,12 +6942,6 @@ function viewDelivery(v) {
       </div>
 
       <div class="side">
-        ${canEditThis ? `<div class="btn-row">
-          ${editable
-            ? `<button class="btn primary lg" style="flex:1" onclick="dvSaveEdit('${d.id}')">✓ 存檔</button>
-               <button class="btn lg" onclick="dvCancelEdit('${d.id}')">取消</button>`
-            : `<button class="btn lg" style="flex:1" onclick="dvStartEdit('${d.id}')">✎ 編輯</button>`}
-        </div>` : ''}
         <div class="total" id="dvTotal"></div>
         <div class="cost-panel" id="dvCost"></div>
         <div class="btn-row">
@@ -6965,6 +6959,12 @@ function viewDelivery(v) {
         <div class="btn-row">
           <button class="btn danger" onclick="deleteDelivery('${d.id}')">🗑 刪除出貨單</button>
         </div>
+        ${canEditThis ? `<div class="btn-row">
+          ${editable
+            ? `<button class="btn primary lg" style="flex:1" onclick="dvSaveEdit('${d.id}')">✓ 存檔</button>
+               <button class="btn lg" onclick="dvCancelEdit('${d.id}')">取消</button>`
+            : `<button class="btn lg" style="flex:1" onclick="dvStartEdit('${d.id}')">✎ 編輯</button>`}
+        </div>` : ''}
       </div>
     </div>
     ${supDatalist()}`;
