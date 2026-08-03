@@ -5558,9 +5558,17 @@ function cloneQuote(id) {
   q.quote_date = today(); q.valid_until = addDays(today(), DB.settings.valid_days);
   q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null; q.sent_at = null;
   q.company_snapshot = null; q.created_at = new Date().toISOString();
+  // 複製出來的新報價，建立人員／最後修改人改成「現在按複製的人」，不要沿用原單的建立人；
+  // 異動紀錄也重設，從這個人建立草稿起算（原單 A 的歷程不帶過來）
+  const op = currentOperator();
+  q.created_by_op = op;
+  q.last_modified_by = op;
+  q.last_modified_at = q.created_at;
+  q.edit_log = [{ by: op || '（未設定名字）', at: q.created_at, action: `複製自 ${src.quote_no} 建立草稿` }];
   q.items.forEach(i => {
     i.id = uid('qi');
     (i.components || []).forEach(c => c.id = uid('qc'));
+    (i.assembly_items || []).forEach(a => a.id = uid('ai'));
   });
   DB.quotes.push(q); save();
   _quoteDirty = { id: null, at: 0 };
