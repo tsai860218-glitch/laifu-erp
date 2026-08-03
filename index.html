@@ -6384,7 +6384,9 @@ function makeDelivery(q, co, o) {
     delivery_date: o.delivery_date || today(),
     status: 'pending_delivery',
     delivery_target: (cust && cust.default_delivery_target) || '',
-    delivery_contact: (cust && cust.default_delivery_contact) || '',
+    delivery_contact: (cust && cust.default_delivery_contact)
+      || [q.customer_snapshot && q.customer_snapshot.contact_person, q.customer_snapshot && q.customer_snapshot.phone].filter(Boolean).join('　')
+      || '',
     ship_address: (q.customer_snapshot && q.customer_snapshot.address) || '',
     shipping_method: o.shipping_method || '貨到公司', shipping_method_other: o.shipping_method_other || '',
     invoice_method: (cust && cust.default_invoice_method) || '隨貨',
