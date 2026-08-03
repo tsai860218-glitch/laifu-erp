@@ -6105,12 +6105,25 @@ const toIncl = ex => Math.round((+ex || 0) * taxMul() * 100) / 100;   // 未稅 
 const toEx = inc => (+inc || 0) / taxMul();                            // 含稅 → 未稅（存檔用）
 const isTaxInclQuote = q => q && q.price_display === 'tax_included';
 
-// 一張報價單對外顯示的「未稅／稅額／含稅總計」的單一計算來源。
+// 判斷一張單據（報價單或出貨單）是否走「含稅」金額。
+// 出貨單若沒存 price_display（早期開立的舊資料），回頭看它來源報價單的設定，
+// 這樣從含稅報價開立的舊出貨單也能顯示一致的含稅金額。
+function docIsTaxIncl(doc) {
+  if (!doc) return false;
+  if (doc.price_display) return doc.price_display === 'tax_included';
+  if (doc.quote_id) {
+    const q = byId(DB.quotes, doc.quote_id);
+    if (q) return q.price_display === 'tax_included';
+  }
+  return false;
+}
+
+// 一張單據對外顯示的「未稅／稅額／含稅總計」的單一計算來源。
 // ・含稅模式：以各列含稅小計（用未四捨五入的未稅計算）的加總為總計，未稅與稅額由含稅回推，
-//   這樣列表、編輯器、PDF 三邊完全一致，也不會出現「客戶談好含稅 4000、系統卻顯示 4001」。
+//   這樣報價單、出貨單、列表、PDF 完全一致，不會出現「客戶談好含稅 4000、系統卻顯示 4001」。
 // ・一般（未稅＋稅分開）模式：沿用 calcDoc（未稅加總 → 稅 → 含稅）。
 function quoteTotals(q) {
-  if (isTaxInclQuote(q)) {
+  if (docIsTaxIncl(q)) {
     const items = (q.items || []).filter(i => (i.name || '').trim());
     const rate = DB.settings.tax_rate || 0.05;
     const total = taxInclusiveAmounts(items, rate).reduce((s, x) => s + x, 0);
@@ -6394,6 +6407,7 @@ function makeDelivery(q, co, o) {
     invoice_note: (cust && cust.default_invoice_note) || '',
     attachment: '', note: (o.note != null && o.note !== '') ? o.note : DEFAULT_DELIVERY_NOTE,
     no_invoice: false, invoice_copies: 3,
+    price_display: q.price_display || 'breakdown',
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '開立出貨單' }],
     invoiced: false, invoice_date: '', invoice_no: '', customer_po: '',
@@ -6421,7 +6435,7 @@ function syncQuoteStatus(q) {
 let dSortState = { key: 'created_at', dir: 'desc' };
 
 function deliverySortValue(d, key) {
-  const t = calcDoc(d);
+  const t = quoteTotals(d);
   switch (key) {
     case 'delivery_no': return d.delivery_no || '';
     case 'customer': return d.customer_snapshot?.name || '';
@@ -6501,7 +6515,7 @@ function deliveryTable(list, opts) {
       ${D_COLS.map(([k, label]) => `<th class="sortable ${k === 'amount' ? 'r' : rc(k)}" data-sortkey="${k}">${label}${sortArrow(dSortState, k)}</th>`).join('')}
     </tr></thead><tbody>
     ${sorted.map(d => {
-      const t = calcDoc(d);
+      const t = quoteTotals(d);
       const buy = allLines(d).filter(i => !i.in_stock).length;
       const names = d.items.map(i => i.name).filter(Boolean);
       const prodTxt = !names.length ? '<span class="muted">—</span>'
@@ -6664,8 +6678,8 @@ function drawDSumBar(list) {
   const bar = document.getElementById('dSumBar');
   if (!bar) return;
   const active = list.filter(d => d.status !== 'cancelled');
-  const amount = active.reduce((s, d) => s + calcDoc(d).total, 0);
-  const subtotal = active.reduce((s, d) => s + calcDoc(d).subtotal, 0);
+  const amount = active.reduce((s, d) => s + quoteTotals(d).total, 0);
+  const subtotal = active.reduce((s, d) => s + quoteTotals(d).subtotal, 0);
   const cost = active.reduce((s, d) => s + calcCost(d).cost, 0);
   const profit = subtotal - cost; // 毛利率基準用未稅金額，含稅的稅額只是代收代付，不是營收
   const rate = subtotal ? profit / subtotal : 0;
@@ -6755,7 +6769,7 @@ function exportDeliveriesExcel() {
   const list = dFilteredList;
   if (!list.length) return toast('目前沒有資料可以匯出', 'err');
   const rows = list.map(d => {
-    const t = calcDoc(d);
+    const t = quoteTotals(d);
     const c = calcCost(d);
     const names = d.items.filter(i => (i.name || '').trim())
       .map(i => `${i.name}${i.brand ? '(' + i.brand + ')' : ''} x${i.qty}`).join('；');
@@ -7202,7 +7216,7 @@ function delDvAsmItem(id, aid) {
 }
 
 function drawDvTotals() {
-  const d = DE, t = calcDoc(d);
+  const d = DE, t = quoteTotals(d);
   const tb = document.getElementById('dvTotal');
   if (tb) tb.innerHTML = `
     <div class="tl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
@@ -7813,7 +7827,7 @@ function paginateDeliveryItemsMeasured(d, co, c, t, ship) {
 function deliveryPaper(d) {
   const co = byId(DB.companies, d.company_id) || {};
   const c = d.customer_snapshot || {};
-  const t = calcDoc(d);
+  const t = quoteTotals(d);
   const ship = d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : d.shipping_method;
   const result = paginateDeliveryItemsMeasured(d, co, c, t, ship);
   const pages = result.pages;
