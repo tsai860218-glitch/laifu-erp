@@ -4717,7 +4717,7 @@ function quoteSortValue(q, key) {
     case 'company': return (byId(DB.companies, q.company_id) || {}).badge || '';
     case 'sales': return userName(q.sales_user_id) || q.sales_name || '';
     case 'quote_date': return q.quote_date || '';
-    case 'amount': return t.total;
+    case 'amount': return t.subtotal;
     case 'status': return QS[q.status] ? QS[q.status].label : '';
     case 'order_method': return q.order_method ? ORDER_METHODS[q.order_method].label : '';
     case 'note': return q.note || '';
@@ -4729,7 +4729,7 @@ function quoteSortValue(q, key) {
 
 const Q_COLS = [
   ['quote_no', '單號'], ['customer', '客戶'], ['product', '商品'], ['company', '公司'],
-  ['sales', '業務'], ['quote_date', '報價日期'], ['amount', '含稅金額'],
+  ['sales', '業務'], ['quote_date', '報價日期'], ['amount', '未稅金額'],
   ['status', '狀態'], ['order_method', '下單方式'], ['note', '備註'],
   ['created_by', '建立人員'], ['edit_log', '異動紀錄']
 ];
@@ -4850,7 +4850,7 @@ function quoteTable(list, opts) {
         <td class="nowrap"><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.badge || co?.code || '?')}</span></td>
         <td class="nowrap">${esc(userName(q.sales_user_id) || q.sales_name || '—')}</td>
         <td class="nowrap">${fmtDateShort(q.quote_date)}${exp ? ' <span class="bdg red" style="height:17px;font-size:10px">將到期</span>' : ''}</td>
-        <td class="r money nowrap">${money(t.total)}</td>
+        <td class="r money nowrap">${money(t.subtotal)}</td>
         <td class="nowrap">${badge(QS, q.status)}</td>
         <td class="nowrap">${om ? `<span class="bdg blue plain">${om.ico} ${om.label}</span>` : '<span class="muted">—</span>'}</td>
         <td class="prod-col muted" title="${esc(q.note || '')}">${esc(q.note || '—')}</td>
@@ -6453,7 +6453,7 @@ function deliverySortValue(d, key) {
     case 'created_by': return d.created_by_op || '';
     case 'delivery_date': return d.delivery_date || '';
     case 'items': return d.items.length;
-    case 'amount': return t.total;
+    case 'amount': return t.subtotal;
     case 'buy': return allLines(d).filter(i => !i.in_stock).length;
     case 'status': return DS[d.status] ? DS[d.status].label : '';
     case 'invoiced': return d.invoiced ? 1 : 0;
@@ -6467,7 +6467,7 @@ function deliverySortValue(d, key) {
 const D_COLS = [
   ['delivery_no', '出貨單號'], ['customer', '客戶'], ['product', '商品'], ['quote_no', '來源報價'],
   ['sales', '業務'], ['created_by', '開單人員'], ['delivery_date', '日期'], ['items', '品項'],
-  ['amount', '含稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'],
+  ['amount', '未稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'],
   ['invoice_no', '發票號碼'], ['customer_po', '客戶PO單號'], ['note', '備註'], ['edit_log', '異動紀錄']
 ];
 
@@ -6539,7 +6539,7 @@ function deliveryTable(list, opts) {
         <td class="muted nowrap">${esc(d.created_by_op || '—')}</td>
         <td class="nowrap">${fmtDateShort(d.delivery_date)}</td>
         <td class="c">${d.items.length}</td>
-        <td class="r money nowrap">${money(t.total)}</td>
+        <td class="r money nowrap">${money(t.subtotal)}</td>
         <td class="c">${buy ? `<span class="bdg orange plain">${buy}</span>` : '<span class="muted">—</span>'}</td>
         <td class="nowrap">${badge(DS, d.status)}</td>
         <td class="c inv-cell" onclick="event.stopPropagation()">
@@ -6693,7 +6693,7 @@ function drawDSumBar(list) {
   const rate = subtotal ? profit / subtotal : 0;
   bar.innerHTML = `
     <div class="dsum-item"><span>出貨單數</span><b>${active.length}</b></div>
-    <div class="dsum-item"><span>出貨金額（含稅）</span><b>NT$ ${money(amount)}</b></div>
+    <div class="dsum-item"><span>出貨金額（未稅）</span><b>NT$ ${money(subtotal)}</b></div>
     ${costOn ? `
     <div class="dsum-item"><span>成本合計</span><b>NT$ ${money(cost)}</b></div>
     <div class="dsum-item"><span>毛利（未稅基準）</span><b class="${profit >= 0 ? 'pos' : 'neg'}">NT$ ${money(profit)}</b></div>
@@ -8245,6 +8245,7 @@ function viewProducts(v) {
               onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(page.map(p => p.id)))})"></th>
           ${th('fav', '★', 'c')}${th('part_no', '料號')}${th('name', '品名')}${th('brand', '品牌')}${th('category', '分類')}${th('supplier', '進貨廠商')}
           ${th('cost', '成本', 'r cost-col')}${th('price', '牌價', 'r')}${th('bom', 'BOM', 'c')}${th('note', '備註')}
+          <th style="width:56px" onclick="event.stopPropagation()"></th>
         </tr></thead><tbody>
         ${page.map(p => `<tr>
           <td onclick="event.stopPropagation()"><input type="checkbox" ${pSelected.has(p.id) ? 'checked' : ''} onchange="toggleSel('p','${p.id}', this.checked)"></td>
@@ -8260,6 +8261,7 @@ function viewProducts(v) {
             ${p.price_ref_date ? `<div class="muted" style="font-size:10px">${esc(p.price_ref_source || '')} ${fmtDateShort(p.price_ref_date)}</div>` : ''}</td>
           <td onclick="editProduct('${p.id}')" class="c">${p.has_bom ? `<span class="bdg blue plain">${(p.components || []).length} 項</span>` : '<span class="muted">—</span>'}</td>
           <td onclick="editProduct('${p.id}')" class="muted prod-col" title="${esc(p.note || '')}">${esc(p.note || '—')}</td>
+          <td onclick="event.stopPropagation()" class="c"><button class="btn sm ghost" onclick="event.stopPropagation();cloneProduct('${p.id}')">複製</button></td>
         </tr>`).join('')}</tbody></table>`;
     document.getElementById('pPageBar').innerHTML = list.length ? pageBarHtml('products', info) : '';
     makeColumnsResizable('plist', 'products');
@@ -8385,13 +8387,27 @@ function toggleFav(id) {
   toast(p.is_favorite ? '已設為常用' : '已取消常用');
 }
 
-function editProduct(id) {
-  const p = id ? JSON.parse(JSON.stringify(byId(DB.products, id))) : {
+// 從商品列表直接「複製」一筆商品：以現有商品為底稿，開一個「新商品」編輯視窗
+// （名稱加上「（複製）」、取消常用星號、零件重新編號），改好後按儲存才會新增，原商品完全不動。
+function cloneProduct(id) {
+  const src = byId(DB.products, id);
+  if (!src) return;
+  const s = JSON.parse(JSON.stringify(src));
+  s.id = null;
+  s.is_favorite = false;
+  s.name = (src.name || '') + '（複製）';
+  (s.components || []).forEach(c => c.id = uid('pc'));
+  editProduct(null, s);
+  toast('已建立複本，改好後按儲存', 'ok');
+}
+
+function editProduct(id, seed) {
+  const p = id ? JSON.parse(JSON.stringify(byId(DB.products, id))) : (seed || {
     id: null, part_no: '', brand: '', name: '', spec: '', unit: '台',
     list_price: 0, default_cost: 0, category: '', default_supplier: '',
     price_ref_date: '', price_ref_source: '', note: '',
     has_bom: false, is_active: true, is_favorite: false, components: []
-  };
+  });
 
   const catOptions = () => majorCategories().map(major => {
     const subs = subCategoriesOf(major.id);
@@ -8445,6 +8461,7 @@ function editProduct(id) {
       ${supDatalist()}
       <datalist id="brandList">${[...new Set((DB.products || []).map(x => (x.brand || '').trim()).filter(Boolean))].sort().map(b => `<option value="${esc(b)}">`).join('')}</datalist>`,
     footer: `${id ? '<button class="btn danger left" data-del>刪除</button>' : ''}
+             ${id ? '<button class="btn" data-clone>複製為新商品</button>' : ''}
              <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
     onMount(el, close) {
       const catSel = el.querySelector('#pcatSel');
@@ -8572,6 +8589,17 @@ function editProduct(id) {
         });
       };
       const d = el.querySelector('[data-del]');
+      const cl = el.querySelector('[data-clone]');
+      if (cl) cl.onclick = () => {
+        // 以目前這筆商品為底稿，複製成一筆「新商品」讓使用者修改後再儲存（原商品不動）
+        const s = JSON.parse(JSON.stringify(p));
+        s.id = null; s.is_favorite = false;
+        s.name = (p.name || '') + '（複製）';
+        (s.components || []).forEach(c => c.id = uid('pc'));
+        close();
+        editProduct(null, s);
+        toast('已建立複本，改好後按儲存', 'ok');
+      };
       if (d) d.onclick = () => {
         const n = DB.quotes.filter(q => q.items.some(i => i.product_id === id)).length;
         if (n) return toast(`此商品被 ${n} 張報價使用，不可刪除（既有報價使用的是快照，不受影響，但主檔仍需保留）`, 'err');
