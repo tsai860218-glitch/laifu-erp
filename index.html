@@ -1522,6 +1522,9 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
      'dev'  ＝強制開發模式（永遠不連雲端，純本機測試）。
      'prod' ＝強制正式模式（就算在本機也連正式雲端；只有你很清楚要對正式資料庫測試時才用）。*/
 const ENV_MODE = 'auto';
+// 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
+// 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
+const APP_BUILD = 'sync-throttle-2026-08-07e';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -1791,12 +1794,12 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 //     這樣資料不會漏（先前大量匯入時，後面幾批被塞爆拒絕，正是出貨單／租賃單掉資料的原因）。
 //  3) 只有真正壞掉的資料（權限、格式）才逐筆隔離並記錄，讓其他資料照常上雲。
 async function fsBatchWrite(ops) {
-  const CHUNK = 150;
+  const CHUNK = 50;
   const failures = [];
   for (let i = 0; i < ops.length; i += CHUNK) {
     const chunk = ops.slice(i, i + CHUNK);
     let attempt = 0, done = false, lastErr = null;
-    while (!done && attempt < 7) {
+    while (!done && attempt < 8) {
       attempt++;
       try {
         const batch = fbDb.batch();
@@ -1807,9 +1810,10 @@ async function fsBatchWrite(ops) {
         lastErr = e;
         const code = (e && e.code) || '';
         if (code === 'resource-exhausted' || code === 'unavailable' || code === 'deadline-exceeded' || code === 'aborted' || code === 'cancelled') {
-          // 暫時性：寫入串流塞滿或連線不穩 → 等佇列排空再重試同一批（指數退避，最長 8 秒）
+          // 暫時性：寫入串流塞滿或連線不穩 → 等佇列排空再重試同一批。
+          // Firestore 塞爆時自己會進入「最大退避」，所以這裡等久一點（最長 30 秒）才有意義。
           setSyncStatus('syncing');
-          await sleep(Math.min(1200 * Math.pow(2, attempt - 1), 8000));
+          await sleep(Math.min(3000 * Math.pow(2, attempt - 1), 30000));
           continue;
         }
         if (code === 'permission-denied') {
@@ -1842,7 +1846,7 @@ async function fsBatchWrite(ops) {
         id: (op.ref && op.ref.id) || '?', code: (lastErr && lastErr.code) || '', msg: (lastErr && lastErr.message) || ''
       }));
     }
-    await sleep(150);   // 每批之間喘口氣，讓寫入串流排空
+    await sleep(250);   // 每批之間喘口氣，讓寫入串流排空
   }
   if (failures.length) {
     const cols = [...new Set(failures.map(f => f.col))];
@@ -10004,6 +10008,7 @@ function viewSettings(v) {
         公司 ${DB.companies.length}　業務 ${DB.users.length}　客戶 ${DB.customers.length}　商品 ${DB.products.length}　
         常用代理商 ${DB.suppliers.length}　報價 ${DB.quotes.length}　出貨 ${DB.deliveries.length}
       </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">程式版本 build：${esc(APP_BUILD)}</div>
     </div></div>`;
 
   document.getElementById('saveSet').onclick = () => {
@@ -10403,6 +10408,7 @@ function deleteAccount(id) {
    §22 開機
    =========================================================== */
 function boot() {
+  console.log('%c報價出貨系統 build: ' + APP_BUILD, 'background:#111;color:#0f0;padding:2px 8px;border-radius:4px;font-weight:bold');
   if (IS_DEV) {
     try {
       const b = document.createElement('div');
