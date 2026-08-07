@@ -297,6 +297,31 @@ body.col-resizing *{cursor:col-resize!important}
 .modal-f{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;background:var(--bg)}
 .modal-f .left{margin-right:auto}
 
+/* Drawer（右側滑出，商品明細用）*/
+.mask.drawer-mask{justify-content:flex-end;align-items:stretch;padding:0}
+.drawer{background:#fff;box-shadow:var(--sh-lg);width:100%;max-width:760px;height:100vh;
+  display:flex;flex-direction:column;overflow:hidden;animation:drawerIn .18s ease-out}
+@keyframes drawerIn{from{transform:translateX(24px);opacity:.4}to{transform:none;opacity:1}}
+.drawer .modal-b{padding:0}
+.drawer-tabs{display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--line);
+  background:var(--bg);overflow-x:auto;flex:0 0 auto}
+.drawer-tab{padding:11px 14px;font-size:13px;font-weight:600;color:var(--text-2);cursor:pointer;
+  border:none;background:none;border-bottom:2px solid transparent;white-space:nowrap}
+.drawer-tab:hover{color:var(--text)}
+.drawer-tab.on{color:var(--brand,#2563eb);border-bottom-color:var(--brand,#2563eb)}
+.drawer-pane{padding:18px;overflow-y:auto;flex:1}
+.drawer-pane[hidden]{display:none}
+@media(max-width:640px){.drawer{max-width:100%}}
+.dw-grid{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.dw-r{display:flex;background:#fff;padding:9px 12px;font-size:13px;gap:12px}
+.dw-k{color:var(--text-3);width:96px;flex:0 0 96px}
+.dw-v{color:var(--text);flex:1;word-break:break-word}
+.dw-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
+.dw-stat{background:var(--bg,#f8fafc);border:1px solid var(--line);border-radius:8px;padding:12px 8px;text-align:center}
+.dw-stat-v{font-size:22px;font-weight:800;line-height:1.1}
+.dw-stat-k{font-size:11px;color:var(--text-3);margin-top:4px}
+.tbl.hide-cost .cost-col{display:none}
+
 /* Toast */
 #toastRoot{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:200;
   display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
@@ -736,6 +761,8 @@ body:not(.cost-on) .fi-meta .f-sup{display:none}
 
 /* 總覽表：商品欄省略號 */
 .prod-col{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stk-col{background:#EFF6FF}
+.tbl tbody tr:hover .stk-col{background:#E3EDFF}
 
 /* ============================================================
    客戶：多聯絡窗口／廠區管理
@@ -1486,8 +1513,35 @@ const FIREBASE_CONFIG = {
 // 對應上面第 4 步驟建立的共用帳號 Email（密碼在登入畫面輸入，不會寫在程式碼裡）
 const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 
-const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY');
+/* ── 開發模式 vs 正式環境切換 ──
+   目的：還沒部署到 GitHub、直接用檔案（file://）或本機開啟時，不要連到正式 Firebase，
+   以免測試時把測試資料寫進正式資料庫、或造成寫入錯誤。
+   ENV_MODE：
+     'auto'（預設）＝自動判斷：file:// 或 localhost/127.0.0.1 視為開發模式（不連雲端，純本機）；
+                    部署到 GitHub Pages 等 https 網站則視為正式（正常連雲端）。
+     'dev'  ＝強制開發模式（永遠不連雲端，純本機測試）。
+     'prod' ＝強制正式模式（就算在本機也連正式雲端；只有你很清楚要對正式資料庫測試時才用）。*/
+const ENV_MODE = 'auto';
+function isDevEnv() {
+  if (ENV_MODE === 'dev') return true;
+  if (ENV_MODE === 'prod') return false;
+  const p = (location.protocol || ''), h = (location.hostname || '');
+  return p === 'file:' || h === 'localhost' || h === '127.0.0.1' || h === '';
+}
+const IS_DEV = isDevEnv();
+if (IS_DEV) {
+  console.warn('%c[開發模式] 目前未連線 Firebase（純本機資料），部署到 GitHub Pages 後才會連正式雲端。要在本機也連正式雲端，把 ENV_MODE 改成 \'prod\'。', 'color:#C2410C;font-weight:bold');
+}
+
+// 有填雲端設定、金鑰不是預設模板，且不在開發模式時，才啟用雲端。
+const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY') && !IS_DEV;
 const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals'];
+// 這幾個進銷存集合「不上雲端」：它們是後來新增的，多數 Firestore 安全性規則尚未開放，
+// 一旦放進上面的同步清單，寫入雲端是「整批一次送」的，只要其中一個集合被規則擋住，
+// 整批就會被拒、連帶讓整個雲端同步卡住（表現就是「連不到雲端」）。因此改為只存本機。
+// 若之後有到 Firebase 主控台把這四個集合的規則開放，想讓它們也跨裝置同步，
+// 只要把下面這幾個名稱移回上面的 FS_COLLECTIONS 即可。
+const LOCAL_ONLY_COLLECTIONS = ['stock', 'warehouses', 'movements', 'stock_locks'];
 
 let fbAuth = null, fbDb = null, fbUser = null;
 let cloudConnected = false; // 即時狀態：現在是不是真的連上雲端資料庫在跑（不是只看有沒有填設定）
@@ -1704,8 +1758,15 @@ function wireCoreListeners() {
 async function firestoreLoadAll() {
   const result = {};
   for (const col of FS_COLLECTIONS) {
-    const snap = await fbDb.collection(col).get();
-    result[col] = snap.docs.map(d => d.data());
+    // 逐集合各自防呆：某個集合讀不到（例如安全性規則還沒開放、或網路瞬斷）時，
+    // 只略過那一個並記錄，不讓它把整批雲端載入拖垮、害整個 App 退回本機模式。
+    try {
+      const snap = await fbDb.collection(col).get();
+      result[col] = snap.docs.map(d => d.data());
+    } catch (e) {
+      console.warn('集合「' + col + '」讀取失敗，先略過（其他資料照常載入）', e);
+      result[col] = [];
+    }
   }
   const s = await fbDb.collection('meta').doc('settings').get();
   result.settings = s.exists ? s.data() : {};
@@ -1890,6 +1951,10 @@ function firestoreListen() {
       });
       if (appliedAny) { try { localStorage.setItem(KEY, slimCacheString()); } catch (e) {} }
       safeRerender(remoteChanges, col);
+    }, err => {
+      // 這個集合的即時監聽掛失敗（多半是安全性規則還沒開放）——只記錄，
+      // 不影響其他集合的同步，也不會讓整個雲端連線斷掉。
+      console.warn('集合「' + col + '」即時同步掛載失敗，先略過', err);
     });
   });
   // 單號計數器：一定要跟著雲端走，不然別人取過的號本機不知道，就會重號。
@@ -1994,7 +2059,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 16;                    // ← 每次改結構就 +1
+const SCHEMA_V = 17;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -2004,8 +2069,16 @@ const DEFAULT_SETTINGS = {
   a4_rows: 12,
   date_format: 'roc',
   allow_price_edit: true,
-  auto_backup_interval: 'off' // off | daily | weekly
+  auto_backup_interval: 'off', // off | daily | weekly
+  // 進銷存模組總開關：預設「關閉」，整套庫存功能之後都掛在這個旗標底下。
+  // 關閉時，報價/出貨/商品等現有流程完全不受影響（跟現在一模一樣）；
+  // 之後功能開發完成、要正式啟用時再打開，並在商品上逐一連結庫存。
+  inventory_enabled: true
 };
+
+// 進銷存是否已啟用（現在一律回傳 false，等模組完成、開關打開後才會生效）
+// 進銷存一律啟用（已移除開關，直接常駐開啟）
+function invEnabled() { return true; }
 
 function uid(p) { return (p || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
@@ -2203,10 +2276,15 @@ async function load() {
         DB = seedData;
         toast(localRaw ? '已將本機資料同步到雲端' : '已建立雲端初始資料', 'ok');
       } else {
+        // 進銷存集合不上雲端，remote 不會帶它們回來；先把本機既有的這幾個集合留住，
+        // 等 DB 換成 remote 之後再貼回去，避免雲端載入把本機庫存資料洗掉。
+        let localInv = null;
+        try { const lr = localStorage.getItem(KEY); if (lr) localInv = JSON.parse(lr); } catch (e) {}
         DB = remote;
         const before = DB._schema || 1;
         migrate(DB);
         DB.settings = Object.assign({}, DEFAULT_SETTINGS, DB.settings || {});
+        LOCAL_ONLY_COLLECTIONS.forEach(c => { if (localInv && Array.isArray(localInv[c])) DB[c] = localInv[c]; });
         if (before < SCHEMA_V) await firestoreUploadAll(DB);
       }
       _lastSynced = JSON.parse(JSON.stringify(DB));
@@ -2304,6 +2382,7 @@ function migrate(db) {
   db.deliveries= db.deliveries|| [];
   db.users     = db.users     || [];
   db.counters  = db.counters  || {};
+  db.stock     = db.stock     || [];   // 進銷存：庫存批次（每批各自的成本/貨況/儲位/入庫日）
 
   if (v < 2) {
     // 公司：簡稱、經銷品牌 Logo、PDF 檔名規則
@@ -2315,7 +2394,7 @@ function migrate(db) {
     });
 
     // 業務：補啟用旗標
-    db.users.forEach(u => { if (u.is_active == null) u.is_active = true; });
+    db.users.forEach(u => { if (u.is_active == null) u.is_active = true; if (u.department == null) u.department = ''; });
     if (!db.users.length) db.users.push({ id: uid('u'), name: '未指定', role: 'admin', is_active: true });
 
     // 商品：新增料號
@@ -2409,6 +2488,9 @@ function migrate(db) {
       if (p.price_ref_date == null) p.price_ref_date = '';
       if (p.price_ref_source == null) p.price_ref_source = '';
       if (p.note == null) p.note = '';
+      // 新增網路部成本／牌價欄位（業務部沿用原本的 default_cost／list_price）；預設 0＝未填，之後沿用業務部值
+      if (p.net_cost == null) p.net_cost = 0;
+      if (p.net_price == null) p.net_price = 0;
     });
 
     // 報價：新增「只顯示含稅價格」模式（例如學校客戶）
@@ -2573,6 +2655,55 @@ function migrate(db) {
     });
   }
 
+  if (v < 17) {
+    // ── 進銷存強化：統一異動流水帳 + 鎖貨 + 代理商庫存 + 多倉庫（全部新增，不動舊資料）──
+
+    // 1) 倉庫主檔：至少有一個「預設倉」，既有批次全部歸到它底下（location 儲位欄保留不動）
+    db.warehouses = db.warehouses || [];
+    if (!db.warehouses.length) {
+      db.warehouses.push({ id: 'wh_main', name: '主倉', is_default: true, note: '' });
+    }
+    const defWh = (db.warehouses.find(w => w.is_default) || db.warehouses[0]).id;
+
+    // 2) 統一庫存異動流水帳（append-only，禁止覆蓋）：入庫/出庫/鎖貨/解鎖/調撥/盤點都寫這裡
+    db.movements = db.movements || [];
+
+    // 3) 鎖貨清單：獨立於訂單，記錄數量/原因/負責人/客戶/時間/狀態
+    db.stock_locks = db.stock_locks || [];
+
+    // 4) 既有批次補倉庫欄；並為每個「還有量」的期初批次補一筆對應的入庫異動當作歷史起點
+    //    （只在這次升級做一次，之後所有進出都會自己寫異動）
+    (db.stock || []).forEach(b => {
+      if (b.warehouse_id == null) b.warehouse_id = defWh;
+    });
+    if (!db.movements.length && (db.stock || []).length) {
+      db.stock.forEach(b => {
+        db.movements.push({
+          id: uid('mv'), product_id: b.product_id, type: 'in',
+          qty: +b.qty || 0, batch_id: b.id, warehouse_id: b.warehouse_id || defWh,
+          from_loc: '', to_loc: b.location || '', unit_cost: +b.cost || 0,
+          ref_type: 'opening', ref_id: '', operator: '系統升級', reason: '期初庫存（v17 匯入）',
+          created_at: b.created_at || new Date().toISOString()
+        });
+      });
+    }
+
+    // 5) 商品：代理商庫存改為可多筆（成本／交期／庫存各自獨立，且不計入公司可用庫存）＋安全庫存
+    db.products.forEach(p => {
+      if (!Array.isArray(p.agent_stocks)) {
+        // 既有的單一「進貨廠商 default_supplier」若有值，轉成第一筆代理商（保留相容，不刪 default_supplier）
+        p.agent_stocks = p.default_supplier
+          ? [{ id: uid('ag'), supplier_name: p.default_supplier, cost: 0, lead_time: '', qty: 0, note: '' }]
+          : [];
+      }
+      if (p.safety_stock == null) p.safety_stock = 0;
+      if (p.stock_mode == null) p.stock_mode = 'company'; // company｜agent｜order（公司庫存／代理商庫存／客訂叫貨）
+    });
+  }
+
+  db.warehouses = db.warehouses || [{ id: 'wh_main', name: '主倉', is_default: true, note: '' }];
+  db.movements  = db.movements  || [];
+  db.stock_locks= db.stock_locks|| [];
   db.rentals = db.rentals || [];
   db.categories = db.categories || [];
   db._schema = SCHEMA_V;
@@ -2902,6 +3033,10 @@ function toast(msg, kind) {
 }
 
 let modalStack = [];
+// 關掉目前所有開著的彈窗（跨頁跳轉前用，避免彈窗殘留在新頁面上）
+function closeAllModals() { modalStack.slice().forEach(m => m.remove()); modalStack = []; }
+// 「庫存管理」分頁已移除，改由商品明細抽屜管理；此函式改為打開該商品抽屜的「採購批次」分頁
+function goToStock(pid) { closeAllModals(); openProductDrawer(pid, 'batches'); }
 function openModal(opts) {
   const mask = document.createElement('div');
   mask.className = 'mask';
@@ -3696,6 +3831,7 @@ function seed() {
     _schema: SCHEMA_V,
     companies, users, suppliers, customers, products, categories,
     quotes: [], deliveries: [], counters: {}, accounts: [],
+    stock: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
     _created: new Date().toISOString()
   };
@@ -3710,6 +3846,7 @@ function emptyDB() {
     companies: s.companies,
     users: [], suppliers: [], customers: [], products: [], categories: [],
     quotes: [], deliveries: [], counters: {}, accounts: [], rentals: [],
+    stock: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
     _created: new Date().toISOString()
   };
@@ -4177,9 +4314,10 @@ const ROUTES = [
   { k: 'quotes',    t: '報價管理', ico: 'quote', tab: true  },
   { k: 'deliveries',t: '出貨管理', ico: 'delivery', tab: true  },
   { k: 'customers', t: '客戶管理', ico: 'customer', tab: true  },
+  { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '商品／庫存' },
   { k: 'rentals',   t: '印表機租賃', ico: 'rental', tab: false, group: '主檔' },
-  { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '主檔' },
   { k: 'users',     t: '業務管理', ico: 'user', tab: false, group: '主檔' },
+  { k: 'departments', t: '部門管理', ico: 'user', tab: false, group: '主檔' },
   { k: 'suppliers', t: '常用代理商', ico: 'supplier', tab: false, group: '主檔' },
   { k: 'accounts',  t: '帳號管理', ico: 'accounts', tab: false, group: '系統', adminOnly: true },
   { k: 'settings',  t: '設定',     ico: 'settings', tab: false, group: '系統' }
@@ -4293,10 +4431,17 @@ function render() {
     customers: viewCustomers, products: viewProducts,
     rentals: viewRentals, rental: viewRentalDetail,
     suppliers: viewSuppliers, users: viewUsers, settings: viewSettings,
+    departments: viewDepartments,
+    stock: viewStock,
     accounts: viewAccounts
   })[route.k];
 
   if (!fn) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到頁面</h3></div>`; return; }
+  if (route.k === 'stock' && !invEnabled()) {
+    document.getElementById('pageTitle').textContent = '庫存管理';
+    v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>進銷存尚未啟用</h3><p>請到「設定 → 進銷存」開啟後再使用</p></div>`;
+    return;
+  }
   if (route.k === 'accounts' && !isAdmin()) {
     document.getElementById('pageTitle').textContent = '沒有權限';
     v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>沒有權限</h3><p>只有管理員能查看帳號管理</p></div>`;
@@ -4343,7 +4488,7 @@ function renderNav() {
   const pend = DB.deliveries.filter(d => d.status === 'pending_delivery').length;
   const nav = document.getElementById('nav');
   let html = '', lastGroup = null;
-  ROUTES.filter(r => !r.adminOnly || isAdmin()).forEach(r => {
+  ROUTES.filter(r => (!r.adminOnly || isAdmin()) && (!r.flag || DB.settings[r.flag])).forEach(r => {
     if (r.group && r.group !== lastGroup) {
       html += `<div class="nav-group"><div class="nav-label">${r.group}</div></div>`;
       lastGroup = r.group;
@@ -4516,7 +4661,7 @@ function viewUsers(v) {
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
               onclick="toggleSelAll('u', this.checked, ${esc(JSON.stringify(page.map(u => u.id)))})"></th>
-          <th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th class="c">負責報價</th><th class="c">狀態</th>
+          <th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th>部門</th><th class="c">負責報價</th><th class="c">狀態</th>
         </tr></thead><tbody>
         ${page.map(u => {
           const n = DB.quotes.filter(q => q.sales_user_id === u.id).length;
@@ -4526,6 +4671,7 @@ function viewUsers(v) {
             <td style="font-family:var(--mono)">${esc(u.phone || '—')}</td>
             <td class="muted">${esc(u.email || '—')}</td>
             <td><span class="bdg gray plain">${esc(u.role || '未設定')}</span></td>
+            <td>${deptName(u.department) ? `<span class="bdg blue plain">${esc(deptName(u.department))}</span>` : '<span class="muted">—</span>'}</td>
             <td class="c">${n || '<span class="muted">—</span>'}</td>
             <td class="c">${u.is_active ? '<span class="bdg green">啟用</span>' : '<span class="bdg gray">停用</span>'}</td>
           </tr>`;
@@ -4537,6 +4683,637 @@ function viewUsers(v) {
   registerPageRunner('users', run);
   document.getElementById('us').addEventListener('input', () => run(true));
   run();
+}
+
+/* ===========================================================
+   部門管理 —— 可自行新增／改名／刪除的部門清單（存 DB.settings.departments，隨雲端同步全公司共用）
+   之後：庫存、報價依部門選價、權限設定都會用到這份清單
+   =========================================================== */
+const DEFAULT_DEPARTMENTS = ['業務部', '專案部', '網路部', '倉管', '工程部', '採購部'];
+
+// 取得部門清單；首次使用（尚未建立）時自動帶入預設部門並存檔
+function ensureDepartments() {
+  if (!Array.isArray(DB.settings.departments) || !DB.settings.departments.length) {
+    DB.settings.departments = DEFAULT_DEPARTMENTS.map(name => ({ id: uid('dept'), name }));
+    saveNow();
+  }
+  return DB.settings.departments;
+}
+
+// 用部門 id 反查名稱（改名後使用者顯示的部門會自動跟著更新）
+function deptName(id) {
+  if (!id || !Array.isArray(DB.settings.departments)) return '';
+  const d = DB.settings.departments.find(x => x.id === id);
+  return d ? d.name : '';
+}
+
+// 目前操作者所屬部門名稱（用操作者名字去對使用者主檔）；對不到回 null
+function currentUserDeptName() {
+  const nm = currentOperator();
+  if (!nm) return null;
+  const u = (DB.users || []).find(x => x.name === nm);
+  return u ? deptName(u.department) : null;
+}
+// 商品列表預設顯示哪個部門的成本/牌價：網路部登入→網路部，否則業務部
+function priceDeptIsNet() { return currentUserDeptName() === '網路部'; }
+// 依部門取得成本/牌價。網路部「不沿用」業務部：沒填(0)就是 0（顯示端會呈現空白）
+function prodCostFor(p, net) { return net ? (+p.net_cost || 0) : (+p.default_cost || 0); }
+function prodPriceFor(p, net) { return net ? (+p.net_price || 0) : (+p.list_price || 0); }
+// 部門對應色：業務部藍、網路部橘
+const DEPT_BLUE = '#1D4ED8', DEPT_ORANGE = '#C2410C';
+
+function viewDepartments(v) {
+  ensureDepartments();
+  const run = () => {
+    const list = DB.settings.departments;
+    v.innerHTML = `
+      <div class="banner" style="background:var(--primary-050);color:var(--primary);margin-bottom:14px">
+        <div>部門清單可自行新增、改名或刪除。之後的庫存、報價依部門選價、權限設定都會用到這份清單。<br>
+        <span style="opacity:.8">（權限目前先不套用，各部門成本大家都看得到；等之後搬到 NAS 再處理權限。）</span></div>
+      </div>
+      <div class="card" style="max-width:560px">
+        <div class="card-h"><h2>部門</h2><span class="sub">${list.length} 個</span></div>
+        <div style="padding:6px 14px 14px">
+          <div id="deptList">
+            ${list.map((d, i) => deptRowHtml(d, i)).join('') || '<div class="muted" style="padding:10px 2px">還沒有部門</div>'}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <input class="inp" id="newDept" placeholder="輸入新部門名稱" style="flex:1">
+            <button class="btn primary" id="addDept">＋ 新增部門</button>
+          </div>
+        </div>
+      </div>`;
+    bindDept(v, list, run);
+  };
+  registerPageRunner('departments', run);
+  run();
+}
+
+function deptRowHtml(d, i) {
+  return `<div class="dept-row" data-id="${d.id}"
+      style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line)">
+    <span class="muted" style="width:22px;text-align:center;font-family:var(--mono)">${i + 1}</span>
+    <input class="inp dept-name" value="${esc(d.name)}" placeholder="部門名稱" style="flex:1">
+    <button class="btn sm ghost" data-del="${d.id}" style="color:var(--red)">刪除</button>
+  </div>`;
+}
+
+function bindDept(v, list, run) {
+  v.querySelectorAll('.dept-name').forEach(inp => {
+    inp.onchange = () => {
+      const id = inp.closest('.dept-row').dataset.id;
+      const d = list.find(x => x.id === id);
+      if (!d) return;
+      const name = inp.value.trim();
+      if (!name) { toast('部門名稱不能空白', 'err'); inp.value = d.name; return; }
+      if (list.some(x => x.id !== id && x.name === name)) { toast('已經有同名部門', 'err'); inp.value = d.name; return; }
+      d.name = name; saveNow(); toast('已更新', 'ok');
+    };
+  });
+  v.querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.del;
+      const d = list.find(x => x.id === id);
+      if (!d) return;
+      confirmBox('刪除部門', `確定要刪除「${esc(d.name)}」？此動作不影響已建立的報價／出貨。`, () => {
+        DB.settings.departments = list.filter(x => x.id !== id);
+        saveNow(); run();
+      }, true);
+    };
+  });
+  const add = () => {
+    const el = document.getElementById('newDept');
+    const name = (el.value || '').trim();
+    if (!name) return;
+    if (list.some(x => x.name === name)) { toast('已經有同名部門', 'err'); return; }
+    list.push({ id: uid('dept'), name });
+    saveNow(); run();
+  };
+  const addBtn = document.getElementById('addDept');
+  if (addBtn) addBtn.onclick = add;
+  const newInp = document.getElementById('newDept');
+  if (newInp) newInp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } };
+}
+
+/* ===========================================================
+   進銷存 —— 庫存管理（Beta，掛在 inventory_enabled 開關底下）
+   資料：DB.stock = 進貨批次陣列，每批各自的進價／貨況／儲位／入庫日
+   目前：批次進貨與帳面數量管理；尚未串接報價/出貨扣庫存（下一輪）
+   =========================================================== */
+const DEFAULT_CONDITIONS = ['全新', '良品'];
+
+/* ===========================================================
+   §進銷存核心：可用庫存 / 鎖貨 / 成本 / 代理商庫存 / 倉庫
+   全部是純函式或 append-only，不覆蓋任何既有資料
+   =========================================================== */
+
+// 倉庫清單與預設倉
+function warehouses() { return DB.warehouses || (DB.warehouses = [{ id: 'wh_main', name: '主倉', is_default: true, note: '' }]); }
+function defaultWarehouse() { const ws = warehouses(); return ws.find(w => w.is_default) || ws[0]; }
+function warehouseName(id) { const w = (DB.warehouses || []).find(x => x.id === id); return w ? w.name : ''; }
+
+// 該商品未釋放的鎖貨總量（active = 尚未 released）
+function productLocked(pid) {
+  return (DB.stock_locks || [])
+    .filter(l => l.product_id === pid && l.status === 'active')
+    .reduce((s, l) => s + (+l.qty || 0), 0);
+}
+// 公司帳面數量（各批次剩餘量加總）——沿用既有 productOnHand，這裡再定義可用庫存
+function productAvailable(pid) { return productOnHand(pid) - productLocked(pid); }
+
+// 代理商庫存（商品上多筆 agent_stocks 的加總）——刻意「不計入」公司可用庫存
+function agentStockQty(pid) {
+  const p = byId(DB.products, pid);
+  return ((p && p.agent_stocks) || []).reduce((s, a) => s + (+a.qty || 0), 0);
+}
+
+// 最新成本（依入庫日最後一批）與平均成本（以剩餘量加權；沒有剩餘量時退回簡單平均）
+function latestCost(pid) {
+  const bs = stockBatches(pid); if (!bs.length) return 0;
+  return +bs[bs.length - 1].cost || 0;
+}
+function avgCost(pid) {
+  const bs = stockBatches(pid); if (!bs.length) return 0;
+  let qty = 0, amt = 0;
+  bs.forEach(b => { const q = +b.qty || 0; qty += q; amt += q * (+b.cost || 0); });
+  if (qty > 0) return round0(amt / qty);
+  const nz = bs.map(b => +b.cost || 0).filter(c => c > 0);
+  return nz.length ? round0(nz.reduce((a, c) => a + c, 0) / nz.length) : 0;
+}
+
+// 安全庫存與缺貨判斷
+function isBelowSafety(pid) {
+  const p = byId(DB.products, pid);
+  const safe = p ? (+p.safety_stock || 0) : 0;
+  return safe > 0 && productAvailable(pid) < safe;
+}
+
+// 異動類型的顯示設定
+const MV_TYPES = {
+  in:       { label: '入庫', color: 'green',  sign: +1 },
+  out:      { label: '出庫', color: 'orange', sign: -1 },
+  lock:     { label: '鎖貨', color: 'gray',   sign: 0  },
+  unlock:   { label: '解鎖', color: 'gray',   sign: 0  },
+  transfer: { label: '調撥', color: 'blue',   sign: 0  },
+  adjust:   { label: '盤點', color: 'blue',   sign: 0  }
+};
+
+// 寫一筆庫存異動（唯一改動 DB.movements 的入口；append-only）
+function recordMovement(m) {
+  DB.movements = DB.movements || [];
+  const mv = {
+    id: uid('mv'),
+    product_id: m.product_id,
+    type: m.type,                       // in｜out｜lock｜unlock｜transfer｜adjust
+    qty: +m.qty || 0,
+    batch_id: m.batch_id || '',
+    warehouse_id: m.warehouse_id || (defaultWarehouse() || {}).id || '',
+    from_loc: m.from_loc || '',
+    to_loc: m.to_loc || '',
+    unit_cost: +m.unit_cost || 0,
+    ref_type: m.ref_type || '',         // delivery｜quote｜manual｜opening｜lock｜count…
+    ref_id: m.ref_id || '',
+    operator: m.operator || currentOperator() || '',
+    reason: m.reason || '',
+    created_at: new Date().toISOString()
+  };
+  DB.movements.push(mv);
+  return mv;
+}
+
+// 某商品的異動紀錄（新到舊）
+function movementsOf(pid) {
+  return (DB.movements || []).filter(m => m.product_id === pid)
+    .slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+}
+
+/* ── 出庫扣庫（先進先出）：從批次剩餘量依序扣，並各寫一筆 out 異動 ──
+   回傳實際扣掉的數量；庫存不足時只扣到 0（呼叫端負責提醒） */
+function stockDeduct(pid, qty, ref) {
+  let need = +qty || 0; if (need <= 0) return 0;
+  const bs = stockBatches(pid);           // 已依入庫日 FIFO 排序
+  let done = 0;
+  for (const b of bs) {
+    if (need <= 0) break;
+    const take = Math.min(+b.qty || 0, need);
+    if (take <= 0) continue;
+    b.qty = (+b.qty || 0) - take;
+    recordMovement({
+      product_id: pid, type: 'out', qty: take, batch_id: b.id,
+      warehouse_id: b.warehouse_id, from_loc: b.location, unit_cost: +b.cost || 0,
+      ref_type: (ref && ref.ref_type) || 'manual', ref_id: (ref && ref.ref_id) || '',
+      reason: (ref && ref.reason) || '出貨扣庫'
+    });
+    need -= take; done += take;
+  }
+  return done;
+}
+
+/* ── 回補（出貨取消時）：把之前這張單扣掉的量還回批次 ──
+   依 ref 找出對應的 out 異動，逐一回補到原批次並寫一筆 in（原因：取消回補） */
+function stockRestore(ref) {
+  if (!ref || !ref.ref_id) return 0;
+  const outs = (DB.movements || []).filter(m =>
+    m.type === 'out' && m.ref_type === ref.ref_type && m.ref_id === ref.ref_id && !m._restored);
+  let total = 0;
+  outs.forEach(mv => {
+    const b = (DB.stock || []).find(x => x.id === mv.batch_id);
+    if (b) { b.qty = (+b.qty || 0) + (+mv.qty || 0); }
+    mv._restored = true;                  // 標記已回補，避免重複
+    recordMovement({
+      product_id: mv.product_id, type: 'in', qty: mv.qty, batch_id: mv.batch_id,
+      warehouse_id: mv.warehouse_id, to_loc: mv.to_loc || mv.from_loc, unit_cost: mv.unit_cost,
+      ref_type: ref.ref_type, ref_id: ref.ref_id, reason: (ref && ref.reason) || '出貨取消回補'
+    });
+    total += +mv.qty || 0;
+  });
+  return total;
+}
+
+/* ── 鎖貨：建立 / 釋放（各寫一筆 lock/unlock 異動）── */
+function createLock({ product_id, qty, reason, customer_id, ref_id }) {
+  const lock = {
+    id: uid('lk'), product_id, qty: +qty || 0, reason: reason || '',
+    operator: currentOperator() || '', customer_id: customer_id || '', ref_id: ref_id || '',
+    status: 'active', created_at: new Date().toISOString(), released_at: ''
+  };
+  DB.stock_locks = DB.stock_locks || [];
+  DB.stock_locks.push(lock);
+  recordMovement({ product_id, type: 'lock', qty: lock.qty, ref_type: 'lock', ref_id: lock.id, reason: lock.reason });
+  return lock;
+}
+function releaseLock(id) {
+  const l = (DB.stock_locks || []).find(x => x.id === id);
+  if (!l || l.status !== 'active') return;
+  l.status = 'released'; l.released_at = new Date().toISOString();
+  recordMovement({ product_id: l.product_id, type: 'unlock', qty: l.qty, ref_type: 'lock', ref_id: l.id, reason: '釋放鎖貨' });
+}
+
+/* ── 盤點：把某商品帳面數量調整到 target，差額寫一筆 adjust ── */
+function stockAdjust(pid, target, note) {
+  const cur = productOnHand(pid);
+  const diff = (+target || 0) - cur;
+  if (diff === 0) return;
+  // 差額掛到最近一批（沒有批次就建一批當作盤盈）
+  let bs = stockBatches(pid);
+  if (!bs.length) {
+    const nb = { id: uid('stk'), product_id: pid, in_date: today(), qty: 0, cost: 0, cost_tax: 'ex',
+      condition: stockConditions()[0] || '', location: '', warehouse_id: (defaultWarehouse() || {}).id,
+      supplier_name: '', note: '盤點建立', created_at: new Date().toISOString() };
+    DB.stock.push(nb); bs = [nb];
+  }
+  const b = bs[bs.length - 1];
+  b.qty = (+b.qty || 0) + diff;
+  recordMovement({ product_id: pid, type: 'adjust', qty: Math.abs(diff), batch_id: b.id,
+    warehouse_id: b.warehouse_id, unit_cost: +b.cost || 0, ref_type: 'count', reason: note || ('盤點調整 ' + (diff > 0 ? '+' : '') + diff) });
+}
+
+/* ── 權限：角色是否能看成本／售價（管理者・採購看完整；其餘依開關）── */
+function canSeeCost() {
+  const r = currentRole();
+  if (r === 'admin') return true;
+  // 之後可細分部門；目前 editor 也可看，viewer 不可
+  return r === 'editor';
+}
+
+// 貨況清單（可自訂），首次使用自動帶入「全新／良品」
+function stockConditions() {
+  if (!Array.isArray(DB.settings.stock_conditions) || !DB.settings.stock_conditions.length) {
+    DB.settings.stock_conditions = DEFAULT_CONDITIONS.slice();
+    saveNow();
+  }
+  return DB.settings.stock_conditions;
+}
+
+// 某商品的所有批次，依「入庫日」由早到晚排（先進先出順序）
+function stockBatches(pid) {
+  return (DB.stock || []).filter(b => b.product_id === pid)
+    .sort((a, b) => (a.in_date || '').localeCompare(b.in_date || '')
+      || (a.created_at || '').localeCompare(b.created_at || ''));
+}
+// 某商品的帳面數量（各批次剩餘量加總）
+function productOnHand(pid) {
+  return stockBatches(pid).reduce((s, b) => s + (+b.qty || 0), 0);
+}
+// 商品列表用：庫存量 + 儲位 + 貨況 + 成本 + 進貨廠商 + 備註（去重彙整）
+function stockSummary(pid) {
+  const bs = stockBatches(pid);
+  const uniq = arr => [...new Set(arr.map(x => (x == null ? '' : x).toString().trim()).filter(Boolean))];
+  return {
+    qty: bs.reduce((s, b) => s + (+b.qty || 0), 0),
+    locs: uniq(bs.map(b => b.location)),
+    conds: uniq(bs.map(b => b.condition)),
+    sups: uniq(bs.map(b => b.supplier_name)),
+    notes: uniq(bs.map(b => b.note)),
+    costs: [...new Set(bs.map(b => +b.cost || 0).filter(c => c > 0))].sort((a, b) => a - b),
+    count: bs.length,
+    batches: bs
+  };
+}
+// 成本顯示：單一→該值；多種→最低~最高；無→—
+function costRangeText(costs) {
+  if (!costs || !costs.length) return '<span class="muted">—</span>';
+  if (costs.length === 1) return money(costs[0]);
+  return `${money(costs[0])}~${money(costs[costs.length - 1])}`;
+}
+// 商品編輯視窗「庫存」那一行的內容（存檔後可即時重寫）
+function prodStockLineHtml(pid) {
+  const p = byId(DB.products, pid) || {};
+  const oh = productOnHand(pid);
+  return `帳面數量：<b style="font-size:18px" class="${oh <= 0 ? 'neg' : ''}">${oh}</b>
+    <span class="muted">${esc(p.unit || '')}</span>
+    <span class="muted" style="margin-left:8px">${stockBatches(pid).length} 批</span>`;
+}
+
+let stockSearch = '';
+let stkSort = { key: 'name', dir: 'asc' };
+const stockExpanded = new Set();
+
+function stockSortValue(p, key) {
+  switch (key) {
+    case 'part_no': return p.part_no || '';
+    case 'name': return p.name || '';
+    case 'qty': return productOnHand(p.id);
+    case 'batches': return stockBatches(p.id).length;
+    case 'cost': return stockSummary(p.id).costs[0] || 0;
+    case 'cond': return stockSummary(p.id).conds[0] || '';
+    case 'loc': return stockSummary(p.id).locs[0] || '';
+    case 'sup': return stockSummary(p.id).sups[0] || '';
+    default: return p.name || '';
+  }
+}
+
+function viewStock(v) {
+  v.innerHTML = `
+    <div class="banner info"><span class="bi">ℹ</span><div>
+      庫存以「<b>進貨批次</b>」記錄：每批各自的進價、貨況、儲位、入庫日；出貨預設<b>先進先出</b>。
+      進銷存已串接：<b>出貨扣庫</b>（出貨單轉「已出貨」自動先進先出扣庫並留異動；作廢／刪除自動回補）、<b>鎖貨</b>、<b>代理商庫存</b>、<b>安全庫存提醒</b>。點商品可開右側明細抽屜管理。</div></div>
+    <div class="toolbar"><div class="grow">
+      <input class="inp" id="stkSearch" placeholder="搜尋商品（品名／料號／品牌）…" value="${esc(stockSearch)}"></div>
+      <button class="btn primary" onclick="receiveNewProduct()">＋ 入庫新商品</button></div>
+    <div id="stkList"></div>`;
+  const run = () => {
+    const box = document.getElementById('stkList'); if (!box) return;
+    const kw = stockSearch.trim().toLowerCase();
+    let list = DB.products.filter(p => p.is_active !== false);
+    if (kw) list = list.filter(p => (`${p.name} ${p.part_no || ''} ${p.brand || ''}`).toLowerCase().includes(kw));
+    list = sortRows(list, stkSort, stockSortValue);
+    const th = (key, label, cls) => `<th class="sortable ${cls || ''}" data-sortkey="${key}">${label}${sortArrow(stkSort, key)}</th>`;
+    box.innerHTML = `<table class="tbl"><thead><tr>
+        <th style="width:26px"></th>${th('part_no', '料號')}${th('name', '品名')}${th('qty', '總數量', 'r')}${th('cost', '成本', 'r')}${th('cond', '貨況')}${th('loc', '儲位')}${th('sup', '進貨廠商')}<th>備註</th>${th('batches', '批次', 'c')}
+        <th class="c" style="width:104px">操作</th>
+      </tr></thead><tbody>
+      ${list.length ? list.map(p => {
+        const oh = productOnHand(p.id), bs = stockBatches(p.id), open = stockExpanded.has(p.id), ss = stockSummary(p.id);
+        return `<tr class="stk-main" data-pid="${p.id}" style="cursor:pointer">
+          <td class="c" style="color:var(--text-3)">${bs.length ? (open ? '▾' : '▸') : ''}</td>
+          <td style="font-family:var(--mono);font-size:11.5px">${esc(p.part_no || '—')}</td>
+          <td><b>${esc(p.name)}</b>${p.brand ? ` <span class="muted">${esc(p.brand)}</span>` : ''}</td>
+          <td class="r"><b class="${oh <= 0 ? 'neg' : ''}" style="font-size:15px">${oh}</b> <span class="muted">${esc(p.unit || '')}</span></td>
+          <td class="r money">${costRangeText(ss.costs)}</td>
+          <td>${ss.conds.length ? esc(ss.conds.join('、')) : '<span class="muted">—</span>'}</td>
+          <td>${ss.locs.length ? esc(ss.locs.join('、')) : '<span class="muted">—</span>'}</td>
+          <td>${ss.sups.length ? esc(ss.sups.join('、')) : '<span class="muted">—</span>'}</td>
+          <td class="muted prod-col" title="${esc(ss.notes.join('；'))}">${ss.notes.length ? esc(ss.notes.join('；')) : '—'}</td>
+          <td class="c">${bs.length || '<span class="muted">—</span>'}</td>
+          <td class="c" onclick="event.stopPropagation()"><button class="btn sm" onclick="manageStock('${p.id}')">進貨／批次</button>
+            <button class="btn sm ghost" onclick="editProduct('${p.id}')">商品資料</button></td>
+        </tr>
+        ${open && bs.length ? `<tr><td></td><td colspan="10" style="padding:0 0 10px">
+          <table class="tbl" style="margin:0;background:#F5F9FF;border:1px solid #D6E4FF;border-radius:8px;overflow:hidden">
+            <thead><tr style="font-size:11px;color:var(--text-2)">
+              <th>入庫日</th><th class="r">數量</th><th class="r">成本</th><th>貨況</th><th>儲位</th><th>進貨廠商</th><th>備註</th><th class="c" style="width:110px">操作</th>
+            </tr></thead><tbody>
+            ${bs.map((b, i) => `<tr>
+              <td style="font-size:11.5px">${esc(b.in_date || '—')}${i === 0 ? ' <span class="bdg blue plain" style="font-size:9px">先出</span>' : ''}</td>
+              <td class="r"><b>${b.qty}</b></td>
+              <td class="r money">${money(b.cost)}</td>
+              <td>${esc(b.condition || '—')}</td>
+              <td>${esc(b.location || '—')}</td>
+              <td>${esc(b.supplier_name || '—')}</td>
+              <td class="muted" title="${esc(b.note || '')}">${esc(b.note || '—')}</td>
+              <td class="c" style="white-space:nowrap">
+                <button class="btn sm ghost" onclick="manageStock('${p.id}')">編輯</button>
+                <button class="btn sm ghost" style="color:var(--red)" onclick="deleteBatch('${b.id}')">刪除</button>
+              </td></tr>`).join('')}
+            </tbody></table></td></tr>` : ''}`;
+      }).join('') : `<tr><td colspan="11" class="muted" style="text-align:center;padding:22px">找不到商品</td></tr>`}
+    </tbody></table>`;
+    box.querySelectorAll('.stk-main').forEach(tr => {
+      tr.onclick = () => {
+        const pid = tr.dataset.pid;
+        if (stockExpanded.has(pid)) stockExpanded.delete(pid); else stockExpanded.add(pid);
+        run();
+      };
+    });
+    bindTableSort('stkList', stkSort, run);
+  };
+  const si = document.getElementById('stkSearch');
+  if (si) si.addEventListener('input', () => { stockSearch = si.value; run(); });
+  registerPageRunner('stock', run);
+  run();
+}
+
+// 從總表直接刪除單一批次（含確認）
+function deleteBatch(bid) {
+  const b = (DB.stock || []).find(x => x.id === bid); if (!b) return;
+  confirmBox('刪除批次', `確定刪除這批（數量 ${b.qty}${b.condition ? '、' + esc(b.condition) : ''}）？此動作不可復原。`, () => {
+    DB.stock = DB.stock.filter(x => x.id !== bid);
+    saveNow();
+    if (route.k === 'stock') render();
+  }, true);
+}
+
+// 單一商品的批次管理（進貨、修改、刪除批次）
+// 採「草稿」模式：所有變更先改在暫存副本，按「儲存」才寫回；沒按儲存不存檔。
+function manageStock(pid) {
+  const p = byId(DB.products, pid);
+  if (!p) return;
+  let draft = stockBatches(pid).map(b => ({ ...b }));  // 工作副本
+  let dirty = false;
+  openModal({
+    title: `庫存批次 — ${esc(p.name)}`,
+    size: 'wide',
+    sticky: true,   // 避免點背景誤關而丟失未儲存的編輯
+    body: `<div id="stkModalBody"></div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-save>儲存</button>`,
+    onMount(el, close) {
+      const body = el.querySelector('#stkModalBody');
+      const draw = () => {
+        draft.sort((a, b) => (a.in_date || '').localeCompare(b.in_date || '') || (a.created_at || '').localeCompare(b.created_at || ''));
+        const oh = draft.reduce((s, b) => s + (+b.qty || 0), 0);
+        const conds = stockConditions();
+        body.innerHTML = `
+          <datalist id="condList">${conds.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+          <datalist id="supListM">${DB.suppliers.map(s => `<option value="${esc(s.name)}">`).join('')}</datalist>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <div>帳面數量：<b style="font-size:20px" class="${oh <= 0 ? 'neg' : ''}">${oh}</b> <span class="muted">${esc(p.unit || '')}</span>
+              ${dirty ? '<span class="bdg orange plain" style="margin-left:8px">尚未儲存</span>' : ''}</div>
+            <button class="btn primary sm" data-add>＋ 進貨（新增批次）</button>
+          </div>
+          ${draft.length ? draft.map((b, i) => `
+            <div class="stk-b" style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:9px;background:var(--bg-2)">
+              <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:flex-end">
+                <div class="field" style="flex:0 0 130px;margin:0"><label>入庫日</label>
+                  <input class="inp" type="date" data-b="${b.id}" data-k="in_date" value="${esc(b.in_date || '')}"></div>
+                <div class="field" style="flex:0 0 84px;margin:0"><label>數量</label>
+                  <input class="inp num" type="number" step="1" data-b="${b.id}" data-k="qty" value="${b.qty}"></div>
+                <div class="field" style="flex:0 0 100px;margin:0"><label>單位成本</label>
+                  <input class="inp num" type="number" data-b="${b.id}" data-k="cost" value="${b.cost}"></div>
+                <div class="field" style="flex:0 0 108px;margin:0"><label>貨況</label>
+                  <input class="inp" list="condList" data-b="${b.id}" data-k="condition" value="${esc(b.condition || '')}" placeholder="全新／良品"></div>
+                <div class="field" style="flex:0 0 96px;margin:0"><label>儲位</label>
+                  <input class="inp" data-b="${b.id}" data-k="location" value="${esc(b.location || '')}" placeholder="例：A-3"></div>
+                <div class="field" style="flex:1;min-width:130px;margin:0"><label>進貨廠商</label>
+                  <input class="inp" list="supListM" data-b="${b.id}" data-k="supplier_name" value="${esc(b.supplier_name || '')}"></div>
+                <button class="btn sm ghost" data-del="${b.id}" style="color:var(--red)">刪除</button>
+              </div>
+              <div class="field" style="margin:7px 0 0"><label>備註</label>
+                <input class="inp" data-b="${b.id}" data-k="note" value="${esc(b.note || '')}" placeholder="批號／來源…"></div>
+              <div class="muted" style="font-size:10.5px;margin-top:5px">先進先出第 ${i + 1} 批</div>
+            </div>`).join('') : '<div class="muted" style="padding:16px 2px">還沒有進貨批次，按右上角「＋ 進貨」新增一批，改完記得按「儲存」。</div>'}`;
+
+        body.querySelectorAll('[data-b]').forEach(inp => {
+          inp.onchange = () => {
+            const b = draft.find(x => x.id === inp.dataset.b); if (!b) return;
+            const k = inp.dataset.k;
+            b[k] = inp.type === 'number' ? (+inp.value || 0) : inp.value.trim();
+            dirty = true;
+            if (k === 'qty' || k === 'in_date') draw(); // 影響總數或先進先出順序才重畫
+          };
+        });
+        body.querySelectorAll('[data-del]').forEach(btn => {
+          btn.onclick = () => { draft = draft.filter(x => x.id !== btn.dataset.del); dirty = true; draw(); };
+        });
+        const addBtn = body.querySelector('[data-add]');
+        if (addBtn) addBtn.onclick = () => {
+          draft.push({
+            id: uid('stk'), product_id: pid, in_date: today(),
+            qty: 1, cost: +p.default_cost || 0, cost_tax: 'ex',   // 成本自動帶入業務部成本
+            condition: stockConditions()[0] || '', location: '',
+            warehouse_id: (defaultWarehouse() || {}).id,
+            supplier_name: p.default_supplier || '', note: '',
+            created_at: new Date().toISOString()
+          });
+          dirty = true; draw();
+        };
+      };
+      draw();
+      const finish = () => { close(); if (route.k === 'stock' || route.k === 'products') render(); };
+      el.querySelector('[data-no]').onclick = () => {
+        if (dirty) { confirmBox('放棄變更', '有尚未儲存的變更，確定要放棄？', finish, true); }
+        else finish();
+      };
+      el.querySelector('[data-save]').onclick = () => {
+        // 收斂新增的貨況到清單
+        draft.forEach(b => { if (b.condition && !stockConditions().includes(b.condition)) DB.settings.stock_conditions.push(b.condition); });
+        // 進出留痕：比對舊批次，新增批次記「入庫」，數量改變記「盤點調整」（啟用進銷存時）
+        if (invEnabled()) {
+          const oldMap = {}; (DB.stock || []).filter(b => b.product_id === pid).forEach(b => oldMap[b.id] = +b.qty || 0);
+          draft.forEach(b => {
+            const nq = +b.qty || 0, wid = b.warehouse_id || (defaultWarehouse() || {}).id;
+            if (!(b.id in oldMap)) {
+              if (nq !== 0) recordMovement({ product_id: pid, type: 'in', qty: nq, batch_id: b.id, warehouse_id: wid, to_loc: b.location, unit_cost: +b.cost || 0, ref_type: 'manual', reason: '進貨（新增批次）' });
+            } else if (nq !== oldMap[b.id]) {
+              const diff = nq - oldMap[b.id];
+              recordMovement({ product_id: pid, type: 'adjust', qty: Math.abs(diff), batch_id: b.id, warehouse_id: wid, unit_cost: +b.cost || 0, ref_type: 'count', reason: '批次調整 ' + (diff > 0 ? '+' : '') + diff });
+            }
+          });
+        }
+        // 以草稿覆蓋這個商品的批次
+        DB.stock = (DB.stock || []).filter(b => b.product_id !== pid)
+          .concat(draft.map(b => ({ ...b, product_id: pid })));
+        saveNow();
+        // 若商品編輯視窗開著，同步更新它上面的「庫存」那行
+        const pInfo = document.getElementById('prodStockInfo');
+        if (pInfo) pInfo.innerHTML = prodStockLineHtml(pid);
+        finish(); toast('庫存已儲存', 'ok');
+      };
+    }
+  });
+}
+
+// 入庫即建立商品：一次填商品基本資料（含料號）+ 第一批進貨，同時寫進商品主檔與庫存
+function receiveNewProduct() {
+  const conds = stockConditions();
+  const m = openModal({
+    title: '入庫新商品（同時建立商品＋料號）',
+    size: 'lg',
+    body: `
+      <datalist id="condListN">${conds.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <datalist id="supListN">${DB.suppliers.map(s => `<option value="${esc(s.name)}">`).join('')}</datalist>
+      <div class="sec-title" style="margin-top:0">商品基本資料</div>
+      <div class="grid g2">
+        <div class="field"><label>料號</label><input class="inp" id="rp_pn" placeholder="可留空"></div>
+        <div class="field"><label class="req">品名</label><input class="inp" id="rp_nm"></div>
+      </div>
+      <div class="grid g2">
+        <div class="field"><label>品牌</label><input class="inp" id="rp_br"></div>
+        <div class="field"><label>單位</label><input class="inp" id="rp_un" value="台"></div>
+      </div>
+      <div class="field"><label>規格</label><input class="inp" id="rp_sp"></div>
+      <div class="grid g2">
+        <div class="field"><label>進貨廠商</label><input class="inp" list="supListN" id="rp_sup"></div>
+        <div class="field"><label>業務部牌價（未稅）</label><input class="inp num" type="number" id="rp_lp" value="0">
+          <div class="hint">可先留 0，之後在商品管理補</div></div>
+      </div>
+      <div class="sec-title">第一批進貨</div>
+      <div class="grid g3">
+        <div class="field"><label class="req">數量</label><input class="inp num" type="number" id="rp_qty" value="1"></div>
+        <div class="field"><label>單位成本（進價）</label><input class="inp num" type="number" id="rp_cost" value="0"></div>
+        <div class="field"><label>入庫日</label><input class="inp" type="date" id="rp_date" value="${today()}"></div>
+      </div>
+      <div class="grid g3">
+        <div class="field"><label>貨況</label><input class="inp" list="condListN" id="rp_cond" value="${esc(conds[0] || '')}"></div>
+        <div class="field"><label>儲位</label><input class="inp" id="rp_loc" placeholder="例：A-3"></div>
+        <div class="field"><label>備註</label><input class="inp" id="rp_note" placeholder="批號／來源…"></div>
+      </div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>建立商品並入庫</button>`,
+    onMount(el, close) {
+      el.querySelector('#rp_nm').focus();
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-ok]').onclick = () => {
+        const g = id => el.querySelector('#' + id);
+        const name = g('rp_nm').value.trim();
+        if (!name) return toast('請填品名', 'err');
+        const qty = +g('rp_qty').value || 0;
+        if (qty <= 0) return toast('數量要大於 0', 'err');
+        const cost = +g('rp_cost').value || 0;
+        const cond = g('rp_cond').value.trim();
+        const sup = g('rp_sup').value.trim();
+        const unit = g('rp_un').value.trim() || '台';
+        const data = {
+          part_no: g('rp_pn').value.trim(), brand: g('rp_br').value.trim(),
+          spec: g('rp_sp').value.trim(), list_price: +g('rp_lp').value || 0,
+          in_date: g('rp_date').value || today(), location: g('rp_loc').value.trim(),
+          note: g('rp_note').value.trim()
+        };
+        const mk = () => {
+          const pid = uid('p');
+          DB.products.push({
+            id: pid, part_no: data.part_no, brand: data.brand, name, spec: data.spec, unit,
+            category: '', default_supplier: sup,
+            list_price: data.list_price, default_cost: cost, net_price: 0, net_cost: 0,
+            price_ref_date: '', price_ref_source: '', note: '',
+            has_bom: false, is_active: true, is_favorite: false, components: []
+          });
+          if (cond && !stockConditions().includes(cond)) DB.settings.stock_conditions.push(cond);
+          DB.stock.push({
+            id: uid('stk'), product_id: pid, in_date: data.in_date, qty, cost, cost_tax: 'ex',
+            condition: cond, location: data.location, supplier_name: sup, note: data.note,
+            created_at: new Date().toISOString()
+          });
+          saveNow(); render(); toast(`已建立「${name}」並入庫 ${qty} ${unit}`, 'ok');
+        };
+        close();
+        confirmNotDuplicate(DB.products, name, '商品', mk, existing => {
+          toast(`「${existing.name}」已存在，帶你去對它進貨`, 'ok');
+          manageStock(existing.id);
+        });
+      };
+    }
+  });
+  return m;
 }
 
 function bulkDeleteUsers() {
@@ -4558,7 +5335,7 @@ function bulkDeleteUsers() {
 
 function editUser(id, cb) {
   const u = id ? byId(DB.users, id)
-    : { id: null, name: '', phone: '', email: '', role: '業務', is_active: true };
+    : { id: null, name: '', phone: '', email: '', role: '業務', department: '', is_active: true };
   openModal({
     title: id ? '編輯業務' : '新增業務',
     body: `
@@ -4567,10 +5344,18 @@ function editUser(id, cb) {
         <div class="field"><label>電話</label><input class="inp" data-f="phone" inputmode="tel" value="${esc(u.phone || '')}"></div>
         <div class="field"><label>Email</label><input class="inp" data-f="email" inputmode="email" value="${esc(u.email || '')}"></div>
       </div>
-      <div class="field"><label>角色 / 職稱</label>
-        <input class="inp" data-f="role" list="roleList" value="${esc(u.role || '')}" placeholder="例：業務、行政、倉管…">
-        <datalist id="roleList">${ROLE_SUGGESTIONS.map(r => `<option value="${r}">`).join('')}</datalist>
-        <div class="hint">可自由輸入，不限於清單裡的選項。</div></div>
+      <div class="grid g2">
+        <div class="field"><label>角色 / 職稱</label>
+          <input class="inp" data-f="role" list="roleList" value="${esc(u.role || '')}" placeholder="例：業務、行政、倉管…">
+          <datalist id="roleList">${ROLE_SUGGESTIONS.map(r => `<option value="${r}">`).join('')}</datalist>
+          <div class="hint">可自由輸入，不限於清單裡的選項。</div></div>
+        <div class="field"><label>所屬部門</label>
+          <select class="inp" data-f="department">
+            <option value="">（未指定）</option>
+            ${ensureDepartments().map(d => `<option value="${d.id}" ${u.department === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
+          </select>
+          <div class="hint">部門清單在「部門管理」維護。</div></div>
+      </div>
       <div class="field"><label><input type="checkbox" data-f="is_active" ${u.is_active ? 'checked' : ''}> 啟用</label>
         <div class="hint">停用後不會出現在報價的業務下拉，既有報價不受影響。</div></div>`,
     footer: `${id ? '<button class="btn danger left" data-del>刪除</button>' : ''}
@@ -4746,6 +5531,15 @@ const PROD_COLS = [
   ['fav', '★ 我的最愛'], ['part_no', '料號'], ['name', '品名'], ['brand', '品牌'], ['category', '分類'],
   ['supplier', '進貨廠商'], ['cost', '成本'], ['price', '牌價'], ['bom', 'BOM'], ['note', '備註']
 ];
+// 商品列表欄位：啟用進銷存時，在「分類」後、「進貨廠商」前插入 庫存／儲位／貨況 三欄
+function prodColDefs() {
+  const cols = PROD_COLS.slice();
+  if (invEnabled()) {
+    const i = cols.findIndex(c => c[0] === 'supplier');
+    cols.splice(i, 0, ['stock_qty', '庫存'], ['stock_loc', '儲位'], ['stock_cond', '貨況']);
+  }
+  return cols;
+}
 // 用函式做延遲查表：D_COLS / RT_COLS 定義在檔案後面，執行期呼叫時它們都已初始化
 function getColDefs(id) {
   return ({
@@ -4753,7 +5547,7 @@ function getColDefs(id) {
     dlist: (typeof D_COLS !== 'undefined' ? D_COLS : []),
     rtlist: (typeof RT_COLS !== 'undefined' ? RT_COLS : []),
     clist: CUST_COLS,
-    plist: PROD_COLS
+    plist: prodColDefs()
   })[id] || [];
 }
 function colStoreKey(id) { return 'erp_cols_hidden_' + id; }
@@ -7268,15 +8062,47 @@ function delDvItem(id) {
   DE.items = DE.items.filter(i => i.id !== id); save(); drawDvItems(); drawDvTotals();
 }
 
+// 出貨單要扣庫的實體品項（只扣「公司庫存」供貨、且是主檔商品的列；BOM 子件與代理商直送不扣）
+function deliveryStockLines(d) {
+  const out = [];
+  allLines(d).forEach(l => {
+    const mode = l.source || (l.in_stock ? 'stock' : 'order');
+    if (mode === 'stock' && l.product_id) out.push({ product_id: l.product_id, qty: +l.qty || 0 });
+  });
+  return out;
+}
+
 function advance(id) {
   const d = byId(DB.deliveries, id);
   const n = dsNext(d); if (!n) return;
-  d.status = n;
-  if (n === 'shipped') d.shipped_at = new Date().toISOString();
-  if (n === 'closed') d.closed_at = new Date().toISOString();
-  const q = byId(DB.quotes, d.quote_id);
-  if (q) syncQuoteStatus(q);
-  saveNow(); render(); toast('狀態已更新為「' + DS[n].label + '」', 'ok');
+  const doAdvance = () => {
+    d.status = n;
+    if (n === 'shipped') {
+      d.shipped_at = new Date().toISOString();
+      // 串接庫存：出貨即扣庫（先進先出），並保留異動紀錄（只在啟用進銷存時）
+      if (invEnabled() && !d._stock_deducted) {
+        deliveryStockLines(d).forEach(li =>
+          stockDeduct(li.product_id, li.qty, { ref_type: 'delivery', ref_id: d.id, reason: '出貨扣庫 ' + (d.delivery_no || '') }));
+        d._stock_deducted = true;
+      }
+    }
+    if (n === 'closed') d.closed_at = new Date().toISOString();
+    const q = byId(DB.quotes, d.quote_id);
+    if (q) syncQuoteStatus(q);
+    saveNow(); render(); toast('狀態已更新為「' + DS[n].label + '」', 'ok');
+  };
+  // 出貨前先檢查可用庫存，不足時提醒改叫代理商供貨
+  if (n === 'shipped' && invEnabled()) {
+    const short = deliveryStockLines(d)
+      .filter(li => productAvailable(li.product_id) < li.qty)
+      .map(li => { const p = byId(DB.products, li.product_id); return `${(p && p.name) || li.product_id}（可用 ${productAvailable(li.product_id)}／需 ${li.qty}）`; });
+    if (short.length) {
+      return confirmBox('庫存不足提醒',
+        `以下商品公司可用庫存不足，出貨後帳面會變負數：<br><br>${short.join('<br>')}<br><br>建議改向<b>代理商叫貨</b>供貨。仍要出貨扣庫嗎？`,
+        doAdvance, true);
+    }
+  }
+  doAdvance();
 }
 
 function cancelDelivery(id) {
@@ -7284,6 +8110,11 @@ function cancelDelivery(id) {
   confirmBox('作廢出貨單', `作廢後這張報價可以重新開立出貨單。<br>
     單號 ${d.delivery_no} 保留不回收。確定？`, () => {
     d.status = 'cancelled';
+    // 已扣過庫存 → 回補，並保留異動紀錄
+    if (invEnabled() && d._stock_deducted) {
+      stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨作廢回補 ' + (d.delivery_no || '') });
+      d._stock_deducted = false;
+    }
     const q = byId(DB.quotes, d.quote_id);
     if (q) syncQuoteStatus(q);
     saveNow(); render(); toast('已作廢');
@@ -7295,6 +8126,10 @@ function deleteDelivery(id) {
   confirmBox('刪除出貨單', `將<b>永久刪除</b> ${esc(d.delivery_no)}，不可復原。<br>
     來源報價會回到「已下單」，可重新開立。<br><br>確定刪除？`, () => {
     const qid = d.quote_id;
+    // 已扣過庫存 → 刪除前先回補，避免庫存憑空少掉
+    if (invEnabled() && d._stock_deducted) {
+      stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨刪除回補 ' + (d.delivery_no || '') });
+    }
     DB.deliveries = DB.deliveries.filter(x => x.id !== id);
     const q = byId(DB.quotes, qid);
     if (q) syncQuoteStatus(q);
@@ -8169,8 +9004,11 @@ function productSortValue(p, key) {
     case 'brand': return p.brand || '';
     case 'category': return p.category || '';
     case 'supplier': return p.default_supplier || '';
-    case 'cost': return p.has_bom ? -1 : (+p.default_cost || 0);
-    case 'price': return +p.list_price || 0;
+    case 'cost': return p.has_bom && !priceDeptIsNet() ? -1 : prodCostFor(p, priceDeptIsNet());
+    case 'price': return prodPriceFor(p, priceDeptIsNet());
+    case 'stock_qty': return productOnHand(p.id);
+    case 'stock_loc': return (stockSummary(p.id).locs[0] || '');
+    case 'stock_cond': return (stockSummary(p.id).conds[0] || '');
     case 'bom': return p.has_bom ? (p.components || []).length : -1;
     case 'note': return p.note || '';
     default: return '';
@@ -8234,33 +9072,43 @@ function viewProducts(v) {
     const info = paginateList('products', list, resetPage);
     const page = info.pageItems;
     const allChecked = page.length && page.every(p => pSelected.has(p.id));
+    const net = priceDeptIsNet();                 // 依登入者部門決定顯示哪一部門的價
+    const dCol = net ? DEPT_ORANGE : DEPT_BLUE;    // 業務部藍、網路部橘
+    const dNm = net ? '網路部' : '業務部';
     const th = (key, label, cls) => `<th class="sortable ${cls || ''}" data-sortkey="${key}">${label}${sortArrow(pSortState, key)}</th>`;
     keepScroll('plist');
     document.getElementById('plist').innerHTML = !list.length
       ? `<div class="empty"><div class="e">${icon('product')}</div><h3>找不到商品</h3>
          <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button></div>`
-      : `<table class="tbl"><thead><tr>
+      : `<div class="muted" style="font-size:11.5px;margin:2px 2px 9px">
+          成本／牌價目前顯示 <b style="color:${dCol}">${dNm}</b> 的價格（依登入者所屬部門自動切換；<span style="color:${DEPT_BLUE}">業務部藍</span>、<span style="color:${DEPT_ORANGE}">網路部橘</span>）</div>
+        <table class="tbl ${canSeeCost() ? '' : 'hide-cost'}"><thead><tr>
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
               onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(page.map(p => p.id)))})"></th>
-          ${th('fav', '★', 'c')}${th('part_no', '料號')}${th('name', '品名')}${th('brand', '品牌')}${th('category', '分類')}${th('supplier', '進貨廠商')}
-          ${th('cost', '成本', 'r cost-col')}${th('price', '牌價', 'r')}${th('bom', 'BOM', 'c')}${th('note', '備註')}
+          ${th('fav', '★', 'c')}${th('part_no', '料號')}${th('name', '品名')}${th('brand', '品牌')}${th('category', '分類')}${invEnabled() ? th('stock_qty', '帳面', 'r stk-col') + th('stock_avail', '可用', 'r stk-col') + th('stock_lock', '鎖貨', 'r stk-col') + th('stock_agent', '代理', 'r stk-col') + th('stock_loc', '儲位', 'stk-col') + th('stock_cond', '貨況', 'stk-col') : ''}${th('supplier', '進貨廠商')}
+          ${th('cost', `成本<span style="color:${dCol};font-weight:800">·${dNm}</span>`, 'r cost-col')}${th('price', `牌價<span style="color:${dCol};font-weight:800">·${dNm}</span>`, 'r')}${th('bom', 'BOM', 'c')}${th('note', '備註')}
           <th style="width:56px" onclick="event.stopPropagation()"></th>
         </tr></thead><tbody>
         ${page.map(p => `<tr>
           <td onclick="event.stopPropagation()"><input type="checkbox" ${pSelected.has(p.id) ? 'checked' : ''} onchange="toggleSel('p','${p.id}', this.checked)"></td>
           <td onclick="event.stopPropagation();toggleFav('${p.id}')" style="cursor:pointer;text-align:center;font-size:15px;color:${p.is_favorite ? 'var(--orange)' : 'var(--line-2)'}">★</td>
-          <td onclick="editProduct('${p.id}')" style="font-family:var(--mono);font-size:11.5px">${esc(p.part_no || '—')}</td>
-          <td onclick="editProduct('${p.id}')"><b>${esc(p.name)}</b>
+          <td onclick="openProductDrawer('${p.id}')" style="font-family:var(--mono);font-size:11.5px">${esc(p.part_no || '—')}</td>
+          <td onclick="openProductDrawer('${p.id}')"><b>${esc(p.name)}</b>
             ${p.spec ? `<div class="muted">${esc(p.spec)}</div>` : ''}</td>
-          <td onclick="editProduct('${p.id}')">${esc(p.brand || '—')}</td>
-          <td onclick="editProduct('${p.id}')">${p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '—'}</td>
-          <td onclick="editProduct('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
-          <td onclick="editProduct('${p.id}')" class="r money cost-col">${p.has_bom ? '<span class="muted">組合</span>' : money(p.default_cost)}</td>
-          <td onclick="editProduct('${p.id}')" class="r money">${money(p.list_price)}
-            ${p.price_ref_date ? `<div class="muted" style="font-size:10px">${esc(p.price_ref_source || '')} ${fmtDateShort(p.price_ref_date)}</div>` : ''}</td>
-          <td onclick="editProduct('${p.id}')" class="c">${p.has_bom ? `<span class="bdg blue plain">${(p.components || []).length} 項</span>` : '<span class="muted">—</span>'}</td>
-          <td onclick="editProduct('${p.id}')" class="muted prod-col" title="${esc(p.note || '')}">${esc(p.note || '—')}</td>
+          <td onclick="openProductDrawer('${p.id}')">${esc(p.brand || '—')}</td>
+          <td onclick="openProductDrawer('${p.id}')">${p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '—'}</td>
+          ${invEnabled() ? (() => { const ss = stockSummary(p.id); const av = productAvailable(p.id); const lk = productLocked(p.id); const ag = agentStockQty(p.id); const low = isBelowSafety(p.id); return `<td onclick="openProductDrawer('${p.id}')" class="r stk-col"><b class="${ss.qty > 0 ? '' : 'muted'}">${ss.qty}</b></td>
+          <td onclick="openProductDrawer('${p.id}')" class="r stk-col"><b class="${av > 0 ? '' : 'muted'}" style="${low ? 'color:var(--red)' : ''}" title="${low ? '低於安全庫存' : ''}">${av}${low ? ' ⚠' : ''}</b></td>
+          <td onclick="openProductDrawer('${p.id}')" class="r stk-col">${lk > 0 ? `<span class="bdg gray plain">${lk}</span>` : '<span class="muted">—</span>'}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="r stk-col">${ag > 0 ? `<span class="bdg blue plain">${ag}</span>` : '<span class="muted">—</span>'}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="stk-col">${ss.locs.length ? esc(ss.locs.join('、')) : '<span class="muted">—</span>'}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="stk-col">${ss.conds.length ? esc(ss.conds.join('、')) : '<span class="muted">—</span>'}</td>`; })() : ''}
+          <td onclick="openProductDrawer('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="r money cost-col" style="color:${dCol}">${p.has_bom && !net ? '<span class="muted">組合</span>' : (net && !prodCostFor(p, net) ? '<span class="muted">—</span>' : money(prodCostFor(p, net)))}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="r money" style="color:${dCol};font-weight:600">${net && !prodPriceFor(p, net) ? '<span class="muted">—</span>' : money(prodPriceFor(p, net))}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="c">${p.has_bom ? `<span class="bdg blue plain">${(p.components || []).length} 項</span>` : '<span class="muted">—</span>'}</td>
+          <td onclick="openProductDrawer('${p.id}')" class="muted prod-col" title="${esc(p.note || '')}">${esc(p.note || '—')}</td>
           <td onclick="event.stopPropagation()" class="c"><button class="btn sm ghost" onclick="event.stopPropagation();cloneProduct('${p.id}')">複製</button></td>
         </tr>`).join('')}</tbody></table>`;
     document.getElementById('pPageBar').innerHTML = list.length ? pageBarHtml('products', info) : '';
@@ -8401,10 +9249,327 @@ function cloneProduct(id) {
   toast('已建立複本，改好後按儲存', 'ok');
 }
 
+/* ===========================================================
+   §商品明細抽屜（右側滑出，六分頁）
+   基本資料／價格／代理商／採購批次／庫存／異動紀錄
+   =========================================================== */
+
+// 通用右側抽屜：tabs = [{key,label,html}]，回傳 { el, close, showTab }
+function openDrawer(opts) {
+  const tabs = opts.tabs || [];
+  const mask = document.createElement('div');
+  mask.className = 'mask drawer-mask';
+  mask.innerHTML = `
+    <div class="drawer" role="dialog" aria-modal="true">
+      <div class="modal-h">
+        <h3>${esc(opts.title || '')}</h3>
+        ${opts.sub ? `<span class="muted" style="font-size:12px">${esc(opts.sub)}</span>` : ''}
+        <button class="x" aria-label="關閉">×</button>
+      </div>
+      <div class="drawer-tabs">
+        ${tabs.map((t, i) => `<button class="drawer-tab ${i === (opts.active || 0) ? 'on' : ''}" data-tab="${t.key}">${esc(t.label)}</button>`).join('')}
+      </div>
+      <div class="modal-b">
+        ${tabs.map((t, i) => `<div class="drawer-pane" data-pane="${t.key}" ${i === (opts.active || 0) ? '' : 'hidden'}>${t.html}</div>`).join('')}
+      </div>
+      ${opts.footer ? `<div class="modal-f">${opts.footer}</div>` : ''}
+    </div>`;
+  document.getElementById('modalRoot').appendChild(mask);
+  modalStack.push(mask);
+  const close = () => { mask.remove(); modalStack = modalStack.filter(m => m !== mask); };
+  mask.querySelector('.x').onclick = close;
+  mask.onmousedown = e => { if (e.target === mask && !opts.sticky) close(); };
+  const showTab = key => {
+    mask.querySelectorAll('.drawer-tab').forEach(b => b.classList.toggle('on', b.dataset.tab === key));
+    mask.querySelectorAll('.drawer-pane').forEach(p => p.hidden = (p.dataset.pane !== key));
+  };
+  mask.querySelectorAll('.drawer-tab').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  if (opts.onMount) opts.onMount(mask, close, showTab);
+  return { el: mask, close, showTab };
+}
+
+// 記住抽屜停在哪個分頁，儲存後重開回到同一頁
+let _prodDrawerTab = 'info';
+function openProductDrawer(id, tab) {
+  const p = byId(DB.products, id);
+  if (!p) return toast('找不到商品', 'err');
+  if (tab) _prodDrawerTab = tab;
+  const active = tab || _prodDrawerTab || 'info';
+  closeAllModals();
+
+  const seeCost = canSeeCost();
+  const net = false; // 抽屜內價格分頁同時列出藍/橘兩部門，不依登入者切換
+  const onHand = productOnHand(id), locked = productLocked(id), avail = productAvailable(id);
+  const agent = agentStockQty(id), safe = +p.safety_stock || 0, low = isBelowSafety(id);
+
+  // ── 分頁1：基本資料 ──
+  const infoHtml = `
+    <div class="dw-grid">
+      ${dwRow('料號', esc(p.part_no || '—'))}
+      ${dwRow('品名', `<b>${esc(p.name || '—')}</b>`)}
+      ${dwRow('品牌', esc(p.brand || '—'))}
+      ${dwRow('規格', esc(p.spec || '—'))}
+      ${dwRow('分類', p.category ? esc(p.category) : '—')}
+      ${dwRow('單位', esc(p.unit || '—'))}
+      ${dwRow('進貨廠商', esc(p.default_supplier || '—'))}
+      ${dwRow('供貨模式', prodModeBadge(p.stock_mode))}
+      ${dwRow('組合商品', p.has_bom ? `是（${(p.components || []).length} 項組成）` : '否')}
+      ${dwRow('常用', p.is_favorite ? '★ 是' : '否')}
+      ${dwRow('備註', esc(p.note || '—'))}
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn primary" onclick="editProduct('${id}')">編輯基本資料</button>
+      <button class="btn ghost" onclick="cloneProduct('${id}')">複製為新商品</button>
+    </div>`;
+
+  // ── 分頁2：價格（雙部門）──
+  const priceHtml = seeCost ? `
+    <div class="grid g2">
+      <div style="background:#EFF6FF;border:1px solid #93C5FD;border-radius:8px;padding:12px">
+        <div style="font-weight:700;font-size:13px;color:#1D4ED8;margin-bottom:8px">🔵 業務部</div>
+        ${dwRow('成本（未稅）', p.has_bom ? '<span class="muted">組合加總</span>' : money(prodCostFor(p, false)))}
+        ${dwRow('牌價（未稅）', money(prodPriceFor(p, false)))}
+      </div>
+      <div style="background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;padding:12px">
+        <div style="font-weight:700;font-size:13px;color:#C2410C;margin-bottom:8px">🟠 網路部</div>
+        ${dwRow('成本（未稅）', p.net_cost ? money(p.net_cost) : '<span class="muted">未設定</span>')}
+        ${dwRow('牌價（未稅）', p.net_price ? money(p.net_price) : '<span class="muted">未設定</span>')}
+      </div>
+    </div>
+    <div class="dw-grid" style="margin-top:12px">
+      ${dwRow('最新進貨成本', invEnabled() ? money(latestCost(id)) : '—')}
+      ${dwRow('加權平均成本', invEnabled() ? money(avgCost(id)) : '—')}
+    </div>
+    <div style="margin-top:14px"><button class="btn primary" onclick="editProduct('${id}')">編輯價格</button></div>`
+    : `<div class="banner info"><span class="bi">🔒</span><div>目前登入角色沒有成本／價格檢視權限。</div></div>`;
+
+  // ── 分頁3：代理商庫存（多筆）──
+  const agents = p.agent_stocks || [];
+  const agentHtml = `
+    <div class="banner info" style="margin-bottom:10px"><span class="bi">ℹ</span><div>
+      代理商庫存<b>不計入</b>公司可用庫存，供「客訂叫貨」時參考成本與交期。</div></div>
+    ${agents.length ? `<table class="tbl" style="font-size:12.5px"><thead><tr>
+      <th>代理商</th>${seeCost ? '<th class="r">成本</th>' : ''}<th>交期</th><th class="r">庫存</th><th>備註</th><th style="width:40px"></th>
+      </tr></thead><tbody>
+      ${agents.map(a => `<tr>
+        <td>${esc(a.supplier_name || '—')}</td>
+        ${seeCost ? `<td class="r money">${a.cost ? money(a.cost) : '—'}</td>` : ''}
+        <td>${esc(a.lead_time || '—')}</td>
+        <td class="r"><b>${+a.qty || 0}</b></td>
+        <td class="muted">${esc(a.note || '—')}</td>
+        <td class="c"><button class="btn sm ghost" onclick="prodAgentEdit('${id}','${a.id}')">✎</button></td>
+      </tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:20px"><p>尚未設定代理商庫存</p></div>`}
+    <div style="margin-top:12px"><button class="btn primary" onclick="prodAgentEdit('${id}','')">＋ 新增代理商</button></div>`;
+
+  // ── 分頁4：採購批次 ──
+  const batches = stockBatches(id);
+  const batchHtml = invEnabled() ? `
+    <div class="dw-grid" style="margin-bottom:10px">
+      ${dwRow('最新成本', seeCost ? money(latestCost(id)) : '🔒')}
+      ${dwRow('加權平均成本', seeCost ? money(avgCost(id)) : '🔒')}
+      ${dwRow('批次數', batches.length)}
+    </div>
+    ${batches.length ? `<table class="tbl" style="font-size:12px"><thead><tr>
+      <th>入庫日</th><th>倉庫</th><th>儲位</th><th>貨況</th>${seeCost ? '<th class="r">成本</th>' : ''}<th class="r">剩餘</th><th>來源</th>
+      </tr></thead><tbody>
+      ${batches.map(b => `<tr>
+        <td>${esc(b.in_date || '—')}</td>
+        <td>${esc(warehouseName(b.warehouse_id) || '—')}</td>
+        <td>${esc(b.location || '—')}</td>
+        <td>${esc(b.condition || '—')}</td>
+        ${seeCost ? `<td class="r money">${money(b.cost)}</td>` : ''}
+        <td class="r"><b>${+b.qty || 0}</b></td>
+        <td class="muted">${esc(b.supplier_name || '—')}</td>
+      </tr>`).join('')}</tbody></table>` : `<div class="empty" style="padding:20px"><p>尚無進貨批次</p></div>`}
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn primary" onclick="manageStock('${id}')">進貨／管理批次</button>
+    </div>`
+    : `<div class="banner info"><span class="bi">ℹ</span><div>尚未啟用進銷存模組，請到「設定 → 進銷存」開啟。</div></div>`;
+
+  // ── 分頁5：庫存總覽（可用/鎖貨/代理/安全）──
+  const locks = (DB.stock_locks || []).filter(l => l.product_id === id && l.status === 'active');
+  const stockHtml = invEnabled() ? `
+    <div class="dw-stats">
+      ${dwStat('帳面庫存', onHand)}
+      ${dwStat('鎖貨', locked, locked > 0 ? 'gray' : '')}
+      ${dwStat('可用庫存', avail, low ? 'red' : (avail > 0 ? 'green' : ''))}
+      ${dwStat('代理商庫存', agent, 'blue')}
+      ${dwStat('安全庫存', safe)}
+    </div>
+    ${low ? `<div class="banner warn" style="margin-top:10px"><span class="bi">⚠</span><div>
+      可用庫存 <b>${avail}</b> 低於安全庫存 <b>${safe}</b>，建議補貨或向代理商叫貨。</div></div>` : ''}
+    <div class="sec-title" style="margin-top:14px">鎖貨明細</div>
+    ${locks.length ? `<table class="tbl" style="font-size:12px"><thead><tr>
+      <th class="r">數量</th><th>原因</th><th>客戶</th><th>負責人</th><th>時間</th><th style="width:56px"></th>
+      </tr></thead><tbody>
+      ${locks.map(l => { const c = l.customer_id ? byId(DB.customers, l.customer_id) : null; return `<tr>
+        <td class="r"><b>${+l.qty || 0}</b></td>
+        <td>${esc(l.reason || '—')}</td>
+        <td>${c ? esc(c.name) : '—'}</td>
+        <td>${esc(l.operator || '—')}</td>
+        <td class="muted">${esc((l.created_at || '').slice(0, 10))}</td>
+        <td class="c"><button class="btn sm ghost" onclick="prodLockRelease('${id}','${l.id}')">釋放</button></td>
+      </tr>`; }).join('')}</tbody></table>` : `<div class="muted" style="font-size:12px;padding:8px 2px">目前沒有鎖貨</div>`}
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn primary" onclick="prodLockNew('${id}')">🔒 鎖貨</button>
+      <button class="btn ghost" onclick="prodCount('${id}')">盤點調整</button>
+      <button class="btn ghost" onclick="prodSafety('${id}')">設定安全庫存</button>
+    </div>`
+    : `<div class="banner info"><span class="bi">ℹ</span><div>尚未啟用進銷存模組。</div></div>`;
+
+  // ── 分頁6：異動紀錄 ──
+  const moves = movementsOf(id).slice(0, 200);
+  const moveHtml = `
+    ${moves.length ? `<table class="tbl" style="font-size:12px"><thead><tr>
+      <th>時間</th><th>類型</th><th class="r">數量</th><th>倉庫</th><th>來源／原因</th><th>操作</th>
+      </tr></thead><tbody>
+      ${moves.map(m => { const t = MV_TYPES[m.type] || { label: m.type, color: 'gray' }; return `<tr>
+        <td class="muted" style="white-space:nowrap">${esc((m.created_at || '').slice(0, 16).replace('T', ' '))}</td>
+        <td><span class="bdg ${t.color} plain">${t.label}</span></td>
+        <td class="r"><b>${+m.qty || 0}</b></td>
+        <td>${esc(warehouseName(m.warehouse_id) || '—')}</td>
+        <td>${esc(m.reason || m.ref_type || '—')}</td>
+        <td class="muted">${esc(m.operator || '—')}</td>
+      </tr>`; }).join('')}</tbody></table>
+      ${movementsOf(id).length > 200 ? '<div class="muted" style="font-size:11px;margin-top:6px">僅顯示最近 200 筆</div>' : ''}`
+      : `<div class="empty" style="padding:20px"><p>尚無異動紀錄</p></div>`}`;
+
+  openDrawer({
+    title: p.name || '商品明細',
+    sub: p.part_no || '',
+    active: ['info', 'price', 'agents', 'batches', 'stock', 'moves'].indexOf(active) < 0 ? 0
+      : ['info', 'price', 'agents', 'batches', 'stock', 'moves'].indexOf(active),
+    tabs: [
+      { key: 'info', label: '基本資料', html: infoHtml },
+      { key: 'price', label: '價格', html: priceHtml },
+      { key: 'agents', label: '代理商', html: agentHtml },
+      { key: 'batches', label: '採購批次', html: batchHtml },
+      { key: 'stock', label: '庫存', html: stockHtml },
+      { key: 'moves', label: '異動紀錄', html: moveHtml }
+    ],
+    onMount(el, close, showTab) {
+      el.querySelectorAll('.drawer-tab').forEach(b => {
+        const orig = b.onclick;
+        b.addEventListener('click', () => { _prodDrawerTab = b.dataset.tab; });
+      });
+    }
+  });
+}
+
+// 抽屜內的小工具 HTML
+function dwRow(label, val) {
+  return `<div class="dw-r"><span class="dw-k">${esc(label)}</span><span class="dw-v">${val}</span></div>`;
+}
+function dwStat(label, val, color) {
+  const c = color === 'red' ? 'var(--red)' : color === 'green' ? 'var(--green)' : color === 'blue' ? '#2563eb' : color === 'gray' ? 'var(--text-3)' : 'var(--text)';
+  return `<div class="dw-stat"><div class="dw-stat-v" style="color:${c}">${val}</div><div class="dw-stat-k">${esc(label)}</div></div>`;
+}
+function prodModeBadge(mode) {
+  const map = { company: ['公司庫存', 'green'], agent: ['代理商庫存', 'blue'], order: ['客訂叫貨', 'orange'] };
+  const m = map[mode] || map.company;
+  return `<span class="bdg ${m[1]} plain">${m[0]}</span>`;
+}
+
+// 代理商庫存：新增／編輯（單筆表單）
+function prodAgentEdit(pid, agid) {
+  const p = byId(DB.products, pid); if (!p) return;
+  p.agent_stocks = p.agent_stocks || [];
+  const a = agid ? p.agent_stocks.find(x => x.id === agid) : null;
+  const d = a || { supplier_name: '', cost: 0, lead_time: '', qty: 0, note: '' };
+  openModal({
+    title: agid ? '編輯代理商庫存' : '新增代理商庫存',
+    body: `
+      <div class="field"><label class="req">代理商／廠商</label>
+        <input class="inp" list="supList" id="ag_sup" value="${esc(d.supplier_name || '')}"></div>
+      <div class="grid g2">
+        <div class="field"><label>成本（未稅）</label><input class="inp num" type="number" id="ag_cost" value="${d.cost || ''}"></div>
+        <div class="field"><label>交期</label><input class="inp" id="ag_lead" value="${esc(d.lead_time || '')}" placeholder="例：現貨／3 天"></div>
+      </div>
+      <div class="grid g2">
+        <div class="field"><label>代理商庫存量</label><input class="inp num" type="number" id="ag_qty" value="${d.qty || 0}"></div>
+        <div class="field"><label>備註</label><input class="inp" id="ag_note" value="${esc(d.note || '')}"></div>
+      </div>${supDatalist()}`,
+    footer: `${agid ? '<button class="btn danger left" id="ag_del">刪除</button>' : ''}
+             <button class="btn" data-no>取消</button><button class="btn primary" id="ag_ok">儲存</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('#ag_ok').onclick = () => {
+        const sup = el.querySelector('#ag_sup').value.trim();
+        if (!sup) return toast('請填代理商名稱', 'err');
+        const rec = {
+          supplier_name: sup, cost: +el.querySelector('#ag_cost').value || 0,
+          lead_time: el.querySelector('#ag_lead').value.trim(),
+          qty: +el.querySelector('#ag_qty').value || 0, note: el.querySelector('#ag_note').value.trim()
+        };
+        if (a) Object.assign(a, rec);
+        else p.agent_stocks.push(Object.assign({ id: uid('ag') }, rec));
+        saveNow(); close(); openProductDrawer(pid, 'agents');
+      };
+      const del = el.querySelector('#ag_del');
+      if (del) del.onclick = () => {
+        p.agent_stocks = p.agent_stocks.filter(x => x.id !== agid);
+        saveNow(); close(); openProductDrawer(pid, 'agents');
+      };
+    }
+  });
+}
+
+// 鎖貨：新增
+function prodLockNew(pid) {
+  const p = byId(DB.products, pid); if (!p) return;
+  const custOpts = (DB.customers || []).slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  openModal({
+    title: '鎖貨 · ' + (p.name || ''),
+    body: `
+      <div class="banner info" style="margin-bottom:10px"><span class="bi">ℹ</span><div>
+        鎖貨會從<b>可用庫存</b>扣除，但不動帳面庫存；獨立於訂單。目前可用：<b>${productAvailable(pid)}</b></div></div>
+      <div class="grid g2">
+        <div class="field"><label class="req">鎖貨數量</label><input class="inp num" type="number" id="lk_qty" value="1" min="1"></div>
+        <div class="field"><label>客戶（可選）</label><select class="inp" id="lk_cust"><option value="">—</option>${custOpts}</select></div>
+      </div>
+      <div class="field"><label>原因</label><input class="inp" id="lk_reason" placeholder="例：客戶已下訂待出貨"></div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" id="lk_ok">建立鎖貨</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('#lk_ok').onclick = () => {
+        const qty = +el.querySelector('#lk_qty').value || 0;
+        if (qty <= 0) return toast('請輸入數量', 'err');
+        createLock({ product_id: pid, qty, reason: el.querySelector('#lk_reason').value.trim(), customer_id: el.querySelector('#lk_cust').value });
+        saveNow(); close(); openProductDrawer(pid, 'stock');
+      };
+    }
+  });
+}
+function prodLockRelease(pid, lkid) {
+  confirmBox('釋放鎖貨', '確定釋放這筆鎖貨？可用庫存會加回。', () => {
+    releaseLock(lkid); saveNow(); openProductDrawer(pid, 'stock');
+  });
+}
+
+// 盤點調整
+function prodCount(pid) {
+  const p = byId(DB.products, pid); if (!p) return;
+  promptBox('盤點調整 · ' + (p.name || ''), `實際盤點數量（目前帳面 ${productOnHand(pid)}）`, String(productOnHand(pid)), val => {
+    const target = +val;
+    if (isNaN(target) || target < 0) return toast('請輸入正確數量', 'err');
+    stockAdjust(pid, target, '盤點調整（抽屜）'); saveNow(); openProductDrawer(pid, 'stock');
+  });
+}
+
+// 設定安全庫存
+function prodSafety(pid) {
+  const p = byId(DB.products, pid); if (!p) return;
+  promptBox('安全庫存 · ' + (p.name || ''), '低於此數量會顯示缺貨提醒', String(+p.safety_stock || 0), val => {
+    p.safety_stock = +val || 0; saveNow(); openProductDrawer(pid, 'stock');
+  });
+}
+
 function editProduct(id, seed) {
   const p = id ? JSON.parse(JSON.stringify(byId(DB.products, id))) : (seed || {
     id: null, part_no: '', brand: '', name: '', spec: '', unit: '台',
-    list_price: 0, default_cost: 0, category: '', default_supplier: '',
+    list_price: 0, default_cost: 0, net_price: 0, net_cost: 0, category: '', default_supplier: '',
     price_ref_date: '', price_ref_source: '', note: '',
     has_bom: false, is_active: true, is_favorite: false, components: []
   });
@@ -8431,19 +9596,38 @@ function editProduct(id, seed) {
       </div>
       <div class="field"><label class="req">品名</label><input class="inp" data-f="name" value="${esc(p.name)}"></div>
       <div class="field"><label>規格</label><input class="inp" data-f="spec" value="${esc(p.spec)}"></div>
-      <div class="grid g3">
+      <div class="grid g2">
         <div class="field"><label>單位</label><input class="inp" data-f="unit" value="${esc(p.unit)}"></div>
         <div class="field"><label>進貨廠商</label>
           <input class="inp" list="supList" data-f="default_supplier" value="${esc(p.default_supplier || '')}" placeholder="可打字／選常用"></div>
-        <div class="field cost-col"><label>預設成本（未稅）</label>
-          <input class="inp num" type="number" data-f="default_cost" value="${p.default_cost}" ${p.has_bom ? 'disabled' : ''}>
-          <div class="hint">組合商品由組成加總</div></div>
       </div>
-      <div class="grid g3">
-        <div class="field"><label class="req">牌價（未稅）</label><input class="inp num" type="number" data-f="list_price" value="${p.list_price}"></div>
-        <div class="field"><label>牌價查詢日期</label><input class="inp" type="date" data-f="price_ref_date" value="${esc(p.price_ref_date || '')}"></div>
-        <div class="field"><label>牌價出處</label><input class="inp" data-f="price_ref_source" value="${esc(p.price_ref_source || '')}" placeholder="例：PChome／原廠官網"></div>
+      <div class="grid g2">
+        <div style="background:#EFF6FF;border:1px solid #93C5FD;border-radius:8px;padding:10px 12px">
+          <div style="font-weight:700;font-size:12.5px;color:#1D4ED8;margin-bottom:8px">🔵 業務部</div>
+          <div class="field cost-col" style="margin-bottom:8px"><label>成本（未稅）</label>
+            <input class="inp num" type="number" data-f="default_cost" value="${p.default_cost}" ${p.has_bom ? 'disabled' : ''}>
+            <div class="hint">${p.has_bom ? '組合商品由組成加總' : '業務部進價'}</div></div>
+          <div class="field" style="margin:0"><label>牌價（未稅）</label>
+            <input class="inp num" type="number" data-f="list_price" value="${p.list_price}"></div>
+        </div>
+        <div style="background:#FFF7ED;border:1px solid #FDBA74;border-radius:8px;padding:10px 12px">
+          <div style="font-weight:700;font-size:12.5px;color:#C2410C;margin-bottom:8px">🟠 網路部</div>
+          <div class="field cost-col" style="margin-bottom:8px"><label>成本（未稅）</label>
+            <input class="inp num" type="number" data-f="net_cost" value="${p.net_cost || ''}">
+            <div class="hint">沒填就空著（不沿用業務部）</div></div>
+          <div class="field" style="margin:0"><label>牌價（未稅）</label>
+            <input class="inp num" type="number" data-f="net_price" value="${p.net_price || ''}">
+            <div class="hint">沒填就空著（不沿用業務部）</div></div>
+        </div>
       </div>
+      ${invEnabled() && id ? `
+      <div class="sec-title">庫存（與倉庫共用同一份資料）</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:2px">
+        <div id="prodStockInfo">${prodStockLineHtml(id)}</div>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn sm" onclick="manageStock('${id}')">進貨／管理批次</button>
+        </div>
+      </div>` : ''}
       <div class="field"><label>備註</label><textarea class="inp" data-f="note" rows="2">${esc(p.note || '')}</textarea></div>
       <div class="btn-row" style="margin:2px 0 12px">
         <label class="chip ${p.is_favorite ? 'on' : ''}" style="cursor:pointer">
@@ -8672,6 +9856,13 @@ function viewSettings(v) {
           </select></div>
       </div>
       <button class="btn primary" id="saveSet">儲存設定</button>
+    </div></div>
+
+    <div class="sec-title">進銷存</div>
+    <div class="card"><div class="card-b">
+      <div class="banner info"><span class="bi">ℹ</span><div>
+        進銷存已<b>常駐啟用</b>：庫存數量、進貨批次、先進先出、鎖貨、代理商庫存、出貨自動扣庫與異動紀錄，
+        都直接在<b>「商品管理」點商品開啟的明細抽屜</b>裡管理。</div></div>
     </div></div>
 
     <div class="sec-title">資料</div>
@@ -8906,10 +10097,35 @@ function importJSON(file) {
       const d = JSON.parse(r.result);
       if (!d.companies || !d.quotes) throw new Error('檔案格式不符');
       confirmBox('匯入備份',
-        `將<b>覆蓋現有全部資料</b>。<br>備份版本 v${d._schema || 1}（目前 v${SCHEMA_V}），舊版會自動升級。<br><br>確定？`, () => {
-          DB = d; migrate(DB);
-          DB.settings = Object.assign({}, DEFAULT_SETTINGS, DB.settings || {});
-          save(); render(); toast('已匯入並升級至 v' + SCHEMA_V, 'ok');
+        `將<b>覆蓋現有全部資料</b>。<br>備份版本 v${d._schema || 1}（目前 v${SCHEMA_V}），舊版會自動升級。<br><br>確定？`, async () => {
+          try {
+            DB = d; migrate(DB);
+            DB.settings = Object.assign({}, DEFAULT_SETTINGS, DB.settings || {});
+
+            // 1) 先寫本機，並標記「本機有尚未同步的修改」。
+            //    這樣萬一雲端還沒寫完使用者就重新整理，下次開機會用本機這份「補送」到雲端，
+            //    而不是被雲端的舊資料蓋回去（這正是之前「匯入後重整又變回原本資料」的主因）。
+            try { localStorage.setItem(KEY, slimCacheString()); } catch (_) {}
+            const cloudOn = FIREBASE_ENABLED && fbUser;
+            if (cloudOn) { try { localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (_) {} }
+
+            // 2) 立刻把整份匯入資料覆蓋到雲端，並「等它寫完」。
+            //    以 _lastSynced（雲端目前內容）為比對基準：匯入檔有的就寫上去、
+            //    匯入檔沒有而雲端還留著的舊資料就刪掉，達到真正「整份覆蓋」。
+            if (cloudOn) {
+              clearTimeout(_syncTimer);
+              if (!_lastSynced) _lastSynced = emptyDB();  // 沒有比對基準時，視雲端為空 → 整份匯入資料全部送上去
+              await firestoreSaveDiff();     // 成功後會清掉 PENDING_SYNC_KEY 並更新 _lastSynced
+            }
+
+            render();
+            toast('已匯入並升級至 v' + SCHEMA_V + (cloudOn ? '，且已同步到雲端' : '（本機模式）'), 'ok');
+          } catch (e) {
+            console.error('匯入寫入雲端失敗', e);
+            // 資料已套用到本機、PENDING 旗標也在，下次連線會自動補送，不會遺失
+            render();
+            toast('匯入已套用到本機，但同步雲端失敗：' + (e && e.message || e) + '（恢復連線後會自動補送）', 'err');
+          }
         }, true);
     } catch (e) { toast('匯入失敗：' + e.message, 'err'); }
   };
@@ -9087,6 +10303,14 @@ function deleteAccount(id) {
    §22 開機
    =========================================================== */
 function boot() {
+  if (IS_DEV) {
+    try {
+      const b = document.createElement('div');
+      b.textContent = '開發模式（本機・未連雲端）';
+      b.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999;background:#C2410C;color:#fff;font-size:11px;font-weight:700;padding:4px 9px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.25);opacity:.9;pointer-events:none';
+      document.body.appendChild(b);
+    } catch (e) {}
+  }
   fbInit();
 }
 document.addEventListener('DOMContentLoaded', boot);
