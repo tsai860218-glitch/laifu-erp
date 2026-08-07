@@ -2325,16 +2325,41 @@ async function load() {
         DB = seedData;
         toast(localRaw ? '已將本機資料同步到雲端' : '已建立雲端初始資料', 'ok');
       } else {
-        // 進銷存集合不上雲端，remote 不會帶它們回來；先把本機既有的這幾個集合留住，
-        // 等 DB 換成 remote 之後再貼回去，避免雲端載入把本機庫存資料洗掉。
-        let localInv = null;
-        try { const lr = localStorage.getItem(KEY); if (lr) localInv = JSON.parse(lr); } catch (e) {}
+        // 進銷存集合不上雲端，remote 不會帶它們回來；先把本機既有的整份快取讀出來，
+        // 等 DB 換成 remote 之後，(1) 把本機專屬集合貼回去，(2) 做「資料遺失保護」。
+        let localDB = null;
+        try { const lr = localStorage.getItem(KEY); if (lr) localDB = JSON.parse(lr); } catch (e) {}
         DB = remote;
         const before = DB._schema || 1;
         migrate(DB);
         DB.settings = Object.assign({}, DEFAULT_SETTINGS, DB.settings || {});
-        LOCAL_ONLY_COLLECTIONS.forEach(c => { if (localInv && Array.isArray(localInv[c])) DB[c] = localInv[c]; });
-        if (before < SCHEMA_V) await firestoreUploadAll(DB);
+        LOCAL_ONLY_COLLECTIONS.forEach(c => { if (localDB && Array.isArray(localDB[c])) DB[c] = localDB[c]; });
+
+        // ★ 資料遺失保護：本機快取「有」、但雲端「沒有」的可同步記錄，代表之前有幾筆沒成功
+        //   寫上雲端（例如某些出貨單／租賃單被 Firestore 拒絕）。把它們補回畫面、標記待同步並
+        //   重新上傳，避免「重新整理後那幾筆就不見了」。此處只會「補回」，不會刪除雲端任何資料。
+        let recovered = 0;
+        if (localDB) {
+          FS_COLLECTIONS.forEach(c => {
+            if (!Array.isArray(localDB[c])) return;
+            DB[c] = DB[c] || [];
+            const have = new Set(DB[c].map(x => x && x.id));
+            localDB[c].forEach(rec => { if (rec && rec.id && !have.has(rec.id)) { DB[c].push(rec); recovered++; } });
+          });
+        }
+
+        if (before < SCHEMA_V) {
+          await firestoreUploadAll(DB);            // 連補回來的一起整包上傳
+        } else if (recovered) {
+          // 以「雲端現況」當比對基準 → 補回來的會被視為新增，重新送上雲端。
+          // 先等它寫完再繼續（跟下面掛即時監聽前的處理一致），把資料被監聽蓋掉的風險降到最低。
+          _lastSynced = JSON.parse(JSON.stringify(remote));
+          try { localStorage.setItem(KEY, slimCacheString()); localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (e) {}
+          clearTimeout(_syncTimer);
+          await firestoreSaveDiff().catch(e => console.error('補送本機未上雲端的資料失敗（資料仍保留在本機）', e));
+          setTimeout(() => toast('偵測到 ' + recovered + ' 筆資料雲端沒有（可能之前同步失敗），已保留並重新上傳', 'ok'), 400);
+          return;
+        }
       }
       _lastSynced = JSON.parse(JSON.stringify(DB));
       try { localStorage.setItem(KEY, slimCacheString()); localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {}
