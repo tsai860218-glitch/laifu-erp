@@ -1781,15 +1781,56 @@ function isFirestoreEmpty(data) {
   return FS_COLLECTIONS.every(col => !data[col] || !data[col].length);
 }
 
-// 分批寫入，避開 Firestore 單一 batch 500 筆上限
+// 分批寫入，避開 Firestore 單一 batch 500 筆上限。
+// 若整批失敗（batch 是全有或全無），改逐筆送以隔離出真正有問題的那幾筆，
+// 讓沒問題的資料照常寫進雲端，並在 console 清楚印出「哪個集合／哪一筆／什麼錯」，
+// 最後丟出一個「看得懂原因」的錯誤（權限被擋？圖片太大？），供上層顯示給使用者。
 async function fsBatchWrite(ops) {
+  const failures = [];
   for (let i = 0; i < ops.length; i += 400) {
-    const batch = fbDb.batch();
-    ops.slice(i, i + 400).forEach(op => {
-      if (op.type === 'set') batch.set(op.ref, op.data);
-      else batch.delete(op.ref);
-    });
-    await batch.commit();
+    const chunk = ops.slice(i, i + 400);
+    try {
+      const batch = fbDb.batch();
+      chunk.forEach(op => { if (op.type === 'set') batch.set(op.ref, op.data); else batch.delete(op.ref); });
+      await batch.commit();
+    } catch (batchErr) {
+      const bcode = (batchErr && batchErr.code) || '';
+      if (bcode === 'permission-denied') {
+        // 整批被安全性規則擋下 → 逐筆重試也一定全失敗，直接記錄整批的集合，別再狂打雲端
+        chunk.forEach(op => failures.push({
+          col: (op.ref && op.ref.parent && op.ref.parent.id) || '?',
+          id: (op.ref && op.ref.id) || '?', code: 'permission-denied', msg: batchErr.message || ''
+        }));
+        console.error('雲端寫入被安全性規則擋下（permission-denied），受影響集合：' +
+          [...new Set(chunk.map(op => op.ref && op.ref.parent && op.ref.parent.id))].join('、'));
+        continue;
+      }
+      // 其他錯誤 → 逐筆隔離，找出壞掉的那幾筆
+      for (const op of chunk) {
+        try {
+          if (op.type === 'set') await op.ref.set(op.data); else await op.ref.delete();
+        } catch (opErr) {
+          const col = (op.ref && op.ref.parent && op.ref.parent.id) || '?';
+          const id = (op.ref && op.ref.id) || '?';
+          const code = (opErr && opErr.code) || '';
+          console.error('雲端寫入失敗 → 集合「' + col + '」文件「' + id + '」：' + code + ' ' + ((opErr && opErr.message) || opErr));
+          failures.push({ col, id, code, msg: (opErr && opErr.message) || String(opErr) });
+        }
+      }
+    }
+  }
+  if (failures.length) {
+    const cols = [...new Set(failures.map(f => f.col))];
+    const allPerm = failures.every(f => f.code === 'permission-denied');
+    const tooBig = failures.some(f => f.code === 'invalid-argument' || f.code === 'resource-exhausted'
+      || /longer than|exceeds maximum|1048[45]/.test(f.msg || ''));
+    let hint;
+    if (allPerm) hint = 'Firestore 安全性規則不允許寫入（集合：' + cols.join('、') + '）。請到 Firebase 主控台把規則改成允許已登入者讀寫。';
+    else if (tooBig) hint = '有單筆資料超過 Firestore 1MB 上限（多半是公司 logo／印章圖片太大），集合：' + cols.join('、') + '。請把圖片換小張再存。';
+    else hint = '部分資料寫入失敗（集合：' + cols.join('、') + '）：' + (failures[0].code || failures[0].msg);
+    const err = new Error(hint);
+    err._failures = failures; err._allPermission = allPerm;
+    throw err;
   }
 }
 
@@ -1840,6 +1881,7 @@ function buildSyncOps(cur0, prev0) {
 let _syncInFlight = false;   // 同一時間只允許一個同步在跑
 let _syncQueued = false;     // 跑的期間又有人改東西 → 這一輪結束後補跑一次
 let _syncRetryDelay = 0;     // 失敗重試的退避時間
+let _lastSyncError = '';     // 最近一次同步失敗的看得懂原因（顯示在同步狀態上）
 
 // 只同步「真的有變動」的那幾筆，不是每次都整包重寫
 async function firestoreSaveDiff() {
@@ -1862,14 +1904,18 @@ async function firestoreSaveDiff() {
     if (stillDirty) _syncQueued = true;
     else {
       try { localStorage.removeItem(PENDING_SYNC_KEY); } catch (e) {}
+      _lastSyncError = '';
       setSyncStatus('synced');
     }
   } catch (e) {
     console.error('雲端同步失敗（資料仍在本機，恢復連線後會自動重試）', e);
+    _lastSyncError = (e && e.message) || '';
     setSyncStatus('error');
-    // 失敗要自己排重試，不能等下一次存檔——使用者可能剛好停下來不動了
+    // 失敗要自己排重試，不能等下一次存檔——使用者可能剛好停下來不動了。
+    // 若是被安全性規則擋（權限問題），重試再多次也沒用，退避拉長到 60 秒，別狂打雲端。
     _syncQueued = true;
-    _syncRetryDelay = Math.min(_syncRetryDelay ? _syncRetryDelay * 2 : 3000, 60000);
+    if (e && e._allPermission) _syncRetryDelay = 60000;
+    else _syncRetryDelay = Math.min(_syncRetryDelay ? _syncRetryDelay * 2 : 3000, 60000);
   } finally {
     _syncInFlight = false;
     if (_syncQueued) {
@@ -1896,7 +1942,10 @@ function setSyncStatus(state) {
     _syncStatusTimer = setTimeout(() => { el.style.display = 'none'; }, 2500);   // 綠燈亮一下就好，不佔版面
   } else {
     el.className = 'sync-status errored';
-    el.innerHTML = '<span class="dot"></span>同步失敗，稍後自動重試';
+    el.innerHTML = _lastSyncError
+      ? '<span class="dot"></span>同步失敗：' + esc(_lastSyncError)
+      : '<span class="dot"></span>同步失敗，稍後自動重試';
+    el.title = _lastSyncError || '';
   }
 }
 
