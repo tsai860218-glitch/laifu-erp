@@ -1524,7 +1524,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = 'sync-throttle-2026-08-07e';
+const APP_BUILD = 'sync-throttle-2026-08-07f';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -2208,26 +2208,48 @@ function promptOperator(force) {
 // 本機離線快取字串：有雲端時把公司大圖（base64 的 logo/印章/品牌圖）拿掉，快取才不會撐爆
 // localStorage（正本在雲端，重整後圖片會補回來）。純本機模式圖片是唯一副本，照原樣保留。
 function slimCacheString(force) {
-  // force=true 一律去掉公司大圖（用於「完整版塞不下」時的退路）；
-  // 否則沿用原規則：有設定雲端就精簡（正本在雲端），純本機保留完整。
   if (!force && !FIREBASE_ENABLED) return JSON.stringify(DB);
-  const slim = Object.assign({}, DB, {
-    companies: (DB.companies || []).map(c =>
-      Object.assign({}, c, { logo_url: '', stamp_url: '', brand_logos: [] }))
-  });
-  return JSON.stringify(slim);
+  // 有雲端同步時，本機這份只是「離線快取」，雲端才是正本，所以快取裡不需要塞 base64 圖片
+  // （公司 logo／印章／品牌圖，或任何 data: 開頭的內嵌圖片，一張可能好幾百 KB，而 localStorage
+  // 每個網域上限只有約 5MB）。這裡用 replacer 一次把「所有 data: 圖片字串」換成空字串，
+  // 快取就縮到很小，永遠不會再爆。重新整理後圖片會從雲端補回來，不影響顯示與儲存。
+  // 注意：這只影響「寫進 localStorage 的字串」，記憶體裡的 DB 仍保留完整圖片，雲端同步照樣送完整圖。
+  return JSON.stringify(DB, (k, v) =>
+    (typeof v === 'string' && v.length > 256 && v.lastIndexOf('data:', 0) === 0) ? '' : v);
 }
-// 把 remote 的公司圖片補回目前 DB 裡被精簡快取清空的欄位，避免「未同步本機修改」補送時
-// 反而用空圖片蓋掉雲端既有的 logo/印章。
-function restoreCompanyImagesFrom(remote) {
-  if (!remote || !Array.isArray(remote.companies)) return;
-  (DB.companies || []).forEach(c => {
-    const r = remote.companies.find(x => x.id === c.id);
-    if (!r) return;
-    if (!c.logo_url && r.logo_url) c.logo_url = r.logo_url;
-    if (!c.stamp_url && r.stamp_url) c.stamp_url = r.stamp_url;
-    if ((!c.brand_logos || !c.brand_logos.length) && Array.isArray(r.brand_logos) && r.brand_logos.length)
-      c.brand_logos = r.brand_logos.slice();
+// 本機快取為了省空間，會把所有 data: 圖片字串清成空字串（見 slimCacheString）。
+// 要把「本機未同步的修改」補送到雲端前，先用雲端現有資料把這些被清空的圖片欄位補回來，
+// 否則 firestoreSaveDiff 會把空字串當成「修改」推上去，反而蓋掉雲端既有的圖片。
+// 做成「泛用」的：逐集合依 id 對應，任何在本機是空、而雲端是 data: 圖片的欄位都補回（含巢狀陣列/物件）。
+function restoreImagesDeep(local, remote) {
+  if (!local || !remote || typeof local !== 'object' || typeof remote !== 'object') return;
+  Object.keys(remote).forEach(k => {
+    const rv = remote[k], lv = local[k];
+    if (typeof rv === 'string' && rv.lastIndexOf('data:', 0) === 0) {
+      if (lv === '' || lv == null) local[k] = rv;             // 補回被清空的圖片字串
+    } else if (Array.isArray(rv)) {
+      if (!Array.isArray(lv) || (lv.length === 0 && rv.length)) { local[k] = rv.slice(); return; }
+      rv.forEach((ri, i) => {
+        if (typeof ri === 'string' && ri.lastIndexOf('data:', 0) === 0) {
+          if (lv[i] === '' || lv[i] == null) lv[i] = ri;
+        } else if (ri && typeof ri === 'object' && lv[i]) restoreImagesDeep(lv[i], ri);
+      });
+    } else if (rv && typeof rv === 'object' && lv && typeof lv === 'object') {
+      restoreImagesDeep(lv, rv);
+    }
+  });
+}
+function restoreImagesFrom(remote) {
+  if (!remote || !DB) return;
+  Object.keys(DB).forEach(col => {
+    const localArr = DB[col], remoteArr = remote[col];
+    if (!Array.isArray(localArr) || !Array.isArray(remoteArr)) return;
+    const rmap = new Map(remoteArr.map(x => [x && x.id, x]));
+    localArr.forEach(rec => {
+      if (!rec || !rec.id) return;
+      const r = rmap.get(rec.id);
+      if (r) restoreImagesDeep(rec, r);
+    });
   });
 }
 
@@ -2271,9 +2293,10 @@ function save() {
   catch (e) {
     console.error(e);
     if (FIREBASE_ENABLED) {
-      // 有設定雲端：主要寫入已是精簡版（不含大圖）還爆，代表資料本身超過瀏覽器上限。
-      // 雲端才是正本，資料不會遺失，這裡靜默清掉過大的舊快取即可，不打擾使用者。
-      try { localStorage.removeItem(KEY); } catch (_) {}
+      // 有設定雲端：主要寫入已是精簡版（不含任何圖片）還爆，代表純資料量已超過瀏覽器上限。
+      // 雲端才是正本，資料不會遺失。這裡「不要」清掉舊快取（清掉會傷到防資料遺失機制），
+      // 只保留現有快取並提醒一次；離線時用得到的仍是上一次成功寫入的那份。
+      warnQuotaOnce(true);
     } else {
       // 純本機模式：主要寫入是完整版（含圖片）。退一步只存「不含圖片」的精簡版，
       // 至少把其他資料保住；並提醒一次（同一個分頁不重複洗紅字）。
@@ -2330,7 +2353,7 @@ async function load() {
           const remoteForDiff = await firestoreLoadAll().catch(() => null);
           // 本機快取為了省空間把公司圖片清空了，補送前先從雲端把圖片補回來，
           // 否則 firestoreSaveDiff 會把空圖片當成「修改」推上去，反而蓋掉雲端的 logo／印章。
-          restoreCompanyImagesFrom(remoteForDiff);
+          restoreImagesFrom(remoteForDiff);
           _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
           // 重要：這裡必須「立刻同步並等待完成」，不能只是排程250ms後才送。
           // 因為load()結束後緊接著會呼叫firestoreListen()掛上即時監聽，監聽一掛上就會馬上
