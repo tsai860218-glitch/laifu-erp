@@ -709,6 +709,11 @@ body.cost-on .fi-meta{background:#FFF8F1;border-color:#F5C89B}
 .fi-tag{font-size:10px;font-weight:700;color:var(--text-3);flex:0 0 auto}
 body.cost-on .fi-tag{color:var(--orange)}
 .fi-lock{font-size:11px;color:var(--text-3);flex:0 0 auto}
+.fi-stock{flex:0 0 auto;font-size:14px;font-weight:800;padding:1px 6px;border-radius:5px;letter-spacing:.3px}
+.fi-stock.ok{color:#15803D;background:#ECFDF5}
+.fi-stock.zero{color:var(--text-3);background:var(--bg-2)}
+.fi-stock.short{color:#B91C1C;background:#FEF2F2}
+.fi-stock.warn{color:#C2410C;background:#FFF7ED;font-weight:700;font-size:13px}
 .fi-chk{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text-2);
   white-space:nowrap;cursor:pointer;flex:0 0 auto}
 body:not(.cost-on) .fi-meta .f-cost,
@@ -1524,7 +1529,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = 'sync-throttle-2026-08-07f';
+const APP_BUILD = 'stamp-and-deduct-2026-08-07j';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -2205,17 +2210,31 @@ function promptOperator(force) {
   });
 }
 
-// 本機離線快取字串：有雲端時把公司大圖（base64 的 logo/印章/品牌圖）拿掉，快取才不會撐爆
-// localStorage（正本在雲端，重整後圖片會補回來）。純本機模式圖片是唯一副本，照原樣保留。
+// 本機離線快取字串：有雲端時，把「已同步」記錄的 base64 大圖（logo／印章／品牌圖或任何 data: 圖片）
+// 拿掉，避免撐爆 localStorage（約 5MB）；但「本機已改、還沒確認同步」的記錄要保留完整圖片，
+// 否則重整時圖片被清空、又被舊雲端值蓋回去 —— 這正是「發票章換了、刷新又復原」的原因。
+// 純本機模式圖片是唯一副本，一律照原樣保留。
+function stripImages(rec) {
+  return JSON.parse(JSON.stringify(rec, (k, v) =>
+    (typeof v === 'string' && v.length > 256 && v.lastIndexOf('data:', 0) === 0) ? '' : v));
+}
 function slimCacheString(force) {
   if (!force && !FIREBASE_ENABLED) return JSON.stringify(DB);
-  // 有雲端同步時，本機這份只是「離線快取」，雲端才是正本，所以快取裡不需要塞 base64 圖片
-  // （公司 logo／印章／品牌圖，或任何 data: 開頭的內嵌圖片，一張可能好幾百 KB，而 localStorage
-  // 每個網域上限只有約 5MB）。這裡用 replacer 一次把「所有 data: 圖片字串」換成空字串，
-  // 快取就縮到很小，永遠不會再爆。重新整理後圖片會從雲端補回來，不影響顯示與儲存。
-  // 注意：這只影響「寫進 localStorage 的字串」，記憶體裡的 DB 仍保留完整圖片，雲端同步照樣送完整圖。
-  return JSON.stringify(DB, (k, v) =>
-    (typeof v === 'string' && v.length > 256 && v.lastIndexOf('data:', 0) === 0) ? '' : v);
+  const base = _lastSynced || {};
+  const out = {};
+  Object.keys(DB).forEach(col => {
+    const arr = DB[col];
+    if (!Array.isArray(arr)) { out[col] = arr; return; }
+    const bmap = new Map((Array.isArray(base[col]) ? base[col] : []).map(x => [x && x.id, x]));
+    out[col] = arr.map(rec => {
+      if (!rec || !rec.id) return rec;
+      const b = bmap.get(rec.id);
+      // 未同步（雲端沒有，或內容和上次同步時不同）→ 保留完整圖片；已同步 → 拿掉圖片省空間
+      if (!b || JSON.stringify(b) !== JSON.stringify(rec)) return rec;
+      return stripImages(rec);
+    });
+  });
+  return JSON.stringify(out);
 }
 // 本機快取為了省空間，會把所有 data: 圖片字串清成空字串（見 slimCacheString）。
 // 要把「本機未同步的修改」補送到雲端前，先用雲端現有資料把這些被清空的圖片欄位補回來，
@@ -6731,6 +6750,10 @@ function drawItems() {
     it.qty = Math.max(0, Math.round(+e.target.value || 0));
     if (String(it.qty) !== e.target.value) e.target.value = it.qty; // 打小數點會被四捨五入，畫面要跟著同步，不然會顯示小數卻存整數
     save(); refreshAmount(it); drawTotals(); mobileSticky(q);
+    // 即時更新該列庫存標示，並在數量超過可用庫存時提醒
+    const se = document.getElementById('fistock-' + it.id);
+    if (se) se.outerHTML = fiStockHtml(it);
+    warnOverStock(it);
   }));
 
   // 組裝配件的料號/品名自動完成：搜尋過去在任何一張報價單用過的配件（不管當時是哪個商品底下的），
@@ -6899,6 +6922,29 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
   </div>`;
 }
 
+// 報價品項的庫存標示（放大加粗；代理商叫貨／其他顯示「需確認」）。抽成函式方便改數量時即時更新。
+function fiStockHtml(it) {
+  if (!(it.product_id && invEnabled())) return `<span class="fi-stock" id="fistock-${it.id}"></span>`;
+  const prod = byId(DB.products, it.product_id);
+  if (prod && !usesCompanyStock(prod))
+    return `<span class="fi-stock warn" id="fistock-${it.id}">${esc(supplyModeLabel(prod))}・需確認</span>`;
+  const onh = productOnHand(it.product_id), avail = productAvailable(it.product_id), need = +it.qty || 0;
+  const short = need > avail;
+  return `<span class="fi-stock ${short ? 'short' : (avail > 0 ? 'ok' : 'zero')}" id="fistock-${it.id}"
+     title="帳面 ${onh}／可用 ${avail}（可用＝帳面−鎖貨）">庫存 ${onh}｜可用 ${avail}${short ? ' ⚠超出' : ''}</span>`;
+}
+let _overStockTimer = null;
+function warnOverStock(it) {
+  clearTimeout(_overStockTimer);
+  _overStockTimer = setTimeout(() => {
+    if (!(it.product_id && invEnabled())) return;
+    const prod = byId(DB.products, it.product_id);
+    if (prod && !usesCompanyStock(prod)) return;         // 代理商／其他不抓庫存，不提醒
+    const avail = productAvailable(it.product_id), need = +it.qty || 0;
+    if (need > avail) toast(`「${it.name || '此商品'}」數量 ${need} 超過可用庫存 ${avail}`, 'err');
+  }, 550);
+}
+
 // 內部資訊：來源 / 成本 / 代理商（自由輸入 + 常用帶入）
 function itemMeta(it, editable) {
   const D = editable ? '' : 'disabled';
@@ -6912,6 +6958,7 @@ function itemMeta(it, editable) {
     <div class="fi-r" style="flex:1">
       <span class="fi-tag">${costOn ? '👁 內部' : '🔒'}</span>
       <label class="fi-chk"><input type="checkbox" data-fi="${it.id}" data-k="in_stock" ${it.in_stock ? 'checked' : ''} ${D}> 公司有庫存</label>
+      ${fiStockHtml(it)}
       ${costOn
         ? (it.in_stock
             ? `<span class="fi-lock">庫存出貨，免叫貨</span>
@@ -7294,7 +7341,7 @@ function startDelivery(qid) {
 
 function makeDelivery(q, co, o) {
   const items = q.items.filter(i => (i.name || '').trim()).map((it, n) => ({
-    id: uid('di'), quote_item_id: it.id, sort_order: n,
+    id: uid('di'), quote_item_id: it.id, product_id: it.product_id || null, sort_order: n,
     part_no: it.part_no || '', brand: it.brand || '', name: it.name,
     spec: it.spec || '', unit: it.unit || '台',
     qty: it.qty, unit_price: it.unit_price,
@@ -7344,8 +7391,26 @@ function makeDelivery(q, co, o) {
   };
   // 一律以「待配送」開單；配送方式只作記錄，不再影響初始狀態
   dv.status = 'pending_delivery';
+  // 「開立出貨單即扣庫」：建立當下就先進先出扣掉公司庫存（代理商叫貨／其他供貨不扣），
+  // 並保留異動紀錄；作廢或刪除會自動回補。之後推進到「已出貨」時因已標記，不會重複扣。
+  if (invEnabled()) {
+    const lines = deliveryStockLines(dv);
+    const done = [], zero = [];
+    lines.forEach(li => {
+      const prod = byId(DB.products, li.product_id);
+      const nm = (prod && prod.name) || li.product_id;
+      const before = productOnHand(li.product_id);
+      const got = stockDeduct(li.product_id, li.qty,
+        { ref_type: 'delivery', ref_id: dv.id, reason: '開立出貨扣庫 ' + (dv.delivery_no || '') });
+      if (got > 0) done.push(`${nm} −${got}${got < li.qty ? '（庫存不足，只扣到 0）' : ''}`);
+      else zero.push(`${nm}（帳面 ${before}，無批次可扣）`);
+    });
+    dv._stock_deducted = true;
+    if (done.length) setTimeout(() => toast('已扣庫存：' + done.join('、'), 'ok'), 250);
+    if (zero.length) setTimeout(() => toast('下列品項沒有可扣的公司庫存（請先進貨／設定庫存，或改為代理商供貨）：' + zero.join('、'), 'err'), 550);
+  }
   DB.deliveries.push(dv);
-  save();
+  saveNow();
   _quoteDirty = { id: null, at: 0 }; // 這是剛確認過的動作，不是不小心離開，不要再跳一次確認
   go('delivery/' + dv.id);
   toast(`已開立 ${dv.delivery_no}`, 'ok');
@@ -8189,12 +8254,22 @@ function delDvItem(id) {
   DE.items = DE.items.filter(i => i.id !== id); save(); drawDvItems(); drawDvTotals();
 }
 
-// 出貨單要扣庫的實體品項（只扣「公司庫存」供貨、且是主檔商品的列；BOM 子件與代理商直送不扣）
+// 這個商品是否用「公司庫存」供貨（會抓庫存、會扣庫）。
+// 代理商叫貨、其他（客戶自備／廠商直送…）→ 不抓公司庫存、不扣庫，供貨當下才跟代理商確認。
+function usesCompanyStock(product) {
+  if (!product) return true;                 // 沒設定或找不到 → 當一般公司庫存
+  return product.stock_mode !== 'agent' && product.stock_mode !== 'other';
+}
+
+// 出貨單要扣庫的實體品項（只扣「公司庫存」供貨、且是主檔商品的列；
+// BOM 子件、代理商叫貨、其他供貨方式都不扣）
 function deliveryStockLines(d) {
   const out = [];
   allLines(d).forEach(l => {
     const mode = l.source || (l.in_stock ? 'stock' : 'order');
-    if (mode === 'stock' && l.product_id) out.push({ product_id: l.product_id, qty: +l.qty || 0 });
+    if (mode !== 'stock' || !l.product_id) return;
+    if (!usesCompanyStock(byId(DB.products, l.product_id))) return;   // 代理商／其他：不扣公司庫存
+    out.push({ product_id: l.product_id, qty: +l.qty || 0 });
   });
   return out;
 }
@@ -9439,7 +9514,7 @@ function openProductDrawer(id, tab) {
       ${dwRow('分類', p.category ? esc(p.category) : '—')}
       ${dwRow('單位', esc(p.unit || '—'))}
       ${dwRow('進貨廠商', esc(p.default_supplier || '—'))}
-      ${dwRow('供貨模式', prodModeBadge(p.stock_mode))}
+      ${dwRow('供貨模式', prodModeBadge(p))}
       ${dwRow('組合商品', p.has_bom ? `是（${(p.components || []).length} 項組成）` : '否')}
       ${dwRow('常用', p.is_favorite ? '★ 是' : '否')}
       ${dwRow('備註', esc(p.note || '—'))}
@@ -9591,10 +9666,20 @@ function dwStat(label, val, color) {
   const c = color === 'red' ? 'var(--red)' : color === 'green' ? 'var(--green)' : color === 'blue' ? '#2563eb' : color === 'gray' ? 'var(--text-3)' : 'var(--text)';
   return `<div class="dw-stat"><div class="dw-stat-v" style="color:${c}">${val}</div><div class="dw-stat-k">${esc(label)}</div></div>`;
 }
-function prodModeBadge(mode) {
-  const map = { company: ['公司庫存', 'green'], agent: ['代理商庫存', 'blue'], order: ['客訂叫貨', 'orange'] };
-  const m = map[mode] || map.company;
-  return `<span class="bdg ${m[1]} plain">${m[0]}</span>`;
+// 供貨模式：公司庫存／代理商叫貨／寄倉／其他（自行輸入）
+const SUPPLY_MODES = [['company', '公司庫存'], ['agent', '代理商叫貨'], ['consignment', '寄倉'], ['other', '其他']];
+function supplyModeLabel(p) {
+  if (!p) return '公司庫存';
+  if (p.stock_mode === 'other') return (p.stock_mode_other || '').trim() || '其他';
+  const m = SUPPLY_MODES.find(x => x[0] === p.stock_mode);
+  return m ? m[1] : '公司庫存';
+}
+function prodModeBadge(modeOrProduct) {
+  // 相容舊呼叫：傳字串就當 stock_mode，傳物件就當商品
+  const p = typeof modeOrProduct === 'string' ? { stock_mode: modeOrProduct } : (modeOrProduct || {});
+  const color = { company: 'green', agent: 'blue', consignment: 'orange', other: 'gray',
+                  order: 'orange' }[p.stock_mode] || 'gray';
+  return `<span class="bdg ${color} plain">${esc(supplyModeLabel(p))}</span>`;
 }
 
 // 代理商庫存：新增／編輯（單筆表單）
@@ -9747,13 +9832,24 @@ function editProduct(id, seed) {
             <div class="hint">沒填就空著（不沿用業務部）</div></div>
         </div>
       </div>
-      ${invEnabled() && id ? `
-      <div class="sec-title">庫存（與倉庫共用同一份資料）</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:2px">
-        <div id="prodStockInfo">${prodStockLineHtml(id)}</div>
-        <div style="display:flex;gap:6px">
-          <button type="button" class="btn sm" onclick="manageStock('${id}')">進貨／管理批次</button>
-        </div>
+      <div class="sec-title">供貨與庫存</div>
+      <div class="grid g3">
+        <div class="field"><label>供貨模式</label>
+          <select class="inp" id="pSupplyMode">
+            ${SUPPLY_MODES.map(([v, t]) => `<option value="${v}" ${(p.stock_mode || 'company') === v ? 'selected' : ''}>${t}</option>`).join('')}
+          </select></div>
+        <div class="field"><label>庫存數量</label>
+          <input class="inp num" type="number" id="pStockQty" value="${id ? productOnHand(id) : 0}">
+          <div class="hint">${id ? '改這裡會做一筆盤點調整' : '新增後建立一筆期初庫存'}</div></div>
+        <div class="field"><label>儲位</label>
+          <input class="inp" id="pStockLoc" value="${esc(id ? ((stockSummary(id).locs || [])[0] || p.default_location || '') : (p.default_location || ''))}" placeholder="例：A-1"></div>
+      </div>
+      <div class="field" id="pSupplyOtherWrap" style="display:none;margin-top:-6px">
+        <input class="inp" id="pSupplyOther" value="${esc(p.stock_mode_other || '')}" placeholder="請自行輸入供貨方式（例：客戶自備、廠商直送…）"></div>
+      ${id ? `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-top:4px">
+        <div id="prodStockInfo" style="font-size:12px">${prodStockLineHtml(id)}</div>
+        <button type="button" class="btn sm" onclick="manageStock('${id}')">進貨／管理批次</button>
       </div>` : ''}
       <div class="field"><label>備註</label><textarea class="inp" data-f="note" rows="2">${esc(p.note || '')}</textarea></div>
       <div class="btn-row" style="margin:2px 0 12px">
@@ -9875,6 +9971,11 @@ function editProduct(id, seed) {
         }
       });
       el.querySelector('[data-no]').onclick = close;
+      // 供貨模式：選「其他」時顯示自訂輸入框
+      const supSel = el.querySelector('#pSupplyMode');
+      const supOtherWrap = el.querySelector('#pSupplyOtherWrap');
+      const syncSupOther = () => { supOtherWrap.style.display = supSel.value === 'other' ? '' : 'none'; };
+      supSel.onchange = syncSupOther; syncSupOther();
       el.querySelector('[data-ok]').onclick = () => {
         if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {};
@@ -9887,9 +9988,36 @@ function editProduct(id, seed) {
         if (p.has_bom) p.default_cost = p.components.filter(c => !c.is_optional)
           .reduce((s, c) => s + (+c.cost || 0) * (+c.qty || 0), 0);
         else p.components = [];
+        // 供貨模式 + 儲位（供貨模式選「其他」才存自訂文字）
+        p.stock_mode = supSel.value || 'company';
+        p.stock_mode_other = p.stock_mode === 'other' ? (el.querySelector('#pSupplyOther').value || '').trim() : '';
+        const newQty = +el.querySelector('#pStockQty').value || 0;
+        const newLoc = (el.querySelector('#pStockLoc').value || '').trim();
+        p.default_location = newLoc;
         const doSave = () => {
-          if (id) { const t = byId(DB.products, id); Object.assign(t, p); }
-          else { p.id = uid('p'); p.is_active = true; DB.products.push(p); }
+          if (id) {
+            const t = byId(DB.products, id); Object.assign(t, p);
+            // 既有商品：庫存數量若和目前帳面不同 → 做一筆盤點調整（會寫異動、留痕）
+            const cur = productOnHand(id);
+            if (newQty !== cur) stockAdjust(id, newQty, '商品表單調整庫存數量');
+            // 儲位：只有一批時直接改它的儲位；多批時只更新商品預設儲位（日後新進貨用）
+            const bs = stockBatches(id);
+            if (bs.length === 1 && newLoc) bs[0].location = newLoc;
+          } else {
+            p.id = uid('p'); p.is_active = true; DB.products.push(p);
+            // 新商品：庫存數量>0 → 建一筆期初庫存批次，並寫一筆入庫異動
+            if (newQty > 0) {
+              const b = { id: uid('stk'), product_id: p.id, in_date: today(), qty: newQty,
+                cost: +p.default_cost || 0, cost_tax: 'ex', condition: (stockConditions()[0] || ''),
+                location: newLoc, warehouse_id: (defaultWarehouse() || {}).id,
+                supplier_name: p.default_supplier || '', note: '期初庫存（新增商品）',
+                created_at: new Date().toISOString() };
+              DB.stock = DB.stock || []; DB.stock.push(b);
+              recordMovement({ product_id: p.id, type: 'in', qty: newQty, batch_id: b.id,
+                warehouse_id: b.warehouse_id, to_loc: newLoc, unit_cost: b.cost,
+                ref_type: 'opening', reason: '期初庫存（新增商品）' });
+            }
+          }
           saveNow(); render(); toast('已儲存', 'ok');
         };
         if (id) { doSave(); close(); return; }
