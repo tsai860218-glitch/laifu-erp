@@ -1529,7 +1529,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = 'stamp-and-deduct-2026-08-07j';
+const APP_BUILD = 'excel-line-profit-2026-08-07m';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -2999,6 +2999,24 @@ function exTaxCost(costVal, taxType) {
 //  · 出貨單：makeDelivery() 建立時就已經算好 c.qty x it.qty 存成絕對數量 → 不能再乘一次
 // 兩邊共用這個函式，所以先分辨這張是什麼單（出貨單一定有 delivery_no）
 const isDeliveryDoc = doc => !!(doc && doc.delivery_no);
+
+// 單一品項的成本（與 calcCost 的每項邏輯一致）：BOM 組件、組裝配件、或主件 default_cost/cost×數量。
+// isDelivery=true 時組件數量視為絕對數量（不再乘主件數量），與 calcCost 對出貨單的處理相同。
+function lineCost(it, isDelivery) {
+  const itQty = +it.qty || 0;
+  let cost = 0;
+  if (it.components && it.components.length) {
+    it.components.forEach(c => {
+      if (c.is_included === false) return;
+      cost += exTaxCost(c.cost, c.cost_tax) * (+c.qty || 0) * (isDelivery ? 1 : itQty);
+    });
+  } else {
+    const raw = it.default_cost != null ? it.default_cost : it.cost;
+    cost += exTaxCost(raw, it.cost_tax) * itQty;
+  }
+  (it.assembly_items || []).forEach(a => { cost += exTaxCost(a.cost, a.cost_tax) * (+a.qty || 0); });
+  return round0(cost);
+}
 
 function calcCost(doc) {
   const compPerUnit = !isDeliveryDoc(doc);   // true = 組件數量還要乘主件數量
@@ -5076,6 +5094,35 @@ function stockRestore(ref) {
   return total;
 }
 
+/* ── 代理商「專案」額度：報備申請來的可出數量，記在商品的 agent_qty 上。
+   客訂下單（開立出貨單）即扣、作廢/刪除回補。額度變動會存在商品上，所以會跟著雲端同步（跨裝置）。
+   異動用 ref_type='delivery_agent' 區隔，跟公司庫存（'delivery'）互不干擾。 ── */
+function agentIsProject(p) { return !!(p && p.stock_mode === 'agent' && p.agent_type === 'project'); }
+function agentIsOnDemand(p) { return !!(p && p.stock_mode === 'agent' && p.agent_type !== 'project'); }
+function agentProjectQty(pid) { const p = byId(DB.products, pid); return p ? (+p.agent_qty || 0) : 0; }
+function agentDeduct(pid, qty, ref) {
+  const p = byId(DB.products, pid); if (!p) return 0;
+  const take = Math.min(+p.agent_qty || 0, +qty || 0);   // 額度不足只扣到 0，呼叫端負責提醒
+  if (take <= 0) return 0;
+  p.agent_qty = (+p.agent_qty || 0) - take;
+  recordMovement({ product_id: pid, type: 'out', qty: take, ref_type: 'delivery_agent',
+    ref_id: (ref && ref.ref_id) || '', reason: (ref && ref.reason) || '客訂扣代理商專案額度', to_loc: '代理商專案額度' });
+  return take;
+}
+function agentRestore(ref) {
+  if (!ref || !ref.ref_id) return 0;
+  let total = 0;
+  (DB.movements || []).filter(m => m.type === 'out' && m.ref_type === 'delivery_agent' && m.ref_id === ref.ref_id && !m._restored)
+    .forEach(mv => {
+      const p = byId(DB.products, mv.product_id); if (p) p.agent_qty = (+p.agent_qty || 0) + (+mv.qty || 0);
+      mv._restored = true;
+      recordMovement({ product_id: mv.product_id, type: 'in', qty: mv.qty, ref_type: 'delivery_agent',
+        ref_id: ref.ref_id, reason: (ref && ref.reason) || '回補代理商專案額度' });
+      total += +mv.qty || 0;
+    });
+  return total;
+}
+
 /* ── 鎖貨：建立 / 釋放（各寫一筆 lock/unlock 異動）── */
 function createLock({ product_id, qty, reason, customer_id, ref_id }) {
   const lock = {
@@ -6025,13 +6072,13 @@ async function importQuotesExcel(file) {
 function exportQuotesExcel() {
   const list = qFilteredList;
   if (!list.length) return toast('目前沒有資料可以匯出', 'err');
-  const rows = list.map(q => {
+  const rows = [];
+  list.forEach(q => {
     const t = quoteTotals(q);
     const co = byId(DB.companies, q.company_id);
-    const names = q.items.filter(i => (i.name || '').trim())
-      .map(i => `${i.name}${i.brand ? '(' + i.brand + ')' : ''} x${i.qty}`).join('；');
     const om = q.order_method ? ORDER_METHODS[q.order_method] : null;
-    return {
+    const items = q.items.filter(i => (i.name || '').trim());
+    const mk = (i, idx) => ({
       '單號': q.quote_no,
       '報價日期': q.quote_date || '',
       '有效日期': q.valid_until || '',
@@ -6040,17 +6087,25 @@ function exportQuotesExcel() {
       '統一編號': q.customer_snapshot?.tax_id || '',
       '聯絡人': q.customer_snapshot?.contact_person || '',
       '電話': q.customer_snapshot?.phone || '',
-      '商品品項': names,
-      '未稅金額': t.subtotal,
-      '稅額': t.tax,
-      '含稅總計': t.total,
+      '商品': i ? i.name : '',
+      '品牌': i ? (i.brand || '') : '',
+      '規格': i ? (i.spec || '') : '',
+      '數量': i ? (+i.qty || 0) : '',
+      '單價(未稅)': i ? (+i.unit_price || 0) : '',
+      '金額(未稅)': i ? Math.round((+i.unit_price || 0) * (+i.qty || 0)) : '',
       '業務': userName(q.sales_user_id) || q.sales_name || '',
       '狀態': QS[q.status] ? QS[q.status].label : q.status,
       '下單方式': om ? om.label : '',
-      '備註': q.note || ''
-    };
+      // 整單金額只放在該單「第一列」，避免逐列加總時重複計算
+      '整單未稅金額': idx === 0 ? t.subtotal : '',
+      '整單稅額': idx === 0 ? t.tax : '',
+      '整單含稅總計': idx === 0 ? t.total : '',
+      '備註': idx === 0 ? (q.note || '') : ''
+    });
+    if (!items.length) rows.push(mk(null, 0));
+    else items.forEach((i, idx) => rows.push(mk(i, idx)));
   });
-  exportExcelRows(rows, '報價單總攬', `報價單總攬_${today()}.xlsx`);
+  exportExcelRows(rows, '報價單明細', `報價單明細_${today()}.xlsx`);
 }
 
 function bulkDeleteQuotes() {
@@ -6926,7 +6981,14 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
 function fiStockHtml(it) {
   if (!(it.product_id && invEnabled())) return `<span class="fi-stock" id="fistock-${it.id}"></span>`;
   const prod = byId(DB.products, it.product_id);
+  if (prod && agentIsProject(prod)) {
+    // 代理商專案額度：可追蹤數量、下單會扣
+    const q = agentProjectQty(it.product_id), need = +it.qty || 0, short = need > q;
+    return `<span class="fi-stock ${short ? 'short' : (q > 0 ? 'ok' : 'zero')}" id="fistock-${it.id}"
+       title="代理商報備專案額度">代理商專案 ${q}${short ? ' ⚠超出額度' : ''}</span>`;
+  }
   if (prod && !usesCompanyStock(prod))
+    // 代理商不確定型／其他：沒有固定數量，出貨當下才跟代理商確認
     return `<span class="fi-stock warn" id="fistock-${it.id}">${esc(supplyModeLabel(prod))}・需確認</span>`;
   const onh = productOnHand(it.product_id), avail = productAvailable(it.product_id), need = +it.qty || 0;
   const short = need > avail;
@@ -6939,8 +7001,14 @@ function warnOverStock(it) {
   _overStockTimer = setTimeout(() => {
     if (!(it.product_id && invEnabled())) return;
     const prod = byId(DB.products, it.product_id);
-    if (prod && !usesCompanyStock(prod)) return;         // 代理商／其他不抓庫存，不提醒
-    const avail = productAvailable(it.product_id), need = +it.qty || 0;
+    const need = +it.qty || 0;
+    if (agentIsProject(prod)) {
+      const q = agentProjectQty(it.product_id);
+      if (need > q) toast(`「${it.name || '此商品'}」數量 ${need} 超過代理商專案額度 ${q}，需向代理商報備追加`, 'err');
+      return;
+    }
+    if (prod && !usesCompanyStock(prod)) return;         // 不確定型／其他不抓數量
+    const avail = productAvailable(it.product_id);
     if (need > avail) toast(`「${it.name || '此商品'}」數量 ${need} 超過可用庫存 ${avail}`, 'err');
   }, 550);
 }
@@ -7405,9 +7473,22 @@ function makeDelivery(q, co, o) {
       if (got > 0) done.push(`${nm} −${got}${got < li.qty ? '（庫存不足，只扣到 0）' : ''}`);
       else zero.push(`${nm}（帳面 ${before}，無批次可扣）`);
     });
+    // 客訂（代理商專案型）：扣代理商報備額度
+    const aDone = [], aShort = [];
+    deliveryAgentLines(dv).forEach(li => {
+      const prod = byId(DB.products, li.product_id);
+      const nm = (prod && prod.name) || li.product_id;
+      const avail = agentProjectQty(li.product_id);
+      const got = agentDeduct(li.product_id, li.qty,
+        { ref_id: dv.id, reason: '客訂扣代理商專案額度 ' + (dv.delivery_no || '') });
+      aDone.push(`${nm} −${got || 0}／代理商專案`);
+      if (li.qty > avail) aShort.push(`${nm}（代理商額度 ${avail}／需 ${li.qty}）`);
+    });
     dv._stock_deducted = true;
-    if (done.length) setTimeout(() => toast('已扣庫存：' + done.join('、'), 'ok'), 250);
+    const okMsg = done.concat(aDone);
+    if (okMsg.length) setTimeout(() => toast('已扣庫存：' + okMsg.join('、'), 'ok'), 250);
     if (zero.length) setTimeout(() => toast('下列品項沒有可扣的公司庫存（請先進貨／設定庫存，或改為代理商供貨）：' + zero.join('、'), 'err'), 550);
+    if (aShort.length) setTimeout(() => toast('下列代理商專案額度不足，請向代理商報備追加：' + aShort.join('、'), 'err'), 800);
   }
   DB.deliveries.push(dv);
   saveNow();
@@ -7762,41 +7843,60 @@ async function importDeliveriesExcel(file) {
 function exportDeliveriesExcel() {
   const list = dFilteredList;
   if (!list.length) return toast('目前沒有資料可以匯出', 'err');
-  const rows = list.map(d => {
+  const rows = [];
+  list.forEach(d => {
     const t = quoteTotals(d);
     const c = calcCost(d);
-    const names = d.items.filter(i => (i.name || '').trim())
-      .map(i => `${i.name}${i.brand ? '(' + i.brand + ')' : ''} x${i.qty}`).join('；');
-    const row = {
-      '出貨單號': d.delivery_no,
-      '出貨日期': d.delivery_date || '',
-      '來源報價單號': d.quote_no || '',
-      '客戶名稱': d.customer_snapshot?.name || '',
-      '統一編號': d.customer_snapshot?.tax_id || '',
-      '商品品項': names,
-      '未稅金額': t.subtotal,
-      '稅額': t.tax,
-      '含稅總計': t.total
+    const items = d.items.filter(i => (i.name || '').trim());
+    const mk = (i, idx) => {
+      const row = {
+        '出貨單號': d.delivery_no,
+        '出貨日期': d.delivery_date || '',
+        '來源報價單號': d.quote_no || '',
+        '客戶名稱': d.customer_snapshot?.name || '',
+        '統一編號': d.customer_snapshot?.tax_id || '',
+        '商品': i ? i.name : '',
+        '品牌': i ? (i.brand || '') : '',
+        '規格': i ? (i.spec || '') : '',
+        '數量': i ? (+i.qty || 0) : '',
+        '單價(未稅)': i ? (+i.unit_price || 0) : '',
+        '金額(未稅)': i ? Math.round(lineAmount(i.qty, i.unit_price)) : ''
+      };
+      if (costOn) {
+        const rev = i ? Math.round(lineAmount(i.qty, i.unit_price)) : '';
+        const lc = i ? lineCost(i, true) : '';
+        const lp = i ? (rev - lc) : '';
+        row['成本(單筆)'] = lc;
+        row['毛利(單筆)'] = lp;
+        row['毛利率(單筆)'] = i ? (rev ? (lp / rev * 100).toFixed(1) + '%' : '0.0%') : '';
+        row['整單成本合計'] = idx === 0 ? c.cost : '';
+        row['整單毛利'] = idx === 0 ? c.profit : '';
+        row['整單毛利率'] = idx === 0 ? (c.rate * 100).toFixed(1) + '%' : '';
+      }
+      Object.assign(row, {
+        '整單未稅金額': idx === 0 ? t.subtotal : '',
+        '整單稅額': idx === 0 ? t.tax : '',
+        '整單含稅總計': idx === 0 ? t.total : '',
+        '業務': userName(d.sales_user_id) || '',
+        '開單人員': d.created_by || '',
+        '狀態': DS[d.status] ? DS[d.status].label : d.status,
+        '送貨方式': d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : (d.shipping_method || ''),
+        '發票方式': d.invoice_method === '其他' ? (d.invoice_method_other || '其他') : (d.invoice_method || ''),
+        '付款方式': d.payment_method === '其他' ? (d.payment_method_other || '其他') : (d.payment_method || ''),
+        '已開發票': d.invoiced ? '是' : '否',
+        '發票號碼': d.invoice_no || '',
+        '客戶PO單號': d.customer_po || '',
+        '發票日期': d.invoice_date || '',
+        '送貨地址': d.ship_address || '',
+        '交貨單位': d.delivery_target || '',
+        '備註': idx === 0 ? (d.note || '') : ''
+      });
+      return row;
     };
-    if (costOn) { row['成本合計'] = c.cost; row['毛利'] = c.profit; row['毛利率'] = (c.rate * 100).toFixed(1) + '%'; }
-    Object.assign(row, {
-      '業務': userName(d.sales_user_id) || '',
-      '開單人員': d.created_by || '',
-      '狀態': DS[d.status] ? DS[d.status].label : d.status,
-      '送貨方式': d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : (d.shipping_method || ''),
-      '發票方式': d.invoice_method === '其他' ? (d.invoice_method_other || '其他') : (d.invoice_method || ''),
-      '付款方式': d.payment_method === '其他' ? (d.payment_method_other || '其他') : (d.payment_method || ''),
-      '已開發票': d.invoiced ? '是' : '否',
-      '發票號碼': d.invoice_no || '',
-      '客戶PO單號': d.customer_po || '',
-      '發票日期': d.invoice_date || '',
-      '送貨地址': d.ship_address || '',
-      '交貨單位': d.delivery_target || '',
-      '備註': d.note || ''
-    });
-    return row;
+    if (!items.length) rows.push(mk(null, 0));
+    else items.forEach((i, idx) => rows.push(mk(i, idx)));
   });
-  exportExcelRows(rows, '出貨單總攬', `出貨單總攬_${today()}.xlsx`);
+  exportExcelRows(rows, '出貨單明細', `出貨單明細_${today()}.xlsx`);
 }
 
 function bulkDeleteDeliveries() {
@@ -8274,6 +8374,17 @@ function deliveryStockLines(d) {
   return out;
 }
 
+// 出貨單裡「代理商專案」供貨的品項（客訂下單要扣代理商額度）。
+// 「不確定型」代理商叫貨不列入（沒有固定數量，出貨當下才跟代理商確認）。
+function deliveryAgentLines(d) {
+  const out = [];
+  allLines(d).forEach(l => {
+    if (!l.product_id) return;
+    if (agentIsProject(byId(DB.products, l.product_id))) out.push({ product_id: l.product_id, qty: +l.qty || 0 });
+  });
+  return out;
+}
+
 function advance(id) {
   const d = byId(DB.deliveries, id);
   const n = dsNext(d); if (!n) return;
@@ -8281,10 +8392,13 @@ function advance(id) {
     d.status = n;
     if (n === 'shipped') {
       d.shipped_at = new Date().toISOString();
-      // 串接庫存：出貨即扣庫（先進先出），並保留異動紀錄（只在啟用進銷存時）
+      // 串接庫存：出貨即扣庫（先進先出），並保留異動紀錄（只在啟用進銷存時）。
+      // 新出貨單在「開立當下」就扣過並標記，這裡只補扣舊資料（未標記者）。
       if (invEnabled() && !d._stock_deducted) {
         deliveryStockLines(d).forEach(li =>
           stockDeduct(li.product_id, li.qty, { ref_type: 'delivery', ref_id: d.id, reason: '出貨扣庫 ' + (d.delivery_no || '') }));
+        deliveryAgentLines(d).forEach(li =>
+          agentDeduct(li.product_id, li.qty, { ref_id: d.id, reason: '客訂扣代理商專案額度 ' + (d.delivery_no || '') }));
         d._stock_deducted = true;
       }
     }
@@ -8315,6 +8429,7 @@ function cancelDelivery(id) {
     // 已扣過庫存 → 回補，並保留異動紀錄
     if (invEnabled() && d._stock_deducted) {
       stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨作廢回補 ' + (d.delivery_no || '') });
+      agentRestore({ ref_id: d.id, reason: '出貨作廢回補代理商額度 ' + (d.delivery_no || '') });
       d._stock_deducted = false;
     }
     const q = byId(DB.quotes, d.quote_id);
@@ -8331,6 +8446,7 @@ function deleteDelivery(id) {
     // 已扣過庫存 → 刪除前先回補，避免庫存憑空少掉
     if (invEnabled() && d._stock_deducted) {
       stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨刪除回補 ' + (d.delivery_no || '') });
+      agentRestore({ ref_id: d.id, reason: '出貨刪除回補代理商額度 ' + (d.delivery_no || '') });
     }
     DB.deliveries = DB.deliveries.filter(x => x.id !== id);
     const q = byId(DB.quotes, qid);
@@ -9833,21 +9949,31 @@ function editProduct(id, seed) {
         </div>
       </div>
       <div class="sec-title">供貨與庫存</div>
-      <div class="grid g3">
-        <div class="field"><label>供貨模式</label>
-          <select class="inp" id="pSupplyMode">
-            ${SUPPLY_MODES.map(([v, t]) => `<option value="${v}" ${(p.stock_mode || 'company') === v ? 'selected' : ''}>${t}</option>`).join('')}
-          </select></div>
+      <div class="field"><label>供貨模式</label>
+        <select class="inp" id="pSupplyMode">
+          ${SUPPLY_MODES.map(([v, t]) => `<option value="${v}" ${(p.stock_mode || 'company') === v ? 'selected' : ''}>${t}</option>`).join('')}
+        </select></div>
+      <div class="grid g2" id="pCompanyStockWrap">
         <div class="field"><label>庫存數量</label>
           <input class="inp num" type="number" id="pStockQty" value="${id ? productOnHand(id) : 0}">
           <div class="hint">${id ? '改這裡會做一筆盤點調整' : '新增後建立一筆期初庫存'}</div></div>
         <div class="field"><label>儲位</label>
           <input class="inp" id="pStockLoc" value="${esc(id ? ((stockSummary(id).locs || [])[0] || p.default_location || '') : (p.default_location || ''))}" placeholder="例：A-1"></div>
       </div>
+      <div class="grid g2" id="pAgentWrap" style="display:none">
+        <div class="field"><label>代理商庫存類型</label>
+          <select class="inp" id="pAgentType">
+            <option value="ondemand" ${p.agent_type !== 'project' ? 'selected' : ''}>不確定（代理商有貨才能出）</option>
+            <option value="project" ${p.agent_type === 'project' ? 'selected' : ''}>專案（報備申請數量）</option>
+          </select></div>
+        <div class="field" id="pAgentQtyWrap"><label>代理商專案額度</label>
+          <input class="inp num" type="number" id="pAgentQty" value="${+p.agent_qty || 0}">
+          <div class="hint">報備申請來的可出數量，客訂下單會扣、作廢回補</div></div>
+      </div>
       <div class="field" id="pSupplyOtherWrap" style="display:none;margin-top:-6px">
         <input class="inp" id="pSupplyOther" value="${esc(p.stock_mode_other || '')}" placeholder="請自行輸入供貨方式（例：客戶自備、廠商直送…）"></div>
       ${id ? `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-top:4px">
+      <div id="pBatchRow" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-top:4px">
         <div id="prodStockInfo" style="font-size:12px">${prodStockLineHtml(id)}</div>
         <button type="button" class="btn sm" onclick="manageStock('${id}')">進貨／管理批次</button>
       </div>` : ''}
@@ -9971,11 +10097,27 @@ function editProduct(id, seed) {
         }
       });
       el.querySelector('[data-no]').onclick = close;
-      // 供貨模式：選「其他」時顯示自訂輸入框
+      // 供貨模式：切換顯示「公司庫存欄位／代理商欄位／其他自訂」
       const supSel = el.querySelector('#pSupplyMode');
+      const compWrap = el.querySelector('#pCompanyStockWrap');
+      const agentWrap = el.querySelector('#pAgentWrap');
       const supOtherWrap = el.querySelector('#pSupplyOtherWrap');
-      const syncSupOther = () => { supOtherWrap.style.display = supSel.value === 'other' ? '' : 'none'; };
-      supSel.onchange = syncSupOther; syncSupOther();
+      const agentTypeSel = el.querySelector('#pAgentType');
+      const agentQtyWrap = el.querySelector('#pAgentQtyWrap');
+      const batchRow = el.querySelector('#pBatchRow');
+      const syncSupply = () => {
+        const mode = supSel.value;
+        const isCompany = mode === 'company' || mode === 'consignment';
+        const isAgent = mode === 'agent';
+        compWrap.style.display = isCompany ? '' : 'none';
+        if (batchRow) batchRow.style.display = isCompany ? '' : 'none';
+        agentWrap.style.display = isAgent ? '' : 'none';
+        supOtherWrap.style.display = mode === 'other' ? '' : 'none';
+        if (isAgent) agentQtyWrap.style.display = agentTypeSel.value === 'project' ? '' : 'none';
+      };
+      supSel.onchange = syncSupply;
+      agentTypeSel.onchange = syncSupply;
+      syncSupply();
       el.querySelector('[data-ok]').onclick = () => {
         if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
         const o = {};
@@ -9991,22 +10133,29 @@ function editProduct(id, seed) {
         // 供貨模式 + 儲位（供貨模式選「其他」才存自訂文字）
         p.stock_mode = supSel.value || 'company';
         p.stock_mode_other = p.stock_mode === 'other' ? (el.querySelector('#pSupplyOther').value || '').trim() : '';
+        // 代理商叫貨：類型 + 專案額度
+        if (p.stock_mode === 'agent') {
+          p.agent_type = agentTypeSel.value === 'project' ? 'project' : 'ondemand';
+          p.agent_qty = p.agent_type === 'project' ? (+el.querySelector('#pAgentQty').value || 0) : 0;
+        }
+        const isCompanyStock = p.stock_mode === 'company' || p.stock_mode === 'consignment';
         const newQty = +el.querySelector('#pStockQty').value || 0;
         const newLoc = (el.querySelector('#pStockLoc').value || '').trim();
-        p.default_location = newLoc;
+        if (isCompanyStock) p.default_location = newLoc;
         const doSave = () => {
           if (id) {
             const t = byId(DB.products, id); Object.assign(t, p);
-            // 既有商品：庫存數量若和目前帳面不同 → 做一筆盤點調整（會寫異動、留痕）
-            const cur = productOnHand(id);
-            if (newQty !== cur) stockAdjust(id, newQty, '商品表單調整庫存數量');
-            // 儲位：只有一批時直接改它的儲位；多批時只更新商品預設儲位（日後新進貨用）
-            const bs = stockBatches(id);
-            if (bs.length === 1 && newLoc) bs[0].location = newLoc;
+            if (isCompanyStock) {
+              // 既有商品：庫存數量若和目前帳面不同 → 做一筆盤點調整（會寫異動、留痕）
+              const cur = productOnHand(id);
+              if (newQty !== cur) stockAdjust(id, newQty, '商品表單調整庫存數量');
+              const bs = stockBatches(id);
+              if (bs.length === 1 && newLoc) bs[0].location = newLoc;
+            }
           } else {
             p.id = uid('p'); p.is_active = true; DB.products.push(p);
-            // 新商品：庫存數量>0 → 建一筆期初庫存批次，並寫一筆入庫異動
-            if (newQty > 0) {
+            // 新商品且為公司庫存：庫存數量>0 → 建一筆期初庫存批次，並寫一筆入庫異動
+            if (isCompanyStock && newQty > 0) {
               const b = { id: uid('stk'), product_id: p.id, in_date: today(), qty: newQty,
                 cost: +p.default_cost || 0, cost_tax: 'ex', condition: (stockConditions()[0] || ''),
                 location: newLoc, warehouse_id: (defaultWarehouse() || {}).id,
