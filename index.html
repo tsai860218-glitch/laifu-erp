@@ -1942,13 +1942,16 @@ async function firestoreSaveDiff() {
     // 底下 await 期間使用者還在打字，DB 會繼續被就地修改；如果等寫入回來才拿
     // 「當下的 DB」當已同步基準，那些在傳輸途中新增的修改會被誤判成已經同步過，
     // 從此再也不會被送出去（畫面有、雲端沒有、F5 就被舊資料蓋掉）。
-    const pending = JSON.parse(JSON.stringify(DB));
+    // 只序列化一次整包 DB，clone 與「傳輸途中是否又改過」都重用這個字串，
+    // 不要為了比對又把整包（含 base64 圖片）多序列化一遍。
+    const pendingStr = JSON.stringify(DB);
+    const pending = JSON.parse(pendingStr);
     const ops = buildSyncOps(pending, _lastSynced);
     if (ops.length) await fsBatchWrite(ops);
     _lastSynced = pending;   // 只認這一輪真的送出去的那一份，不是「現在的 DB」
 
     // 傳輸途中又改過東西嗎？有的話 pending 旗標不能清、而且要再跑一輪
-    const stillDirty = JSON.stringify(DB) !== JSON.stringify(pending);
+    const stillDirty = JSON.stringify(DB) !== pendingStr;
     _syncRetryDelay = 0;
     if (stillDirty) _syncQueued = true;
     else {
@@ -6471,11 +6474,15 @@ function sendQuote(id, onSuccess) {
   });
 }
 
+// 快照只保留「送出當下的公司文字資料」（抬頭、統編、地址、電話…），
+// 不再把 logo／印章／頁尾品牌圖的 base64 複製進每一張報價單——那會讓每張已送出的單
+// 都各自夾一份大圖，撐大單筆文件、拖慢登入（要抓全部圖）、還把雲端寫入佇列塞爆
+// （改一張就得整包含圖重傳）。圖片改由列印時讀「公司現有的圖」（見 quotePaper），
+// 公司 logo／印章極少更換，列印結果一致。
 function snapCompany(co) {
   return {
     name: co.name, short_name: co.short_name, tax_id: co.tax_id, address: co.address,
-    phone: co.phone, fax: co.fax, logo_url: co.logo_url, stamp_url: co.stamp_url,
-    brand_logos: (co.brand_logos || []).slice()
+    phone: co.phone, fax: co.fax
   };
 }
 
@@ -8668,7 +8675,15 @@ function taxInclusiveAmounts(items, taxRate, grandTotal) {
 }
 
 function quotePaper(q) {
-  const co = q.company_snapshot || snapCompany(byId(DB.companies, q.company_id));
+  // 文字用「送出當下的快照」；圖片一律讀「公司現有的」logo／印章／頁尾品牌圖。
+  // 舊資料的快照若仍夾帶圖片，就沿用它作為後備，確保清理前後列印都正常。
+  const _liveCo = byId(DB.companies, q.company_id) || {};
+  const _snap = q.company_snapshot || snapCompany(_liveCo);
+  const co = Object.assign({}, _snap, {
+    logo_url: _liveCo.logo_url || _snap.logo_url || '',
+    stamp_url: _liveCo.stamp_url || _snap.stamp_url || '',
+    brand_logos: (_liveCo.brand_logos && _liveCo.brand_logos.length ? _liveCo.brand_logos : _snap.brand_logos) || []
+  });
   const c = q.customer_snapshot || {};
   const items = (q.items || []).filter(i => (i.name || '').trim());
   const t = quoteTotals(q);
@@ -10332,6 +10347,16 @@ function viewSettings(v) {
         <button class="btn danger" onclick="wipe()">清空所有資料</button>
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+        <div style="font-size:12.5px;font-weight:700;color:var(--text-2);margin-bottom:6px">清理報價單內嵌圖片（加速登入與同步）</div>
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:8px;line-height:1.7">
+          早期每張已送出的報價單，都各自存了一份公司 logo／發票章／頁尾品牌圖，這會拖慢登入（要抓全部圖）與雲端同步（改一張就整包含圖重傳）。
+          清理只會移除「單據裡夾帶的那份圖片副本」，抬頭文字與其他內容全部保留；之後列印會自動改用公司現有的 logo／發票章／頁尾圖。
+          目前有 <b>${quotesWithSnapImages().length}</b> 張報價單夾帶圖片。
+          <br>清理會一次重寫這些單據、觸發一波較大的同步，請保持頁面開啟、別中途重新整理，等右上角變「已同步」再離開。
+        </div>
+        <button class="btn" id="cleanupSnapImg">清理報價單內嵌圖片</button>
+      </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
         <div style="font-size:12.5px;font-weight:700;color:var(--text-2);margin-bottom:6px">存檔位置</div>
         <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">
           三個各自獨立的資料夾，設定好之後對應的匯出/另存會直接存進去，不用每次選存檔位置；
@@ -10374,6 +10399,35 @@ function viewSettings(v) {
     toast(e.target.value === 'off' ? '已關閉自動備份' : '已設定自動備份週期', 'ok');
   };
   document.getElementById('impFile').onchange = e => importJSON(e.target.files[0]);
+
+  const cleanupBtn = document.getElementById('cleanupSnapImg');
+  if (cleanupBtn) cleanupBtn.onclick = () => {
+    const targets = quotesWithSnapImages();
+    if (!targets.length) return toast('沒有需要清理的報價單', 'ok');
+    confirmBox('清理報價單內嵌圖片',
+      `將移除 <b>${targets.length}</b> 張報價單裡夾帶的公司 logo／發票章／頁尾圖片副本。<br>` +
+      `抬頭文字與其他內容都會保留，之後列印改用公司現有的圖。<br><br>` +
+      `清理後會一次同步這些單據到雲端，過程中請<b>不要重新整理</b>，等右上角變「已同步」再離開。`,
+      () => {
+        let n = 0;
+        targets.forEach(q => {
+          const s = q.company_snapshot;
+          if (!s) return;
+          delete s.logo_url; delete s.stamp_url; delete s.brand_logos;
+          n++;
+        });
+        saveNow(); render();
+        toast(`已清理 ${n} 張報價單，正在同步到雲端…`, 'ok');
+      });
+  };
+}
+
+// 找出「快照裡還夾帶圖片」的報價單（清理對象）。新送出的單已不再夾圖，只有舊資料會命中。
+function quotesWithSnapImages() {
+  return (DB.quotes || []).filter(q => {
+    const s = q.company_snapshot;
+    return s && (s.logo_url || s.stamp_url || (s.brand_logos && s.brand_logos.length));
+  });
 }
 
 function lastAutoBackupText() {
