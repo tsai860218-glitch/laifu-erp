@@ -1752,9 +1752,15 @@ function wireCoreListeners() {
     // 盡力觸發一次立即同步（不等待結果，瀏覽器不保證會等非同步操作完成，
     // 但能多搶一點時間總比什麼都不做好，正常情況下250ms的防抖通常早就送出去了）
     window.addEventListener('beforeunload', () => {
+      flushLocalPersist(); // 防抖若還沒寫，關頁前先把本機快取補寫一次
       let hasPendingLocal = false;
       try { hasPendingLocal = localStorage.getItem(PENDING_SYNC_KEY) === '1'; } catch (e) {}
       if (hasPendingLocal && FIREBASE_ENABLED && fbUser) { clearTimeout(_syncTimer); firestoreSaveDiff(); }
+    });
+    // 手機上切到別的 App 或鎖屏時，beforeunload 不一定會觸發；用 visibilitychange 補一道保險，
+    // 分頁一隱藏就把還在防抖佇列裡的本機快取立刻寫出，避免「切走再回來資料少了幾個字」。
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushLocalPersist();
     });
   }
 }
@@ -2282,23 +2288,14 @@ function warnQuotaOnce(dataSaved) {
     : '本機空間已滿，存檔失敗。請到「設定」匯出備份，並縮小公司 logo／印章圖片或清理舊資料。', 'err');
 }
 
-function save() {
-  if (!canEdit()) {
-    toast('目前是唯讀權限，沒辦法儲存修改', 'err');
-    return false;
-  }
-  // 標記目前正在看的這張單是誰、什麼時候動的（多人共用同一組密碼登入時，用這個分辨誰做的）
-  if (typeof QE !== 'undefined' && QE && route.k === 'quote') {
-    QE.last_modified_by = currentOperator();
-    QE.last_modified_at = new Date().toISOString();
-    appendEditLog(QE, '編輯');
-    _quoteDirty = { id: QE.id, at: Date.now() };
-  }
-  if (typeof DE !== 'undefined' && DE && route.k === 'delivery') {
-    DE.last_modified_by = currentOperator();
-    DE.last_modified_at = new Date().toISOString();
-    appendEditLog(DE, '編輯');
-  }
+// 把「寫本機離線快取」這個很重的動作抽出來、做成防抖。
+// 原本 save() 每被呼叫一次就同步跑一次 slimCacheString()（會把整個資料庫逐筆做兩次
+// JSON.stringify 比對、再整包 stringify 一次）並寫進 localStorage——在報價單欄位上「每打一個字」
+// 都會觸發一次，資料量一大就會卡到「打一個字就當」。改成連續輸入時只在停手約300ms後真正寫一次，
+// 打字過程完全不阻塞主執行緒。雲端同步本來就已經是防抖的（250ms），不受影響。
+let _localPersistTimer = null;
+function flushLocalPersist() {
+  if (_localPersistTimer) { clearTimeout(_localPersistTimer); _localPersistTimer = null; }
   // 寫本機離線快取。真正把 localStorage 撐爆的是公司 logo／印章／品牌圖——它們是 base64
   // 存在資料庫裡，一張可能好幾百 KB，而 localStorage 每個網域上限只有約 5MB。
   // 有雲端同步時，本機這份只是「離線快取」，雲端才是正本，所以快取裡不需要塞這些大圖：
@@ -2324,6 +2321,33 @@ function save() {
       warnQuotaOnce(saved);
     }
   }
+}
+function scheduleLocalPersist() {
+  if (_localPersistTimer) clearTimeout(_localPersistTimer);
+  _localPersistTimer = setTimeout(flushLocalPersist, 300);
+}
+
+function save() {
+  if (!canEdit()) {
+    toast('目前是唯讀權限，沒辦法儲存修改', 'err');
+    return false;
+  }
+  // 標記目前正在看的這張單是誰、什麼時候動的（多人共用同一組密碼登入時，用這個分辨誰做的）
+  if (typeof QE !== 'undefined' && QE && route.k === 'quote') {
+    QE.last_modified_by = currentOperator();
+    QE.last_modified_at = new Date().toISOString();
+    appendEditLog(QE, '編輯');
+    _quoteDirty = { id: QE.id, at: Date.now() };
+  }
+  if (typeof DE !== 'undefined' && DE && route.k === 'delivery') {
+    DE.last_modified_by = currentOperator();
+    DE.last_modified_at = new Date().toISOString();
+    appendEditLog(DE, '編輯');
+  }
+  // 本機快取的實際寫入改走防抖（見 flushLocalPersist / scheduleLocalPersist）：
+  // 連續打字時不會每個字都同步序列化整包資料，停手後才寫一次，避免卡頓。
+  // 頁面關閉前（beforeunload / 分頁隱藏）與 saveNow() 會強制立即寫入，資料不會因為防抖而遺失。
+  scheduleLocalPersist();
   scheduleFirestoreSync();
   return true;
 }
@@ -2333,6 +2357,7 @@ function save() {
 // 沒有防抖的必要，能省掉的等待時間就直接省掉，把「存檔後太快切走/重整」的風險窗口降到最低。
 async function saveNow() {
   if (!save()) return false;
+  flushLocalPersist(); // 一次性動作：不等防抖，立刻把本機快取寫進去
   if (FIREBASE_ENABLED && fbUser) {
     clearTimeout(_syncTimer);
     await firestoreSaveDiff().catch(e => console.error('立即同步失敗（資料仍在本機，稍後會自動重試）', e));
