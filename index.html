@@ -209,6 +209,7 @@ body.col-resizing *{cursor:col-resize!important}
 .tbl tr.pa-sub td{background:var(--bg-2);border-bottom:1px solid var(--line);font-size:12.5px;padding-top:7px;padding-bottom:7px}
 .tbl tr.pa-sub:hover td{background:var(--bg-2)}
 .tbl td.pa-cust{padding-left:26px;color:var(--text-2);word-break:keep-all}
+.tbl tr.pa-sum td{font-weight:600;color:var(--text-1);background:var(--primary-050)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
 .seg-btn{padding:7px 16px;font-size:13px;font-weight:600;color:var(--text-2);background:#fff;border:none;cursor:pointer}
 .seg-btn+.seg-btn{border-left:1px solid var(--line)}
@@ -2402,6 +2403,20 @@ function appendEditLog(rec, action) {
   rec.edit_log.push({ by: who, at: new Date().toISOString(), action });
 }
 
+// 登入載入時，若「補送未同步資料」耗時過久（例如資料量大或雲端在退避重試），
+// 不要一直卡在「資料載入中」把使用者關在外面。最多等 ms 毫秒就先放行進入系統，
+// 底層的同步 Promise 不會被中斷、會在背景繼續跑完；而即時監聽本身有「剛掛上的短窗
+// 期先不套用 + 逐筆比對本機是否有未送出修改」雙重保護，所以先進入不會弄丟本機的修改。
+function raceTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise(res => setTimeout(() => {
+      console.warn('（' + label + '）耗時較久，先進入系統，剩餘同步在背景繼續');
+      res('__timeout__');
+    }, ms))
+  ]);
+}
+
 async function load() {
   if (FIREBASE_ENABLED && fbUser) {
     try {
@@ -2428,7 +2443,7 @@ async function load() {
           // 本機修改蓋掉一次，而且蓋掉之後_lastSynced也會被同步更新，之後排程的同步會誤判
           // 成「沒有差異」而不送出，變成真的永久遺失，不只是暫時被蓋過去而已。
           clearTimeout(_syncTimer);
-          await firestoreSaveDiff().catch(e => console.error('補送本機未同步的修改失敗', e));
+          await raceTimeout(firestoreSaveDiff().catch(e => console.error('補送本機未同步的修改失敗', e)), 9000, '補送未同步的修改');
           toast('偵測到上次還有未同步的本機修改，已優先套用並補送到雲端', 'ok');
           return;
         }
@@ -2476,7 +2491,7 @@ async function load() {
           _lastSynced = JSON.parse(JSON.stringify(remote));
           try { localStorage.setItem(KEY, slimCacheString()); localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (e) {}
           clearTimeout(_syncTimer);
-          await firestoreSaveDiff().catch(e => console.error('補送本機未上雲端的資料失敗（資料仍保留在本機）', e));
+          await raceTimeout(firestoreSaveDiff().catch(e => console.error('補送本機未上雲端的資料失敗（資料仍保留在本機）', e)), 9000, '補送未上雲端的資料');
           setTimeout(() => toast('偵測到 ' + recovered + ' 筆資料雲端沒有（可能之前同步失敗），已保留並重新上傳', 'ok'), 400);
           return;
         }
@@ -9420,7 +9435,7 @@ let pFilterState = { kw: '', majorId: '', subName: '', sup: '' };
    DB.settings.pa_merge_groups，會跟著雲端同步、也存本機）。全部前端即時計算，
    除了「合併設定」外不寫入任何資料。
    =========================================================== */
-let paState = { mode: 'product', from: '', to: '', company: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, sel: null };
+let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, sel: null };
 
 function paMergeGroups() {
   const g = DB.settings && DB.settings.pa_merge_groups;
@@ -9464,7 +9479,7 @@ function paRecords() {
       const g = mg.get(key);
       if (g) { key = 'g:' + g.id; name = g.name; manual = false; }   // 已被合併 → 歸到群組
       const qty = +it.qty || 0, amt = qty * (+it.unit_price || 0);
-      recs.push({ key, name, manual, part_no, unit, cust, qty, amt, did: d.id, date });
+      recs.push({ key, name, manual, part_no, unit, cust, qty, amt, did: d.id, date, no: d.delivery_no || '' });
     });
   });
   return recs;
@@ -9474,11 +9489,15 @@ function paByProduct(recs) {
   const rows = {};
   recs.forEach(r => {
     let x = rows[r.key];
-    if (!x) x = rows[r.key] = { key: r.key, name: r.name, manual: r.manual, part_no: r.part_no, unit: r.unit, qty: 0, amount: 0, ships: new Set(), subs: {} };
+    if (!x) x = rows[r.key] = { key: r.key, name: r.name, manual: r.manual, part_no: r.part_no, unit: r.unit, qty: 0, amount: 0, ships: new Set(), subs: {}, deliv: {} };
     x.qty += r.qty; x.amount += r.amt; x.ships.add(r.did);
     let s = x.subs[r.cust];
     if (!s) s = x.subs[r.cust] = { name: r.cust, qty: 0, amount: 0, ships: new Set(), last: '' };
     s.qty += r.qty; s.amount += r.amt; s.ships.add(r.did); if (r.date > s.last) s.last = r.date;
+    // 每一張出貨單各一筆（同單同產品多列會合併），供「叫貨紀錄」看每個日期
+    let ln = x.deliv[r.did];
+    if (!ln) ln = x.deliv[r.did] = { date: r.date, cust: r.cust, qty: 0, amount: 0, no: r.no };
+    ln.qty += r.qty; ln.amount += r.amt;
   });
   return Object.values(rows);
 }
@@ -9511,6 +9530,10 @@ function viewProductAnalysis(v) {
           <button class="seg-btn" data-mode="customer">依客戶</button>
         </div>
         <span style="flex:1"></span>
+        <div class="seg" id="paDetailSeg" style="display:none">
+          <button class="seg-btn" data-detail="customer">展開看客戶</button>
+          <button class="seg-btn" data-detail="dates">展開看叫貨紀錄</button>
+        </div>
         <button class="btn sm" id="paMergeToggle">合併同產品</button>
         <button class="btn" id="paExport">⬇ 匯出 Excel</button>
       </div>
@@ -9549,6 +9572,11 @@ function viewProductAnalysis(v) {
   el('paKw').value = paState.kw;
 
   const setModeBtns = () => v.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === paState.mode));
+  const setDetailUI = () => {
+    const seg = el('paDetailSeg');
+    seg.style.display = paState.mode === 'product' ? 'inline-flex' : 'none';
+    seg.querySelectorAll('[data-detail]').forEach(b => b.classList.toggle('active', b.dataset.detail === paState.detail));
+  };
   const setMergeUI = () => {
     const on = paState.mode === 'product' && paState.mergeMode;
     el('paMergeBar').style.display = on ? 'flex' : 'none';
@@ -9558,7 +9586,10 @@ function viewProductAnalysis(v) {
   };
 
   v.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
-    paState.mode = b.dataset.mode; paState.expanded = {}; setModeBtns(); setMergeUI(); drawResults();
+    paState.mode = b.dataset.mode; paState.expanded = {}; setModeBtns(); setDetailUI(); setMergeUI(); drawResults();
+  }));
+  v.querySelectorAll('[data-detail]').forEach(b => b.addEventListener('click', () => {
+    paState.detail = b.dataset.detail; setDetailUI(); drawResults();
   }));
   el('paMergeToggle').addEventListener('click', () => { paState.mergeMode = !paState.mergeMode; paState.sel.clear(); setMergeUI(); drawResults(); });
   el('paFrom').addEventListener('change', e => { paState.from = e.target.value; drawResults(); });
@@ -9578,7 +9609,7 @@ function viewProductAnalysis(v) {
   el('paSelClear').addEventListener('click', () => { paState.sel.clear(); drawResults(); });
   el('paMergeDo').addEventListener('click', () => paDoMerge());
 
-  setModeBtns(); setMergeUI(); drawResults();
+  setModeBtns(); setDetailUI(); setMergeUI(); drawResults();
 
   function drawResults() {
     const results = el('paResults'), summary = el('paSummary');
@@ -9620,12 +9651,13 @@ function viewProductAnalysis(v) {
     const body = rows.map(r => {
       const open = !!paState.expanded[r.key];
       const subCount = Object.keys(r.subs).length;
-      const subRows = Object.values(r.subs).sort((a, b) => b.qty - a.qty).map(x =>
+      const subRowsCust = Object.values(r.subs).sort((a, b) => b.qty - a.qty).map(x =>
         `<tr class="pa-sub">${mergeCol ? '<td></td>' : ''}<td class="pa-cust">↳ ${esc(x.name)}</td>
           <td class="r money">${paNum(x.qty)}</td>
           <td class="r money">${money(x.amount)}</td>
           <td class="c">${x.ships.size}</td>
           <td class="nowrap muted">${x.last ? fmtDateShort(x.last) : '—'}</td></tr>`).join('');
+      const subRows = (isProd && paState.detail === 'dates') ? paDateRows(r, mergeCol) : subRowsCust;
       if (isProd) {
         const isGroup = r.key.slice(0, 2) === 'g:';
         const chk = mergeCol ? `<td onclick="event.stopPropagation()" class="c"><input type="checkbox" class="pa-chk" data-k="${esc(r.key)}" ${paState.sel.has(r.key) ? 'checked' : ''}></td>` : '';
@@ -9657,6 +9689,31 @@ function viewProductAnalysis(v) {
       const n = el('paSelCount'); if (n) n.textContent = paState.sel.size;
     }));
     results.querySelectorAll('.pa-dissolve').forEach(a => a.addEventListener('click', () => paDissolve(a.dataset.g)));
+  }
+
+  function paDateRows(r, mergeCol) {
+    const lead = mergeCol ? '<td></td>' : '';
+    const totalCols = mergeCol ? 6 : 5;
+    const list = Object.values(r.deliv || {}).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    if (!list.length) return '';
+    const dd = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
+    const dates = list.map(x => x.date).filter(Boolean);
+    const newest = dates[0], oldest = dates[dates.length - 1];
+    const avg = (list.length > 1 && newest && oldest) ? Math.round(dd(newest, oldest) / (list.length - 1)) : 0;
+    const summary = `<tr class="pa-sub pa-sum"><td class="pa-cust" colspan="${totalCols}">↳ 共 <b>${list.length}</b> 筆出貨`
+      + (list.length > 1 ? ` · 期間 ${fmtDateShort(oldest)} ~ ${fmtDateShort(newest)} · 平均每 <b>${avg}</b> 天叫一次` : '')
+      + `</td></tr>`;
+    const lines = list.map((x, i) => {
+      const prev = list[i + 1];   // 較舊的一筆
+      const gap = (x.date && prev && prev.date) ? `距上次 ${dd(x.date, prev.date)} 天` : '首次';
+      return `<tr class="pa-sub">${lead}
+        <td class="pa-cust">↳ ${x.date ? fmtDateShort(x.date) : '—'} <span class="muted" style="font-size:11px">${gap}</span></td>
+        <td class="r money">${paNum(x.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
+        <td class="r money">${money(x.amount)}</td>
+        <td class="c muted" style="font-family:var(--mono);font-size:11px">${esc(x.no || '')}</td>
+        <td class="nowrap muted">${esc(x.cust || '')}</td></tr>`;
+    }).join('');
+    return summary + lines;
   }
 
   function paExport() {
