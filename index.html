@@ -1600,11 +1600,13 @@ function fbInit() {
       try {
         if (user) {
           showAppShell();
+          setBootLoading(true);
           await load();
           cloudConnected = true;
           initCostDefault();
           wireCoreListeners();
           render();
+          setBootLoading(false);
           firestoreListen();
           promptOperator();
         } else {
@@ -1616,6 +1618,7 @@ function fbInit() {
         console.error('登入後載入資料失敗，改用本機模式', e);
         toast('連上雲端後載入資料失敗，先用本機資料', 'err');
         localFallback = true; cloudConnected = false;
+        setBootLoading(false);
         bootLocalOnly();
       }
     },
@@ -1771,9 +1774,11 @@ function wireCoreListeners() {
    =========================================================== */
 async function firestoreLoadAll() {
   const result = {};
-  for (const col of FS_COLLECTIONS) {
-    // 逐集合各自防呆：某個集合讀不到（例如安全性規則還沒開放、或網路瞬斷）時，
-    // 只略過那一個並記錄，不讓它把整批雲端載入拖垮、害整個 App 退回本機模式。
+  // 逐集合各自防呆：某個集合讀不到（例如安全性規則還沒開放、或網路瞬斷）時，
+  // 只略過那一個並記錄，不讓它把整批雲端載入拖垮、害整個 App 退回本機模式。
+  // 改成「並行」抓取：原本是 for 迴圈一個 await 接一個，13 趟往返全部相加，
+  // 登入後會卡在空白畫面好幾秒；改用 Promise.all 同時發出，總時間降到最慢那一趟。
+  await Promise.all(FS_COLLECTIONS.map(async col => {
     try {
       const snap = await fbDb.collection(col).get();
       result[col] = snap.docs.map(d => d.data());
@@ -1781,13 +1786,16 @@ async function firestoreLoadAll() {
       console.warn('集合「' + col + '」讀取失敗，先略過（其他資料照常載入）', e);
       result[col] = [];
     }
-  }
-  const s = await fbDb.collection('meta').doc('settings').get();
-  result.settings = s.exists ? s.data() : {};
-  const c = await fbDb.collection('meta').doc('counters').get();
-  result.counters = c.exists ? c.data() : {};
-  const sch = await fbDb.collection('meta').doc('schema').get();
-  result._schema = sch.exists ? (sch.data().v || 1) : 1;
+  }));
+  // 三個 meta 文件同樣一起抓，不要再一個等一個
+  const [s, c, sch] = await Promise.all([
+    fbDb.collection('meta').doc('settings').get().catch(() => null),
+    fbDb.collection('meta').doc('counters').get().catch(() => null),
+    fbDb.collection('meta').doc('schema').get().catch(() => null),
+  ]);
+  result.settings = (s && s.exists) ? s.data() : {};
+  result.counters = (c && c.exists) ? c.data() : {};
+  result._schema = (sch && sch.exists) ? (sch.data().v || 1) : 1;
   return result;
 }
 
@@ -3384,7 +3392,23 @@ function floatAC(input, searchFn, pickFn) {
     acReopen = open; acPick = pickFn;
   };
   input.addEventListener('focus', () => { acSel = -1; open(); });
-  input.addEventListener('input', () => { acSel = -1; open(); });
+  // 自動完成的搜尋很重（要掃全部商品，組裝配件那格還要掃所有歷史報價單），
+  // 原本每打一個字就跑一次並重建下拉選單，資料一多就卡。改成：
+  //   1) 防抖——連續打字時停手約140ms才真的搜一次；
+  //   2) 用注音／拼音組字的過程中先不搜（isComposing / compositionstart~end），
+  //      等整個字選好（compositionend）才搜，避免半形組字狀態一直觸發重掃。
+  // 方向鍵選取走的是 acReopen()（即時），不受此防抖影響。
+  let _acDebTimer = null, _acComposing = false;
+  const openDebounced = () => {
+    clearTimeout(_acDebTimer);
+    _acDebTimer = setTimeout(() => { acSel = -1; open(); }, 140);
+  };
+  input.addEventListener('compositionstart', () => { _acComposing = true; });
+  input.addEventListener('compositionend', () => { _acComposing = false; openDebounced(); });
+  input.addEventListener('input', e => {
+    if (_acComposing || e.isComposing) return;   // 組字中不搜，等 compositionend 再搜
+    openDebounced();
+  });
   input.addEventListener('blur', () => setTimeout(closeFloatAC, 120));
 }
 // 捲動頁面（不是面板內部捲動）才關閉候選視窗，避免使用者在面板裡捲動找選項時視窗突然消失
@@ -10732,6 +10756,25 @@ function deleteAccount(id) {
 /* ===========================================================
    §22 開機
    =========================================================== */
+// 登入後到資料載入完成之間，畫面只有外框、內容是空白的，看起來像當掉。
+// 這裡放一個很輕量的「資料載入中…」覆蓋層，載入結束（render 後）就移除。
+function setBootLoading(on) {
+  let el = document.getElementById('bootLoading');
+  if (on) {
+    if (el) return;
+    el = document.createElement('div');
+    el.id = 'bootLoading';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9998;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(248,250,252,.92);color:#334155;font-size:14px;font-weight:600';
+    el.innerHTML = '<div style="width:34px;height:34px;border:3px solid #cbd5e1;border-top-color:#4f46e5;border-radius:50%;animation:bootspin .8s linear infinite"></div><div>資料載入中…</div>';
+    const st = document.createElement('style');
+    st.textContent = '@keyframes bootspin{to{transform:rotate(360deg)}}';
+    el.appendChild(st);
+    document.body.appendChild(el);
+  } else if (el) {
+    el.remove();
+  }
+}
+
 function boot() {
   console.log('%c報價出貨系統 build: ' + APP_BUILD, 'background:#111;color:#0f0;padding:2px 8px;border-radius:4px;font-weight:bold');
   if (IS_DEV) {
