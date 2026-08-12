@@ -2273,6 +2273,9 @@ function slimCacheString(force) {
 function restoreImagesDeep(local, remote) {
   if (!local || !remote || typeof local !== 'object' || typeof remote !== 'object') return;
   Object.keys(remote).forEach(k => {
+    // company_snapshot 裡的公司圖片是要被清除的舊資料，任何情況都不要從雲端還原回來，
+    // 否則清理過的報價單一重新整理又會被補回圖片（變回一堆夾圖的單）。
+    if (k === 'company_snapshot') return;
     const rv = remote[k], lv = local[k];
     if (typeof rv === 'string' && rv.lastIndexOf('data:', 0) === 0) {
       if (lv === '' || lv == null) local[k] = rv;             // 補回被清空的圖片字串
@@ -10768,8 +10771,9 @@ function viewSettings(v) {
     confirmBox('清理報價單內嵌圖片',
       `將移除 <b>${targets.length}</b> 張報價單裡夾帶的公司 logo／發票章／頁尾圖片副本。<br>` +
       `抬頭文字與其他內容都會保留，之後列印改用公司現有的圖。<br><br>` +
-      `清理後會一次同步這些單據到雲端，過程中請<b>不要重新整理</b>，等右上角變「已同步」再離開。`,
-      () => {
+      `清理過程會把這些單據直接寫回雲端，請<b>不要重新整理</b>，等出現完成提示再離開。`,
+      async () => {
+        // 1) 先在記憶體裡把圖片欄位移除
         let n = 0;
         targets.forEach(q => {
           const s = q.company_snapshot;
@@ -10777,8 +10781,36 @@ function viewSettings(v) {
           delete s.logo_url; delete s.stamp_url; delete s.brand_logos;
           n++;
         });
-        saveNow(); render();
-        toast(`已清理 ${n} 張報價單，正在同步到雲端…`, 'ok');
+        // 2) 直接把「清乾淨的這幾張」逐批寫回雲端並等完成——不走一般差異同步，
+        //    避免因為量大／退避而沒送完，或被載入時的「補圖」機制又還原回去。
+        try {
+          if (FIREBASE_ENABLED && fbUser) {
+            toast(`開始清理 ${n} 張，寫入雲端中…請勿關閉或重新整理`, 'ok');
+            const ops = targets.map(q => ({
+              type: 'set',
+              ref: fbDb.collection('quotes').doc(q.id),
+              data: JSON.parse(JSON.stringify(q))
+            }));
+            await fsBatchWrite(ops);
+            // 3) 把「上次同步基準」也校正成清理後的內容 → 之後差異同步不會再判定為變更、
+            //    載入時的補圖也不會把圖片還原回來（因為雲端與基準都已經沒有圖了）。
+            if (_lastSynced && Array.isArray(_lastSynced.quotes)) {
+              const dbMap = new Map(DB.quotes.map(q => [q.id, q]));
+              _lastSynced.quotes = _lastSynced.quotes.map(lq =>
+                dbMap.has(lq.id) ? JSON.parse(JSON.stringify(dbMap.get(lq.id))) : lq);
+            }
+            try { localStorage.setItem(KEY, slimCacheString()); } catch (e) {}
+          } else {
+            save();
+          }
+          render();
+          toast(`已清理 ${n} 張報價單，雲端已更新（重新整理不會再變回來）`, 'ok');
+        } catch (e) {
+          console.error(e);
+          try { localStorage.setItem(KEY, slimCacheString()); } catch (_) {}
+          render();
+          toast('清理時雲端寫入中斷，請稍後重新整理再按一次（已完成的不會重複處理）', 'err');
+        }
       });
   };
 }
