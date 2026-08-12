@@ -203,6 +203,12 @@ body.col-resizing *{cursor:col-resize!important}
 .tbl .money{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600}
 .tbl .muted{color:var(--text-3);font-size:12px}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.pa-arrow{display:inline-block;transition:transform .12s;color:var(--text-3);font-size:11px}
+.pa-arrow.open{transform:rotate(90deg);color:var(--primary)}
+.tbl tr.pa-sub{cursor:default}
+.tbl tr.pa-sub td{background:var(--bg-2);border-bottom:1px solid var(--line);font-size:12.5px;padding-top:7px;padding-bottom:7px}
+.tbl tr.pa-sub:hover td{background:var(--bg-2)}
+.tbl td.pa-cust{padding-left:26px;color:var(--text-2)}
 .tbl td.nowrap,.tbl th.nowrap{white-space:nowrap}
 
 /* Badges */
@@ -4531,6 +4537,7 @@ const ROUTES = [
   { k: 'deliveries',t: '出貨管理', ico: 'delivery', tab: true  },
   { k: 'customers', t: '客戶管理', ico: 'customer', tab: true  },
   { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '商品／庫存' },
+  { k: 'panalysis', t: '產品分析', ico: 'product', tab: false, group: '商品／庫存' },
   { k: 'rentals',   t: '印表機租賃', ico: 'rental', tab: false, group: '主檔' },
   { k: 'users',     t: '業務管理', ico: 'user', tab: false, group: '主檔' },
   { k: 'departments', t: '部門管理', ico: 'user', tab: false, group: '主檔' },
@@ -4645,6 +4652,7 @@ function render() {
     dash: viewDash, quotes: viewQuotes, quote: viewQuote,
     deliveries: viewDeliveries, delivery: viewDelivery,
     customers: viewCustomers, products: viewProducts,
+    panalysis: viewProductAnalysis,
     rentals: viewRentals, rental: viewRentalDetail,
     suppliers: viewSuppliers, users: viewUsers, settings: viewSettings,
     departments: viewDepartments,
@@ -9398,6 +9406,190 @@ function productSortValue(p, key) {
 }
 
 let pFilterState = { kw: '', majorId: '', subName: '', sup: '' };
+
+/* ===========================================================
+   §產品分析 —— 依出貨單統計各產品在不同客戶的出貨量與金額
+   資料來源：DB.deliveries（排除「已取消」的單）。品項以 product_id 歸戶，
+   沒有連到主檔的手動品項則以品名歸戶。全部在前端即時計算，不寫入任何資料。
+   =========================================================== */
+let paState = { from: '', to: '', company: '', kw: '', sort: 'qty', expanded: {} };
+
+function paAggregate() {
+  const rows = {};
+  (DB.deliveries || []).forEach(d => {
+    if (d.status === 'cancelled') return;                       // 已取消不計入
+    if (paState.company && d.company_id !== paState.company) return;
+    const date = d.delivery_date || '';
+    if (paState.from && date < paState.from) return;
+    if (paState.to && date > paState.to) return;
+    const cust = (d.customer_snapshot && d.customer_snapshot.name) || '（未填客戶）';
+    (d.items || []).forEach(it => {
+      const nm = (it.name || '').trim();
+      if (!nm && !it.product_id) return;
+      const key = it.product_id ? ('p:' + it.product_id) : ('n:' + nm);
+      const qty = +it.qty || 0;
+      const amt = qty * (+it.unit_price || 0);
+      let r = rows[key];
+      if (!r) {
+        const prod = it.product_id ? byId(DB.products, it.product_id) : null;
+        r = rows[key] = {
+          key, product_id: it.product_id || null,
+          name: nm || (prod && prod.name) || '（未命名）',
+          part_no: it.part_no || (prod && prod.part_no) || '',
+          unit: it.unit || (prod && prod.unit) || '',
+          qty: 0, amount: 0, ships: new Set(), custs: {}
+        };
+      }
+      r.qty += qty; r.amount += amt; r.ships.add(d.id);
+      let cr = r.custs[cust];
+      if (!cr) cr = r.custs[cust] = { name: cust, qty: 0, amount: 0, ships: new Set(), last: '' };
+      cr.qty += qty; cr.amount += amt; cr.ships.add(d.id);
+      if (date > cr.last) cr.last = date;
+    });
+  });
+  return Object.values(rows);
+}
+
+function paNum(v) {
+  const n = Math.round((+v || 0) * 100) / 100;
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function viewProductAnalysis(v) {
+  document.getElementById('pageTitle').textContent = '產品分析';
+
+  const draw = () => {
+    let rows = paAggregate();
+    const kw = paState.kw.trim().toLowerCase();
+    if (kw) rows = rows.filter(r =>
+      (r.name + ' ' + r.part_no).toLowerCase().includes(kw));
+
+    // 排序
+    const s = paState.sort;
+    rows.sort((a, b) =>
+      s === 'amount' ? b.amount - a.amount :
+      s === 'custs'  ? Object.keys(b.custs).length - Object.keys(a.custs).length :
+      s === 'name'   ? a.name.localeCompare(b.name, 'zh-Hant') :
+                       b.qty - a.qty);
+
+    const totalAmount = rows.reduce((n, r) => n + r.amount, 0);
+    const totalShips = new Set();
+    (DB.deliveries || []).forEach(d => {
+      if (d.status === 'cancelled') return;
+      if (paState.company && d.company_id !== paState.company) return;
+      const dt = d.delivery_date || '';
+      if (paState.from && dt < paState.from) return;
+      if (paState.to && dt > paState.to) return;
+      totalShips.add(d.id);
+    });
+
+    const coOpts = ['<option value="">全部公司</option>']
+      .concat((DB.companies || []).map(c =>
+        `<option value="${c.id}" ${paState.company === c.id ? 'selected' : ''}>${esc(c.short_name || c.name)}</option>`)).join('');
+
+    const sortOpts = [['qty', '出貨量'], ['amount', '出貨金額'], ['custs', '客戶數'], ['name', '產品名稱']]
+      .map(([k, t]) => `<option value="${k}" ${paState.sort === k ? 'selected' : ''}>依${t}排序</option>`).join('');
+
+    const periodTxt = (paState.from || paState.to)
+      ? `${paState.from || '最早'} ~ ${paState.to || '至今'}` : '全部期間';
+
+    const bodyRows = rows.length ? rows.map(r => {
+      const custCount = Object.keys(r.custs).length;
+      const open = !!paState.expanded[r.key];
+      const custRows = Object.values(r.custs)
+        .sort((a, b) => b.qty - a.qty)
+        .map(c => `<tr class="pa-sub"><td class="pa-cust">↳ ${esc(c.name)}</td>
+          <td class="r money">${paNum(c.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
+          <td class="r money">${money(c.amount)}</td>
+          <td class="c">${c.ships.size}</td>
+          <td class="nowrap muted">${c.last ? fmtDateShort(c.last) : '—'}</td></tr>`).join('');
+      return `<tr class="pa-main" data-pkey="${esc(r.key)}">
+          <td><span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b>${esc(r.name)}</b>
+            ${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}
+            ${!r.product_id ? ' <span class="bdg gray plain" style="height:16px;font-size:9px">手動品項</span>' : ''}</td>
+          <td class="r money">${paNum(r.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
+          <td class="r money">${money(r.amount)}</td>
+          <td class="c">${custCount}</td>
+          <td class="c">${r.ships.size}</td></tr>
+        ${open ? custRows : ''}`;
+    }).join('') : '';
+
+    v.innerHTML = `
+      <div class="card" style="margin-bottom:14px"><div class="card-b">
+        <div class="grid g4" style="gap:10px">
+          <div class="field"><label>起始日期</label>
+            <input class="inp" type="date" id="paFrom" value="${paState.from}"></div>
+          <div class="field"><label>結束日期</label>
+            <input class="inp" type="date" id="paTo" value="${paState.to}"></div>
+          <div class="field"><label>公司別</label>
+            <select class="inp" id="paCompany">${coOpts}</select></div>
+          <div class="field"><label>排序</label>
+            <select class="inp" id="paSort">${sortOpts}</select></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+          <button class="btn sm" data-range="month">本月</button>
+          <button class="btn sm" data-range="year">今年</button>
+          <button class="btn sm" data-range="all">全部</button>
+          <input class="inp" id="paKw" placeholder="搜尋產品名稱／料號" value="${esc(paState.kw)}"
+            style="flex:1;min-width:160px;height:34px">
+          <button class="btn" id="paExport">⬇ 匯出 Excel</button>
+        </div>
+        <div class="muted" style="margin-top:10px;font-size:12.5px">
+          期間 <b>${periodTxt}</b>　·　產品 <b>${rows.length}</b> 項　·　出貨單 <b>${totalShips.size}</b> 張　·　出貨金額合計 <b>${money(totalAmount)}</b>
+          <span style="margin-left:6px">（點產品可展開各客戶明細；已取消的出貨單不計入）</span>
+        </div>
+      </div></div>
+
+      ${rows.length ? `<div class="tbl-wrap"><table class="tbl">
+        <thead><tr>
+          <th>產品</th>
+          <th class="r">出貨量</th>
+          <th class="r">出貨金額</th>
+          <th class="c">客戶數</th>
+          <th class="c">出貨次數</th>
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table></div>`
+      : `<div class="empty"><div class="e">${icon('notfound')}</div><h3>這個條件下沒有出貨資料</h3>
+          <p>換個日期區間或公司別再看看</p></div>`}`;
+
+    // 事件綁定（每次重繪都重新掛，避免殘留）
+    const wire = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+    wire('paFrom', 'change', e => { paState.from = e.target.value; draw(); });
+    wire('paTo', 'change', e => { paState.to = e.target.value; draw(); });
+    wire('paCompany', 'change', e => { paState.company = e.target.value; draw(); });
+    wire('paSort', 'change', e => { paState.sort = e.target.value; draw(); });
+    let kwTimer = null;
+    wire('paKw', 'input', e => { clearTimeout(kwTimer); const val = e.target.value; kwTimer = setTimeout(() => { paState.kw = val; draw(); }, 200); });
+    v.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => {
+      const now = new Date(), y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0');
+      if (b.dataset.range === 'month') { paState.from = `${y}-${m}-01`; paState.to = today(); }
+      else if (b.dataset.range === 'year') { paState.from = `${y}-01-01`; paState.to = today(); }
+      else { paState.from = ''; paState.to = ''; }
+      draw();
+    }));
+    wire('paExport', 'click', () => {
+      const flat = [];
+      rows.forEach(r => Object.values(r.custs).sort((a, b) => b.qty - a.qty).forEach(c => {
+        flat.push({
+          '產品': r.name, '料號': r.part_no, '單位': r.unit,
+          '客戶': c.name, '出貨量': Math.round(c.qty * 100) / 100,
+          '出貨金額': Math.round(c.amount), '出貨次數': c.ships.size,
+          '最近出貨日': c.last || ''
+        });
+      }));
+      if (!flat.length) return toast('沒有可匯出的資料', 'err');
+      exportExcelRows(flat, '產品分析', `產品分析_${today()}.xlsx`);
+    });
+    v.querySelectorAll('tr.pa-main').forEach(tr => tr.addEventListener('click', () => {
+      const k = tr.dataset.pkey;
+      paState.expanded[k] = !paState.expanded[k];
+      draw();
+    }));
+  };
+
+  draw();
+}
 
 function viewProducts(v) {
   pSelected.clear();
