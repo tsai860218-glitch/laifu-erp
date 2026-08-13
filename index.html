@@ -1542,7 +1542,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = 'excel-line-profit-2026-08-07m';
+const APP_BUILD = '2026-08-13b 強制長輪詢+同步防護+產品分析';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -1595,10 +1595,11 @@ function fbInit() {
     fbAuth = firebase.auth();
     fbDb = firebase.firestore();
     // 有些網路環境（尤其公司防火牆／Proxy）會擋掉或干擾 Firestore 預設的 WebChannel／QUIC(HTTP3)
-    // 連線，症狀就是 ERR_QUIC_PROTOCOL_ERROR、'Listen' stream transport errored、同步一直失敗。
-    // 開啟「自動偵測長輪詢」：SDK 偵測到連線異常時，會自動改用一般 HTTP 長輪詢（long polling），
-    // 就能穿過這類受限網路穩定連上。必須在任何讀寫之前設定，所以放在這裡。
-    try { fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true }); }
+    // 連線，症狀就是大量 ERR_QUIC_PROTOCOL_ERROR、'Listen' stream transport errored、同步一直失敗。
+    // 「自動偵測」抓不到 QUIC 被擋這種情況，所以這裡直接「強制長輪詢」：一律改用一般 HTTP 長輪詢
+    //（long polling），完全繞開會被擋的連線方式。一般網路（例如家裡）也照常運作，只是即時同步
+    // 效率略低，換來每台都穩定。必須在任何讀寫之前設定，所以放在這裡。
+    try { fbDb.settings({ experimentalForceLongPolling: true, merge: true }); }
     catch (e) { console.warn('設定 Firestore 長輪詢失敗（不影響一般網路使用）', e); }
     // 明確要求「本機持久化」，讓登入狀態在重新整理／關掉分頁後仍保留，不用每次重新登入。
     // （這本來就是 Firebase 網頁版的預設值，這裡明寫一次當保險，失敗也不影響後續流程。）
