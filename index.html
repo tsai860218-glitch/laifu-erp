@@ -1594,6 +1594,12 @@ function fbInit() {
     firebase.initializeApp(FIREBASE_CONFIG);
     fbAuth = firebase.auth();
     fbDb = firebase.firestore();
+    // 有些網路環境（尤其公司防火牆／Proxy）會擋掉或干擾 Firestore 預設的 WebChannel／QUIC(HTTP3)
+    // 連線，症狀就是 ERR_QUIC_PROTOCOL_ERROR、'Listen' stream transport errored、同步一直失敗。
+    // 開啟「自動偵測長輪詢」：SDK 偵測到連線異常時，會自動改用一般 HTTP 長輪詢（long polling），
+    // 就能穿過這類受限網路穩定連上。必須在任何讀寫之前設定，所以放在這裡。
+    try { fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true }); }
+    catch (e) { console.warn('設定 Firestore 長輪詢失敗（不影響一般網路使用）', e); }
     // 明確要求「本機持久化」，讓登入狀態在重新整理／關掉分頁後仍保留，不用每次重新登入。
     // （這本來就是 Firebase 網頁版的預設值，這裡明寫一次當保險，失敗也不影響後續流程。）
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(e => console.warn('設定登入持久化失敗（不影響使用）', e));
@@ -2305,6 +2311,41 @@ function restoreImagesFrom(remote) {
   });
 }
 
+// 用「剛抓下來的雲端資料」逐筆校正本機 DB，避免舊裝置把新雲端資料蓋掉或刪掉：
+//  - 雲端有、本機沒有的記錄：補進本機（之後差異比對才不會把它當成「本機刪掉了」而送出刪除）
+//  - 兩邊都有、雲端 last_modified_at 較新的：採用雲端版（不要用較舊的本機蓋過去）
+//  - 只有「本機較新」或「雲端根本沒有」的，才維持本機、稍後補送
+// 只處理會上雲端的集合（FS_COLLECTIONS）；進銷存等本機專屬集合不動。
+// 另外保護產品分析的合併設定：雲端有、而本機沒有時，沿用雲端的，避免舊裝置把合併洗掉。
+function reconcileNewerRemote(local, remote) {
+  (typeof FS_COLLECTIONS !== 'undefined' ? FS_COLLECTIONS : []).forEach(col => {
+    const rArr = Array.isArray(remote[col]) ? remote[col] : [];
+    if (!Array.isArray(local[col])) local[col] = [];
+    const lArr = local[col];
+    const lIdx = new Map();
+    lArr.forEach((x, i) => { if (x && x.id != null) lIdx.set(x.id, i); });
+    rArr.forEach(r => {
+      if (!r || r.id == null) return;
+      const idx = lIdx.get(r.id);
+      if (idx === undefined) {
+        lArr.push(JSON.parse(JSON.stringify(r)));                 // 雲端有、本機沒有 → 補回
+      } else {
+        const l = lArr[idx];
+        const lt = l && l.last_modified_at, rt = r.last_modified_at;
+        if (rt && (!lt || rt > lt)) lArr[idx] = JSON.parse(JSON.stringify(r));   // 雲端較新 → 採用雲端
+      }
+    });
+  });
+  try {
+    const rMerges = remote.settings && remote.settings.pa_merge_groups;
+    if (Array.isArray(rMerges) && rMerges.length) {
+      if (!local.settings) local.settings = {};
+      const lMerges = local.settings.pa_merge_groups;
+      if (!Array.isArray(lMerges) || !lMerges.length) local.settings.pa_merge_groups = rMerges;
+    }
+  } catch (e) {}
+}
+
 // 本機空間已滿的提醒：同一個分頁最多只跳一次紅字，避免每次存檔都洗畫面
 let _quotaWarned = false;
 function warnQuotaOnce(dataSaved) {
@@ -2439,6 +2480,12 @@ async function load() {
           // 本機快取為了省空間把公司圖片清空了，補送前先從雲端把圖片補回來，
           // 否則 firestoreSaveDiff 會把空圖片當成「修改」推上去，反而蓋掉雲端的 logo／印章。
           restoreImagesFrom(remoteForDiff);
+          // ★ 防止「舊裝置蓋掉／刪掉新雲端資料」：用剛抓下來的雲端逐筆校正本機——
+          //   雲端有、本機沒有的 → 補進本機（否則等一下的差異比對會把它當成「要刪除」而刪掉雲端那筆）；
+          //   兩邊都有、但雲端的 last_modified_at 較新 → 採用雲端版（別用較舊的本機蓋掉別人剛改的）。
+          //   只有本機確實較新、或雲端根本沒有的，才會保留下來稍後補送。這樣才不會發生
+          //   「A 電腦在家改好，B 電腦一開就用舊資料把成果洗掉、還刪掉新增的單」。
+          if (remoteForDiff) reconcileNewerRemote(DB, remoteForDiff);
           _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
           // 重要：這裡必須「立刻同步並等待完成」，不能只是排程250ms後才送。
           // 因為load()結束後緊接著會呼叫firestoreListen()掛上即時監聽，監聽一掛上就會馬上
