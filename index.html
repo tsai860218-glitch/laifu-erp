@@ -204,7 +204,7 @@ body.col-resizing *{cursor:col-resize!important}
 .tbl .muted{color:var(--text-3);font-size:12px}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .pa-arrow{display:inline-block;transition:transform .12s;color:var(--text-3);font-size:11px}
-.row-exp{display:inline-block;width:16px;text-align:center;color:var(--text-3);text-decoration:none;font-size:11px;transition:transform .12s}
+.row-exp{display:inline-block;width:20px;text-align:center;color:var(--primary-600);text-decoration:none;font-size:15px;font-weight:700;transition:transform .12s}
 .row-exp:hover{color:var(--primary)}
 .row-exp.open{transform:rotate(90deg);color:var(--primary)}
 .tbl tr.row-detail>td{background:var(--bg-2);padding:0}
@@ -6017,10 +6017,10 @@ function toggleRowDetail(id, a) {
   if (show) alignRowDetail(row);
 }
 
-// 展開小表的欄寬（#／品名／規格／數量／單價／金額）——固定寬度，整體比原本窄很多
-const MINI_COL_W = [36, 240, 160, 72, 96, 104];
+// 展開小表：#／數量／單價／金額為固定窄欄，品名與規格自動撐滿前面的空間
+const MINI_FIX = { idx: 36, qty: 72, price: 100, amt: 108 };
 
-// 把小表往右移，讓「單價」欄右緣對齊外層清單的「未稅金額」欄右緣
+// 讓小表「品名／規格」靠左在前面填滿，「單價」欄右緣對齊外層清單的「未稅金額」欄右緣
 function alignRowDetail(row) {
   try {
     const dataRow = row.previousElementSibling;
@@ -6028,13 +6028,20 @@ function alignRowDetail(row) {
     const wrap = row.querySelector('.row-detail-wrap');
     if (!dataRow || !tbl || !wrap) return;
     const amt = dataRow.querySelector('td.money');   // 未稅金額欄（清單列唯一帶 money 的欄）
-    if (!amt) { tbl.style.marginLeft = '0px'; return; }
     const cs = getComputedStyle(wrap);
-    const wrapContentLeft = wrap.getBoundingClientRect().left + parseFloat(cs.paddingLeft || '0');
-    const priceRight = MINI_COL_W.slice(0, 5).reduce((s, w) => s + w, 0); // 單價欄右緣（表內位置）
-    let ml = amt.getBoundingClientRect().right - wrapContentLeft - priceRight;
-    if (!isFinite(ml) || ml < 0) ml = 0;
-    tbl.style.marginLeft = Math.round(ml) + 'px';
+    const wrapLeft = wrap.getBoundingClientRect().left + parseFloat(cs.paddingLeft || '0');
+    const fixed = MINI_FIX.idx + MINI_FIX.qty + MINI_FIX.price + MINI_FIX.amt;
+    // 單價右緣＝未稅金額右緣；金額欄再往右延伸一欄。抓不到未稅金額時退回預設寬度
+    let tableW = amt ? (amt.getBoundingClientRect().right - wrapLeft + MINI_FIX.amt) : 640;
+    tableW = Math.max(fixed + 180, Math.round(tableW)); // 保底：品名＋規格至少 180px
+    tbl.style.marginLeft = '0px';                       // 靠左：品名／規格在最前面
+    tbl.style.width = tableW + 'px';
+    const leftover = tableW - fixed;
+    const nameW = Math.round(leftover * 0.58);
+    const nameCol = tbl.querySelector('col.mc-name');
+    const specCol = tbl.querySelector('col.mc-spec');
+    if (nameCol) nameCol.style.width = nameW + 'px';
+    if (specCol) specCol.style.width = (leftover - nameW) + 'px';
   } catch (e) { /* 對齊失敗不影響展開 */ }
 }
 
@@ -6056,10 +6063,14 @@ function rowDetailHtml(id, cols, items) {
       + `<td class="r">${money(up)}</td>`
       + `<td class="r money">${money(amt)}</td></tr>`;
   }).join('');
-  const miniW = MINI_COL_W.reduce((s, w) => s + w, 0);
-  const colg = `<colgroup>${MINI_COL_W.map(w => `<col style="width:${w}px">`).join('')}</colgroup>`;
+  const colg = `<colgroup>`
+    + `<col style="width:${MINI_FIX.idx}px">`
+    + `<col class="mc-name"><col class="mc-spec">`
+    + `<col style="width:${MINI_FIX.qty}px">`
+    + `<col style="width:${MINI_FIX.price}px">`
+    + `<col style="width:${MINI_FIX.amt}px"></colgroup>`;
   return `<tr class="row-detail" id="${id}" style="display:none"><td colspan="${cols}">`
-    + `<div class="row-detail-wrap"><table class="mini-tbl" style="width:${miniW}px">`
+    + `<div class="row-detail-wrap"><table class="mini-tbl" style="width:640px">`
     + colg
     + `<thead><tr><th class="c">#</th><th>品名</th><th>規格</th><th class="r">數量</th><th class="r">單價</th><th class="r">金額</th></tr></thead>`
     + `<tbody>${body}</tbody>`
