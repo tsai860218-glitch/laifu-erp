@@ -435,6 +435,14 @@ table.mini-tbl tfoot td{font-weight:700;background:var(--bg-2);border-top:1px so
 .irow .del:hover{background:var(--red-bg);color:var(--red)}
 .irow .inp{height:31px;font-size:14px}
 .irow .mfield label{display:none} /* 桌面版上方已經有「數量／未稅單價」欄位標題，這裡不用重複顯示，避免比其他欄位多一行造成對不齊 */
+/* 拖曳排序：# 欄當把手 */
+.irow .idx[draggable]{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:grab;user-select:none}
+.irow .idx[draggable]:active{cursor:grabbing}
+.irow .idx .grip{font-size:12px;color:var(--text-3);letter-spacing:-1px;line-height:1}
+.irow .idx[draggable]:hover .grip{color:var(--primary)}
+.irow.dragging{opacity:.45}
+.irow.drag-over{box-shadow:inset 0 3px 0 var(--primary)}
+.irow.drag-below{box-shadow:inset 0 -3px 0 var(--primary)}
 .bom-toggle{
   font-size:13.5px;color:var(--primary);cursor:pointer;font-weight:700;
   background:none;border:none;padding:3px 0;margin-top:3px;text-decoration:underline;
@@ -7127,8 +7135,63 @@ function drawItems() {
         row => { fillFromProduct(it, row.p); drawItems(); mobileSticky(q); toast(`已帶入 ${row.p.name}`); });
     });
   }
+  if (editable) wireItemDnD(box, q);
   drawTotals();
   box.querySelectorAll('textarea.f-sp').forEach(t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; });
+}
+
+// 報價品項拖曳排序：# 欄是把手，整列是放置區。放開後重排 QE.items 並存檔
+function reorderItems(q, fromId, toId, after) {
+  const arr = q.items;
+  const fi = arr.findIndex(x => x.id === fromId);
+  if (fi < 0) return;
+  const [moved] = arr.splice(fi, 1);
+  let ti = arr.findIndex(x => x.id === toId);
+  if (ti < 0) { arr.splice(fi, 0, moved); return; }   // 找不到目標就還原
+  if (after) ti += 1;
+  arr.splice(ti, 0, moved);
+  arr.forEach((x, i) => x.sort_order = i);
+  save();
+  drawItems();
+}
+
+function wireItemDnD(box, q) {
+  let dragId = null;
+  const clear = () => box.querySelectorAll('.irow').forEach(r => r.classList.remove('dragging', 'drag-over', 'drag-below'));
+  box.querySelectorAll('.irow[data-rid]').forEach(row => {
+    const handle = row.querySelector('.idx[draggable]');
+    if (handle) {
+      handle.addEventListener('dragstart', e => {
+        dragId = row.dataset.rid;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
+        try { e.dataTransfer.setDragImage(row, 24, 16); } catch (_) {}
+      });
+      handle.addEventListener('dragend', () => { dragId = null; clear(); });
+    }
+    row.addEventListener('dragover', e => {
+      if (dragId == null || row.dataset.rid === dragId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = row.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      row.classList.toggle('drag-over', !after);
+      row.classList.toggle('drag-below', after);
+    });
+    row.addEventListener('dragleave', e => {
+      if (!row.contains(e.relatedTarget)) row.classList.remove('drag-over', 'drag-below');
+    });
+    row.addEventListener('drop', e => {
+      if (dragId == null || row.dataset.rid === dragId) return;
+      e.preventDefault();
+      const from = dragId, to = row.dataset.rid;
+      const rect = row.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      clear();
+      reorderItems(q, from, to, after);
+    });
+  });
 }
 
 // 這一列目前的料號＋品名是否對應到某個內建產品（用於「＋ 存入主檔 / 主檔」的即時判斷）
@@ -7158,8 +7221,8 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
   const refProduct = it.product_id ? byId(DB.products, it.product_id) : null;
   const refPrice = refProduct ? refProduct.list_price : 0;
 
-  return `<div class="irow">
-    <span class="idx">${n + 1}</span>
+  return `<div class="irow"${editable ? ` data-rid="${it.id}"` : ''}>
+    <span class="idx"${editable ? ' draggable="true" title="拖曳調整順序"' : ''}>${editable ? '<span class="grip">⠿</span>' : ''}${n + 1}</span>
     <div class="nm">
       <div class="fi">
         <div class="fi-r">
