@@ -204,6 +204,19 @@ body.col-resizing *{cursor:col-resize!important}
 .tbl .muted{color:var(--text-3);font-size:12px}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .pa-arrow{display:inline-block;transition:transform .12s;color:var(--text-3);font-size:11px}
+.row-exp{display:inline-block;width:16px;text-align:center;color:var(--text-3);text-decoration:none;font-size:11px;transition:transform .12s}
+.row-exp:hover{color:var(--primary)}
+.row-exp.open{transform:rotate(90deg);color:var(--primary)}
+.tbl tr.row-detail>td{background:var(--bg-2);padding:0}
+.tbl tr.row-detail:hover>td{background:var(--bg-2)}
+.row-detail-wrap{padding:10px 14px 12px 40px}
+table.mini-tbl{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+table.mini-tbl th{background:var(--bg-2);color:var(--text-2);font-weight:600;text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.mini-tbl td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.mini-tbl tbody tr:last-child td{border-bottom:none}
+table.mini-tbl th.r,table.mini-tbl td.r{text-align:right}
+table.mini-tbl th.c,table.mini-tbl td.c{text-align:center}
+table.mini-tbl tfoot td{font-weight:700;background:var(--bg-2);border-top:1px solid var(--line);border-bottom:none}
 .pa-arrow.open{transform:rotate(90deg);color:var(--primary)}
 .tbl tr.pa-sub{cursor:default}
 .tbl tr.pa-sub td{background:var(--bg-2);border-bottom:1px solid var(--line);font-size:12.5px;padding-top:7px;padding-bottom:7px}
@@ -1542,7 +1555,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = '2026-08-13b 強制長輪詢+同步防護+產品分析';
+const APP_BUILD = '2026-08-13c 清單展開品項+強制長輪詢+同步防護';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -5955,6 +5968,8 @@ function quoteTable(list, opts) {
       const t = quoteTotals(q);
       const co = byId(DB.companies, q.company_id);
       const cc = companyColor(co);
+      const totalCols = (sel ? 1 : 0) + Q_COLS.length;
+      const its = (q.items || []).filter(i => (i.name || '').trim() || +i.qty || +i.unit_price);
       const exp = q.status === 'sent' && q.valid_until && q.valid_until <= addDays(today(), 3);
       const om = q.order_method ? ORDER_METHODS[q.order_method] : null;
       const names = q.items.filter(i => (i.name || '').trim()).map(i => i.name);
@@ -5963,7 +5978,7 @@ function quoteTable(list, opts) {
         : `${esc(names[0])} <span class="muted">等${names.length}項</span>`;
       return `<tr class="co-row" style="border-left-color:${cc}" onclick="go('quote/${q.id}')">
         ${sel ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="q-sel" ${qSelected.has(q.id) ? 'checked' : ''} onchange="toggleQSel('${q.id}', this.checked)"></td>` : ''}
-        <td class="no nowrap">${esc(q.quote_no)}</td>
+        <td class="no nowrap">${its.length ? `<a href="javascript:void(0)" class="row-exp" onclick="event.stopPropagation();toggleRowDetail('qd_${q.id}',this)">▸</a> ` : ''}${esc(q.quote_no)}</td>
         <td class="nowrap">${esc(q.customer_snapshot?.name || '—')}<div class="muted">${esc((q.customer_snapshot?.site_label ? '(' + q.customer_snapshot.site_label + ') ' : '') + (q.customer_snapshot?.contact_person || ''))}</div></td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
         <td class="nowrap"><span class="co-badge" style="background:${cc}22;color:${cc}">${esc(co?.badge || co?.code || '?')}</span></td>
@@ -5976,7 +5991,7 @@ function quoteTable(list, opts) {
         <td class="nowrap muted">${esc(q.created_by_op || '—')}</td>
         <td class="c nowrap" onclick="event.stopPropagation()">
           ${(q.edit_log && q.edit_log.length) ? `<a href="javascript:void(0)" class="op-trail-link" onclick="showEditLog('${q.id}')">查看（${q.edit_log.length}）</a>` : '<span class="muted">—</span>'}</td>
-      </tr>`;
+      </tr>${its.length ? rowDetailHtml('qd_' + q.id, totalCols, its) : ''}`;
     }).join('')}</tbody></table>`;
 }
 
@@ -5988,6 +6003,34 @@ function toggleQSelAll(checked, ids) {
   ids.forEach(id => checked ? qSelected.add(id) : qSelected.delete(id));
   document.querySelectorAll('#qlist .q-sel').forEach(el => el.checked = checked);
   updateBulkBar('q');
+}
+
+// 清單「展開列出品項」共用：切換該列下方的品項小表 + 旋轉箭頭
+function toggleRowDetail(id, a) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  const show = row.style.display === 'none' || !row.style.display;
+  row.style.display = show ? '' : 'none';
+  if (a) a.classList.toggle('open', show);
+}
+// 產生某張報價/出貨單的品項小表（品名 / 規格 / 數量 / 單價 / 金額 + 小計），塞在展開列裡
+function rowDetailHtml(id, cols, items) {
+  let sub = 0;
+  const body = items.map((it, i) => {
+    const qty = +it.qty || 0, up = +it.unit_price || 0, amt = qty * up; sub += amt;
+    return `<tr><td class="c muted">${i + 1}</td>`
+      + `<td>${esc(it.name || '')}${it.brand ? ` <span class="muted">${esc(it.brand)}</span>` : ''}</td>`
+      + `<td class="muted">${esc(it.spec || '') || '—'}</td>`
+      + `<td class="r">${qty.toLocaleString('en-US', { maximumFractionDigits: 2 })}${it.unit ? ` <span class="muted">${esc(it.unit)}</span>` : ''}</td>`
+      + `<td class="r">${money(up)}</td>`
+      + `<td class="r money">${money(amt)}</td></tr>`;
+  }).join('');
+  return `<tr class="row-detail" id="${id}" style="display:none"><td colspan="${cols}">`
+    + `<div class="row-detail-wrap"><table class="mini-tbl">`
+    + `<thead><tr><th class="c">#</th><th>品名</th><th>規格</th><th class="r">數量</th><th class="r">單價</th><th class="r">金額</th></tr></thead>`
+    + `<tbody>${body}</tbody>`
+    + `<tfoot><tr><td colspan="5" class="r">小計</td><td class="r money">${money(sub)}</td></tr></tfoot>`
+    + `</table></div></td></tr>`;
 }
 
 function bindTableSort(wrapId, stateObj, renderFn) {
@@ -7728,13 +7771,15 @@ function deliveryTable(list, opts) {
     ${sorted.map(d => {
       const t = quoteTotals(d);
       const buy = allLines(d).filter(i => !i.in_stock).length;
+      const totalCols = (sel ? 1 : 0) + D_COLS.length;
+      const its = (d.items || []).filter(i => (i.name || '').trim() || +i.qty || +i.unit_price);
       const names = d.items.map(i => i.name).filter(Boolean);
       const prodTxt = !names.length ? '<span class="muted">—</span>'
         : names.length === 1 ? esc(names[0])
         : `${esc(names[0])} <span class="muted">等${names.length}項</span>`;
       return `<tr onclick="go('delivery/${d.id}')">
         ${sel ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="d-sel" ${dSelected.has(d.id) ? 'checked' : ''} onchange="toggleDSel('${d.id}', this.checked)"></td>` : ''}
-        <td class="no nowrap">${esc(d.delivery_no)}${d._legacy ? ' <span class="bdg gray plain" style="height:16px;font-size:9px">舊格式</span>' : ''}</td>
+        <td class="no nowrap">${its.length ? `<a href="javascript:void(0)" class="row-exp" onclick="event.stopPropagation();toggleRowDetail('dd_${d.id}',this)">▸</a> ` : ''}${esc(d.delivery_no)}${d._legacy ? ' <span class="bdg gray plain" style="height:16px;font-size:9px">舊格式</span>' : ''}</td>
         <td class="nowrap">${esc(d.customer_snapshot?.name || '—')}</td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
         <td class="muted nowrap" style="font-family:var(--mono);font-size:11px">${esc(d.quote_no || '—')}</td>
@@ -7759,7 +7804,7 @@ function deliveryTable(list, opts) {
         <td class="prod-col muted" title="${esc(d.note || '')}">${esc(d.note || '—')}</td>
         <td class="c nowrap" onclick="event.stopPropagation()">
           ${(d.edit_log && d.edit_log.length) ? `<a href="javascript:void(0)" class="op-trail-link" onclick="showEditLog('${d.id}')">查看（${d.edit_log.length}）</a>` : '<span class="muted">—</span>'}</td>
-      </tr>`;
+      </tr>${its.length ? rowDetailHtml('dd_' + d.id, totalCols, its) : ''}`;
     }).join('')}</tbody></table>`;
 }
 
