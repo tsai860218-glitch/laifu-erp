@@ -209,10 +209,10 @@ body.col-resizing *{cursor:col-resize!important}
 .row-exp.open{transform:rotate(90deg);color:var(--primary)}
 .tbl tr.row-detail>td{background:var(--bg-2);padding:0}
 .tbl tr.row-detail:hover>td{background:var(--bg-2)}
-.row-detail-wrap{padding:10px 14px 12px 40px}
-table.mini-tbl{width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.row-detail-wrap{padding:10px 14px 12px 40px;overflow-x:auto}
+table.mini-tbl{table-layout:fixed;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 table.mini-tbl th{background:var(--bg-2);color:var(--text-2);font-weight:600;text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-table.mini-tbl td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.mini-tbl td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
 table.mini-tbl tbody tr:last-child td{border-bottom:none}
 table.mini-tbl th.r,table.mini-tbl td.r{text-align:right}
 table.mini-tbl th.c,table.mini-tbl td.c{text-align:center}
@@ -6009,10 +6009,41 @@ function toggleQSelAll(checked, ids) {
 function toggleRowDetail(id, a) {
   const row = document.getElementById(id);
   if (!row) return;
-  const show = row.style.display === 'none' || !row.style.display;
-  row.style.display = show ? '' : 'none';
+  // 只認 'none' 為關閉狀態；展開時用具體值 'table-row'，
+  // 這樣再點一次才會被判定為「已展開→要關起來」（原本設成 '' 會被 !display 判成又要展開）
+  const show = row.style.display === 'none';
+  row.style.display = show ? 'table-row' : 'none';
   if (a) a.classList.toggle('open', show);
+  if (show) alignRowDetail(row);
 }
+
+// 展開小表的欄寬（#／品名／規格／數量／單價／金額）——固定寬度，整體比原本窄很多
+const MINI_COL_W = [36, 240, 160, 72, 96, 104];
+
+// 把小表往右移，讓「單價」欄右緣對齊外層清單的「未稅金額」欄右緣
+function alignRowDetail(row) {
+  try {
+    const dataRow = row.previousElementSibling;
+    const tbl = row.querySelector('table.mini-tbl');
+    const wrap = row.querySelector('.row-detail-wrap');
+    if (!dataRow || !tbl || !wrap) return;
+    const amt = dataRow.querySelector('td.money');   // 未稅金額欄（清單列唯一帶 money 的欄）
+    if (!amt) { tbl.style.marginLeft = '0px'; return; }
+    const cs = getComputedStyle(wrap);
+    const wrapContentLeft = wrap.getBoundingClientRect().left + parseFloat(cs.paddingLeft || '0');
+    const priceRight = MINI_COL_W.slice(0, 5).reduce((s, w) => s + w, 0); // 單價欄右緣（表內位置）
+    let ml = amt.getBoundingClientRect().right - wrapContentLeft - priceRight;
+    if (!isFinite(ml) || ml < 0) ml = 0;
+    tbl.style.marginLeft = Math.round(ml) + 'px';
+  } catch (e) { /* 對齊失敗不影響展開 */ }
+}
+
+// 視窗縮放時，重新對齊目前展開中的小表
+window.addEventListener('resize', () => {
+  document.querySelectorAll('tr.row-detail').forEach(r => {
+    if (r.style.display && r.style.display !== 'none') alignRowDetail(r);
+  });
+});
 // 產生某張報價/出貨單的品項小表（品名 / 規格 / 數量 / 單價 / 金額 + 小計），塞在展開列裡
 function rowDetailHtml(id, cols, items) {
   let sub = 0;
@@ -6025,8 +6056,11 @@ function rowDetailHtml(id, cols, items) {
       + `<td class="r">${money(up)}</td>`
       + `<td class="r money">${money(amt)}</td></tr>`;
   }).join('');
+  const miniW = MINI_COL_W.reduce((s, w) => s + w, 0);
+  const colg = `<colgroup>${MINI_COL_W.map(w => `<col style="width:${w}px">`).join('')}</colgroup>`;
   return `<tr class="row-detail" id="${id}" style="display:none"><td colspan="${cols}">`
-    + `<div class="row-detail-wrap"><table class="mini-tbl">`
+    + `<div class="row-detail-wrap"><table class="mini-tbl" style="width:${miniW}px">`
+    + colg
     + `<thead><tr><th class="c">#</th><th>品名</th><th>規格</th><th class="r">數量</th><th class="r">單價</th><th class="r">金額</th></tr></thead>`
     + `<tbody>${body}</tbody>`
     + `<tfoot><tr><td colspan="5" class="r">小計</td><td class="r money">${money(sub)}</td></tr></tfoot>`
