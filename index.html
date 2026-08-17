@@ -204,7 +204,7 @@ body.col-resizing *{cursor:col-resize!important}
 .tbl .muted{color:var(--text-3);font-size:12px}
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .pa-arrow{display:inline-block;transition:transform .12s;color:var(--text-3);font-size:11px}
-.row-exp{display:inline-block;width:20px;text-align:center;color:var(--primary-600);text-decoration:none;font-size:20px;font-weight:700;transition:transform .12s}
+.row-exp{display:inline-block;width:20px;text-align:center;color:var(--primary-600);text-decoration:none;font-size:15px;font-weight:700;transition:transform .12s}
 .row-exp:hover{color:var(--primary)}
 .row-exp.open{transform:rotate(90deg);color:var(--primary)}
 .tbl tr.row-detail>td{background:var(--bg-2);padding:0}
@@ -550,6 +550,10 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-salesbar{display:flex;justify-content:flex-end;gap:2mm;font-size:8pt;margin-top:2mm;padding-right:1mm}
 .pp-salesbar span{color:#666;letter-spacing:.06em}
 .pp-salesbar b{font-weight:700;color:#1E3A8A}
+/* 續頁抬頭：不重複公司 LOGO／名稱，只留一行辨識用 */
+.pp-cont-head{display:flex;justify-content:space-between;align-items:baseline;
+  border-bottom:1.2pt solid #1E3A8A;padding-bottom:1.6mm;font-size:9pt;color:#1E3A8A;font-weight:700}
+.pp-cont-head span:last-child{font-family:var(--mono);font-size:8.5pt}
 
 .pp-tbl{width:100%;border-collapse:collapse;margin-top:1.5mm;font-size:8.5pt;table-layout:fixed}
 .pp-tbl th{background:#E8EDF7;border:.5pt solid #7A8AA5;padding:1.6mm 1.4mm;
@@ -562,6 +566,14 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-tbl .pn{font-family:var(--mono);font-size:7.5pt;color:#333;word-break:break-all}
 .pp-tbl .sp{font-size:7.5pt;color:#333;margin-top:.4mm;line-height:1.35;white-space:pre-wrap}
 .pp-tbl tr.blank td{height:7.4mm}
+/* 報價單「塞好塞滿一頁」用的縮放級距：由大到小挑第一個能整份塞進單頁的字級 */
+.pp-tbl.z-100{zoom:1}
+.pp-tbl.z-93{zoom:.93}
+.pp-tbl.z-86{zoom:.86}
+.pp-tbl.z-79{zoom:.79}
+.pp-tbl.z-72{zoom:.72}
+.pp-tbl.z-65{zoom:.65}
+.pp-tbl.z-58{zoom:.58}
 
 .pp-sum{display:flex;gap:4mm;margin-top:3mm;align-items:stretch}
 .pp-sum-l{flex:1;min-width:0;display:flex;flex-direction:column;gap:2mm}
@@ -1563,7 +1575,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = '2026-08-13c 清單展開品項+強制長輪詢+同步防護';
+const APP_BUILD = '2026-08-17e 報價/出貨搜尋支援多關鍵字(客戶+商品)';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -2209,6 +2221,7 @@ const DEFAULT_SETTINGS = {
   valid_days: 30,
   a5_rows: 8,
   a4_rows: 12,
+  a4_layout_mode: 'fit',
   date_format: 'roc',
   allow_price_edit: true,
   auto_backup_interval: 'off', // off | daily | weekly
@@ -6100,7 +6113,7 @@ function viewQuotes(v) {
   qSelected.clear();
   v.innerHTML = `
     <div class="toolbar">
-      <div class="grow"><input class="inp" id="qs" placeholder="搜尋單號 / 客戶 / 品名 / 料號 / 業務…" value="${esc(f.kw || '')}"></div>
+      <div class="grow"><input class="inp" id="qs" placeholder="搜尋單號 / 客戶 / 品名 / 料號 / 業務（可空格分隔多關鍵字）…" value="${esc(f.kw || '')}"></div>
       <select class="inp" id="qstatus" style="width:130px">
         <option value="">全部狀態</option>
         ${Object.keys(QS).map(k => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${QS[k].label}</option>`).join('')}
@@ -6137,12 +6150,16 @@ function viewQuotes(v) {
     const sa = document.getElementById('qsales').value;
     const d1 = document.getElementById('qd1').value, d2 = document.getElementById('qd2').value;
     let list = DB.quotes.slice();
-    if (kw) list = list.filter(q =>
-      (q.quote_no || '').toLowerCase().includes(kw) ||
-      (q.customer_snapshot?.name || '').toLowerCase().includes(kw) ||
-      (userName(q.sales_user_id) || q.sales_name || '').toLowerCase().includes(kw) ||
-      // 品名 / 料號 / 規格 / 品牌 → 找到整張單
-      q.items.some(i => ((i.name || '') + (i.part_no || '') + (i.brand || '') + (i.spec || '')).toLowerCase().includes(kw)));
+    // 多關鍵字：以空白分隔，每個關鍵字都要命中（可跨欄位），例如「客戶名 商品名」
+    const terms = kw.split(/\s+/).filter(Boolean);
+    if (terms.length) list = list.filter(q => {
+      const hay = ((q.quote_no || '') + ' ' +
+        (q.customer_snapshot?.name || '') + ' ' +
+        (userName(q.sales_user_id) || q.sales_name || '') + ' ' +
+        q.items.map(i => (i.name || '') + ' ' + (i.part_no || '') + ' ' + (i.brand || '') + ' ' + (i.spec || '')).join(' ')
+      ).toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
     if (st) list = list.filter(q => q.status === st);
     if (co) list = list.filter(q => q.company_id === co);
     if (sa) list = list.filter(q => q.sales_user_id === sa);
@@ -7935,7 +7952,7 @@ function viewDeliveries(v) {
   const nowY = today().slice(0, 4);        // YYYY
   v.innerHTML = `
     <div class="toolbar">
-      <div class="grow"><input class="inp" id="ds" placeholder="搜尋出貨單號 / 報價單號 / 客戶 / 品名 / 料號…" value="${esc(f.kw || '')}"></div>
+      <div class="grow"><input class="inp" id="ds" placeholder="搜尋出貨單號 / 報價單號 / 客戶 / 品名 / 料號（可空格分隔多關鍵字）…" value="${esc(f.kw || '')}"></div>
       <select class="inp" id="dstatus" style="width:130px">
         <option value="">全部狀態</option>
         ${Object.keys(DS).map(k => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${DS[k].label}</option>`).join('')}
@@ -8003,10 +8020,15 @@ function viewDeliveries(v) {
     const sa = document.getElementById('dsales').value;
     const { d1, d2 } = periodBounds();
     let list = DB.deliveries.slice();
-    if (kw) list = list.filter(d =>
-      (d.delivery_no + ' ' + (d.quote_no || '')).toLowerCase().includes(kw) ||
-      (d.customer_snapshot?.name || '').toLowerCase().includes(kw) ||
-      d.items.some(i => ((i.name || '') + (i.part_no || '') + (i.brand || '')).toLowerCase().includes(kw)));
+    // 多關鍵字：以空白分隔，每個關鍵字都要命中（可跨欄位），例如「客戶名 商品名」
+    const terms = kw.split(/\s+/).filter(Boolean);
+    if (terms.length) list = list.filter(d => {
+      const hay = ((d.delivery_no || '') + ' ' + (d.quote_no || '') + ' ' +
+        (d.customer_snapshot?.name || '') + ' ' +
+        d.items.map(i => (i.name || '') + ' ' + (i.part_no || '') + ' ' + (i.brand || '') + ' ' + (i.spec || '')).join(' ')
+      ).toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
     if (st) list = list.filter(d => d.status === st);
     if (sa) list = list.filter(d => d.sales_user_id === sa);
     if (d1) list = list.filter(d => d.delivery_date >= d1);
@@ -8907,34 +8929,20 @@ function taxInclusiveAmounts(items, taxRate, grandTotal) {
   return amts;
 }
 
-function quotePaper(q) {
-  // 文字用「送出當下的快照」；圖片一律讀「公司現有的」logo／印章／頁尾品牌圖。
-  // 舊資料的快照若仍夾帶圖片，就沿用它作為後備，確保清理前後列印都正常。
-  const _liveCo = byId(DB.companies, q.company_id) || {};
-  const _snap = q.company_snapshot || snapCompany(_liveCo);
-  const co = Object.assign({}, _snap, {
-    logo_url: _liveCo.logo_url || _snap.logo_url || '',
-    stamp_url: _liveCo.stamp_url || _snap.stamp_url || '',
-    brand_logos: (_liveCo.brand_logos && _liveCo.brand_logos.length ? _liveCo.brand_logos : _snap.brand_logos) || []
-  });
-  const c = q.customer_snapshot || {};
-  const items = (q.items || []).filter(i => (i.name || '').trim());
-  const t = quoteTotals(q);
-  const taxRate = DB.settings.tax_rate || 0.05;
-  const taxIncluded = q.price_display === 'tax_included';
-  const inclAmts = taxIncluded ? taxInclusiveAmounts(items, taxRate, t.total) : null;
-
-  const per = DB.settings.a4_rows || 12;
-  const pages = [];
-  for (let i = 0; i < items.length; i += per) pages.push(items.slice(i, i + per));
-  if (!pages.length) pages.push([]);
-
-  return pages.map((rows, pi) => {
-    const last = pi === pages.length - 1;
-    const blanks = Math.max(0, per - rows.length);
-    const rowStart = pi * per;
-    return `<div class="paper a4">
-      <div class="pp-head">
+// 報價單單頁 HTML。ctx 帶入整份資料，pg 描述這一頁要放的品項、空白列、是否含摘要、字級縮放
+function qpPageHtml(ctx, pg) {
+  const { q, co, c, t, taxIncluded, taxRate, inclAmts } = ctx;
+  const { rows, rowStart, showSummary, zoomClass } = pg;
+  const isFirst = pg.isFirst !== false;   // 續頁不重複公司抬頭
+  const spacerPx = pg.spacerPx || 0;      // 續頁模式最後一頁：把摘要／發票章推到頁底的隱形墊高
+  const blanks = pg.blanks || 0;
+  const padPx = pg.padPx || 0;
+  const blankRow = h => `<tr class="blank"><td${h ? ` style="height:${h}px"` : ''}>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`;
+  const blankRows = blanks
+    ? Array(Math.max(0, blanks - 1)).fill(blankRow(0)).join('') + blankRow(padPx)
+    : '';
+  return `<div class="paper a4">
+      ${isFirst ? `<div class="pp-head">
         <div class="pp-co-wrap">
           ${co.logo_url ? `<img class="pp-logo" src="${co.logo_url}" alt="">` : ''}
           <div>
@@ -8967,9 +8975,9 @@ function quotePaper(q) {
         </div>
       </div>
 
-      <div class="pp-salesbar"><span>負責業務</span><b>${esc(userName(q.sales_user_id) || q.sales_name || '—')}</b></div>
+      <div class="pp-salesbar"><span>負責業務</span><b>${esc(userName(q.sales_user_id) || q.sales_name || '—')}</b></div>` : `<div class="pp-cont-head"><span>報價單（續）　${esc(c.name || '')}</span><span>${esc(q.quote_no)}</span></div>`}
 
-      <table class="pp-tbl">
+      <table class="pp-tbl ${zoomClass || 'z-100'}">
         <thead><tr>
           <th style="width:8mm">項次</th>
           <th style="width:24mm">品牌</th>
@@ -8980,11 +8988,12 @@ function quotePaper(q) {
         </tr></thead>
         <tbody>
           ${rows.map((it, n) => {
+            const gi = rowStart + n;
             const exAmt = lineAmount(it.qty, it.unit_price);
-            const amt = taxIncluded ? inclAmts[rowStart + n] : exAmt;
+            const amt = taxIncluded ? inclAmts[gi] : exAmt;
             const unitDisp = taxIncluded ? (it.qty ? round0(amt / it.qty * 100) / 100 : 0) : it.unit_price;
-            return `<tr>
-            <td class="c">${rowStart + n + 1}</td>
+            return `<tr data-rg="q${gi}"${pg.rowHeights && pg.rowHeights[n] ? ` style="height:${pg.rowHeights[n]}px"` : ''}>
+            <td class="c">${gi + 1}</td>
             <td class="item-brand">${esc(it.brand || '—')}</td>
             <td><b>${esc(it.name)}</b>${it.spec ? `<div class="sp">${esc(it.spec)}</div>` : ''}${it.part_no ? `<div class="sp">料號：${esc(it.part_no)}</div>` : ''}</td>
             <td class="r">${moneyD(unitDisp)}</td>
@@ -8992,11 +9001,13 @@ function quotePaper(q) {
             <td class="r">${money(amt)}</td>
           </tr>`;
           }).join('')}
-          ${Array(blanks).fill(`<tr class="blank"><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('')}
+          ${blankRows}
         </tbody>
       </table>
 
-      ${last ? `
+      ${spacerPx ? `<div style="height:${spacerPx}px"></div>` : ''}
+
+      ${showSummary ? `
         <div class="pp-sum">
           <div class="pp-sum-l">
             ${q.note ? `<div class="pp-note"><span>備註</span><div class="pp-note-b">${esc(q.note).replace(/\n/g, '<br>')}</div></div>` : ''}
@@ -9024,14 +9035,182 @@ function quotePaper(q) {
         </div>` : ''}
 
       <div class="pp-foot">
-        ${last && (co.brand_logos || []).length ? `<div class="pp-brands${co.brand_logos.length === 1 ? ' single' : ''}">
+        ${showSummary && (co.brand_logos || []).length ? `<div class="pp-brands${co.brand_logos.length === 1 ? ' single' : ''}">
           ${co.brand_logos.map(b => `<img src="${b}" alt="">`).join('')}
         </div>` : ''}
         <div class="pp-foot-l">${esc(co.name)}　${esc(q.quote_no)}</div>
-        <div class="pp-foot-r">第 ${pi + 1} / ${pages.length} 頁</div>
+        <div class="pp-foot-r">第 ${pg.pageNum || 1} / ${pg.totalPages || 1} 頁</div>
       </div>
     </div>`;
-  }).join('');
+}
+
+// 用瀏覽器實際渲染量測，決定報價單的版面：
+//  fit  ＝ 一律單頁，品項多時自動縮小字級／列高，全部塞進一張 A4
+//  spill＝ 字級固定，第一頁排到底部，發票章／頁尾品牌圖移到最後一頁底部
+// 回傳 {zoomClass, pages:[{items, rowStart, showSummary, blanks, padPx}]}
+const QP_FIT_TIERS = ['z-100', 'z-93', 'z-86', 'z-79', 'z-72', 'z-65', 'z-58'];
+
+function qpLayout(ctx) {
+  const items = ctx.items;
+  const mode = DB.settings.a4_layout_mode === 'spill' ? 'spill' : 'fit';
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
+  document.body.appendChild(host);
+
+  // 在指定字級下量測版面各項高度（首頁有公司抬頭、續頁沒有；末頁頁尾會多出品牌圖）
+  function measureAt(zoomClass) {
+    const foot = p => p.querySelector('.pp-foot').getBoundingClientRect().top;
+    const tbTop = p => p.querySelector('.pp-tbl tbody').getBoundingClientRect().top;
+
+    // 首頁、無摘要、一列空白 → 首頁表格起點、空白列高、無品牌頁尾位置
+    host.innerHTML = qpPageHtml(ctx, { rows: [], rowStart: 0, blanks: 1, isFirst: true, showSummary: false, zoomClass });
+    let paper = host.querySelector('.paper.a4');
+    const tbodyTopFirst = tbTop(paper);
+    const blankRowHeight = paper.querySelector('.pp-tbl tbody tr').getBoundingClientRect().height || 20;
+    const footTopNoSum = foot(paper);
+
+    // 續頁、無摘要 → 續頁表格起點（抬頭較精簡，位置較高）
+    host.innerHTML = qpPageHtml(ctx, { rows: [], rowStart: 0, blanks: 0, isFirst: false, showSummary: false, zoomClass });
+    paper = host.querySelector('.paper.a4');
+    const tbodyTopCont = tbTop(paper);
+
+    // 首頁、有摘要、空表 → 摘要區高度、含品牌圖的頁尾位置
+    host.innerHTML = qpPageHtml(ctx, { rows: [], rowStart: 0, blanks: 0, isFirst: true, showSummary: true, zoomClass });
+    paper = host.querySelector('.paper.a4');
+    const tb = paper.querySelector('.pp-tbl tbody').getBoundingClientRect();
+    const sign = paper.querySelector('.pp-sign');
+    const summaryRegion = (sign ? sign.getBoundingClientRect().bottom : tb.bottom) - tb.bottom;
+    const footTopSum = foot(paper);
+
+    // 全部品項（首頁、無摘要）→ 每一項實際高度
+    host.innerHTML = qpPageHtml(ctx, { rows: items, rowStart: 0, blanks: 0, isFirst: true, showSummary: false, zoomClass });
+    paper = host.querySelector('.paper.a4');
+    const tb3 = paper.querySelector('.pp-tbl tbody');
+    const itemHeights = items.map((it, n) => {
+      const tr = tb3.querySelector(`tr[data-rg="q${n}"]`);
+      return tr ? tr.getBoundingClientRect().height : blankRowHeight;
+    });
+
+    return { tbodyTopFirst, tbodyTopCont, footTopNoSum, footTopSum, summaryRegion, blankRowHeight, itemHeights };
+  }
+
+  const SAFETY = 6;
+  const fillBlanks = (leftover, brh) => {
+    const nb = Math.max(0, Math.floor(leftover / brh));
+    return { blanks: nb, padPx: nb ? Math.round(brh + (leftover - nb * brh)) : 0 };
+  };
+
+  // 沒有品項：單頁、最大字級撐版面（fit 樣式，補空白列）
+  if (!items.length) {
+    const m = measureAt('z-100');
+    document.body.removeChild(host);
+    const availLast = m.footTopSum - m.tbodyTopFirst - m.summaryRegion;
+    const f = fillBlanks(Math.max(0, availLast - SAFETY), m.blankRowHeight);
+    return { zoomClass: 'z-100', pages: [{ rows: [], rowStart: 0, isFirst: true, showSummary: true, blanks: f.blanks, padPx: f.padPx }] };
+  }
+
+  // ── fit：一律單頁，由大到小挑第一個「全部品項＋摘要」塞得進的字級，補空白列填滿到頁底 ──
+  if (mode === 'fit') {
+    let chosen = null, chosenZoom = null;
+    for (const z of QP_FIT_TIERS) {
+      const m = measureAt(z);
+      const availLast = m.footTopSum - m.tbodyTopFirst - m.summaryRegion;
+      const total = m.itemHeights.reduce((s, h) => s + h, 0);
+      if (total <= availLast - SAFETY) { chosen = m; chosenZoom = z; break; }
+    }
+    if (!chosen) { chosenZoom = QP_FIT_TIERS[QP_FIT_TIERS.length - 1]; chosen = measureAt(chosenZoom); }
+    document.body.removeChild(host);
+    const availLast = chosen.footTopSum - chosen.tbodyTopFirst - chosen.summaryRegion;
+    const used = chosen.itemHeights.reduce((s, h) => s + h, 0);
+    const f = fillBlanks(Math.max(0, availLast - SAFETY - used), chosen.blankRowHeight);
+    return { zoomClass: chosenZoom, pages: [{ rows: items.slice(), rowStart: 0, isFirst: true, showSummary: true, blanks: f.blanks, padPx: f.padPx }] };
+  }
+
+  // ── spill：字級固定。裝得下就一頁（總價/發票章接在最後一項後面）；
+  //    真的擠不下才另開一頁，此時前面的頁面表格補滿到頁底（滿版），末頁接續品項＋摘要 ──
+  const m = measureAt('z-100');
+  document.body.removeChild(host);
+  const { tbodyTopFirst, tbodyTopCont, footTopNoSum, footTopSum, summaryRegion, blankRowHeight, itemHeights } = m;
+  const budgetFirstNoSum = footTopNoSum - tbodyTopFirst - SAFETY;   // 首頁（不含摘要）
+  const budgetContNoSum = footTopNoSum - tbodyTopCont - SAFETY;    // 續頁（不含摘要）
+  const budgetFirstSum = footTopSum - tbodyTopFirst - summaryRegion - SAFETY; // 首頁又是末頁
+  const budgetContSum = footTopSum - tbodyTopCont - summaryRegion - SAFETY;  // 續頁是末頁
+
+  // 全部品項＋摘要塞得進一頁 → 單頁，總價／發票章直接接在最後一項後面（不補空白列）
+  const totalItemsH = itemHeights.reduce((s, h) => s + h, 0);
+  if (totalItemsH <= budgetFirstSum) {
+    return { zoomClass: 'z-100', pages: [{ rows: items.slice(), rowStart: 0, isFirst: true, showSummary: true, blanks: 0, padPx: 0, spacerPx: 0 }] };
+  }
+
+  // 需要多頁：逐頁貪婪塞入（首頁用首頁預算、其餘用續頁預算）
+  const pages = [];
+  let idx = 0, pi = 0;
+  while (idx < items.length) {
+    const first = pi === 0;
+    const budget = first ? budgetFirstNoSum : budgetContNoSum;
+    const page = []; let used = 0;
+    while (idx < items.length) {
+      const h = itemHeights[idx];
+      if (page.length && used + h > budget) break;
+      page.push(idx); used += h; idx++;
+    }
+    pages.push({ idxs: page, used, first });
+    pi++;
+  }
+  // 末頁要放摘要／發票章，塞不下就把品項往新的一頁推
+  while (pages.length) {
+    const lp = pages[pages.length - 1];
+    const bLast = lp.first ? budgetFirstSum : budgetContSum;
+    if (lp.used <= bLast || lp.idxs.length <= 1) break;
+    const mv = lp.idxs.pop(); lp.used -= itemHeights[mv];
+    pages.push({ idxs: [mv], used: itemHeights[mv], first: false });
+  }
+
+  let rowStart = 0;
+  return {
+    zoomClass: 'z-100',
+    pages: pages.map((p, i) => {
+      const isLast = i === pages.length - 1;
+      // 非末頁：把品項列「等比例撐高」填滿到頁底（滿版），而不是補空白列；
+      //         末頁不撐高，總價／發票章直接接在最後一項後面
+      let rowHeights = null;
+      if (!isLast && p.idxs.length) {
+        const budget = p.first ? budgetFirstNoSum : budgetContNoSum;
+        const scale = p.used > 0 ? budget / p.used : 1;
+        rowHeights = p.idxs.map(k => Math.floor(itemHeights[k] * scale));
+        const sum = rowHeights.reduce((s, h) => s + h, 0);
+        rowHeights[rowHeights.length - 1] += Math.max(0, Math.round(budget - sum)); // 餘數補到最後一列，底線對齊
+      }
+      const pg = { rows: p.idxs.map(k => items[k]), rowStart, isFirst: p.first, showSummary: isLast, blanks: 0, padPx: 0, spacerPx: 0, rowHeights };
+      rowStart += p.idxs.length;
+      return pg;
+    })
+  };
+}
+
+function quotePaper(q) {
+  // 文字用「送出當下的快照」；圖片一律讀「公司現有的」logo／印章／頁尾品牌圖。
+  // 舊資料的快照若仍夾帶圖片，就沿用它作為後備，確保清理前後列印都正常。
+  const _liveCo = byId(DB.companies, q.company_id) || {};
+  const _snap = q.company_snapshot || snapCompany(_liveCo);
+  const co = Object.assign({}, _snap, {
+    logo_url: _liveCo.logo_url || _snap.logo_url || '',
+    stamp_url: _liveCo.stamp_url || _snap.stamp_url || '',
+    brand_logos: (_liveCo.brand_logos && _liveCo.brand_logos.length ? _liveCo.brand_logos : _snap.brand_logos) || []
+  });
+  const c = q.customer_snapshot || {};
+  const items = (q.items || []).filter(i => (i.name || '').trim());
+  const t = quoteTotals(q);
+  const taxRate = DB.settings.tax_rate || 0.05;
+  const taxIncluded = q.price_display === 'tax_included';
+  const inclAmts = taxIncluded ? taxInclusiveAmounts(items, taxRate, t.total) : null;
+
+  const ctx = { q, co, c, t, taxRate, taxIncluded, inclAmts, items };
+  const layout = qpLayout(ctx);
+  const total = layout.pages.length;
+  return layout.pages.map((pg, pi) =>
+    qpPageHtml(ctx, Object.assign({ zoomClass: layout.zoomClass, pageNum: pi + 1, totalPages: total }, pg))
+  ).join('');
 }
 
 /* ===========================================================
@@ -10872,10 +11051,13 @@ function viewSettings(v) {
           <div class="hint">0.05 = 5%</div></div>
         <div class="field"><label>報價有效天數</label>
           <input class="inp num" type="number" id="svalid" value="${s.valid_days}"></div>
-        <div class="field"><label>A4 每頁列數</label>
-          <input class="inp num" type="number" id="sa4" value="${s.a4_rows}"></div>
+        <div class="field"><label>報價單版面（品項多時）</label>
+          <select class="inp" id="sa4mode">
+            <option value="fit" ${(s.a4_layout_mode || 'fit') === 'fit' ? 'selected' : ''}>縮小字級，塞滿同一頁</option>
+            <option value="spill" ${s.a4_layout_mode === 'spill' ? 'selected' : ''}>維持字級，另起一頁</option>
+          </select></div>
       </div>
-      <div class="hint" style="margin:-4px 0 10px">出貨單（A5）改為自動依內容分頁，確保不超過紙張範圍，不需手動設定列數。</div>
+      <div class="hint" style="margin:-4px 0 10px">「塞滿同一頁」：品項多時自動縮小字級與列高，全部擠進一張 A4。「另起一頁」：字級不變，第一頁排滿後把發票章／頁尾品牌圖移到下一頁最底部。出貨單（A5）則一律自動依內容分頁，確保不超出紙張。</div>
       <div class="grid g2">
         <div class="field"><label>日期格式</label>
           <select class="inp" id="sdate">
@@ -10953,7 +11135,7 @@ function viewSettings(v) {
   document.getElementById('saveSet').onclick = () => {
     s.tax_rate = +document.getElementById('stax').value || 0.05;
     s.valid_days = +document.getElementById('svalid').value || 30;
-    s.a4_rows = Math.max(4, +document.getElementById('sa4').value || 12);
+    s.a4_layout_mode = document.getElementById('sa4mode').value === 'spill' ? 'spill' : 'fit';
     s.date_format = document.getElementById('sdate').value;
     s.allow_price_edit = document.getElementById('sprice').value === '1';
     saveNow(); render(); toast('設定已儲存', 'ok');
