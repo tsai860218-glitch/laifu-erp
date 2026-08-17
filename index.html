@@ -1575,7 +1575,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = '2026-08-17e 報價/出貨搜尋支援多關鍵字(客戶+商品)';
+const APP_BUILD = '2026-08-17f 修正縮小字級首次列印版面算錯(圖片預載後再量測)';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -8868,12 +8868,12 @@ async function renderPDF(html, size, filename, folderKey) {
   }
 }
 
-function downloadQuotePDF(id) {
+async function downloadQuotePDF(id) {
   const q = byId(DB.quotes, id);
   if (!q.customer_snapshot) return toast('請先選擇客戶', 'err');
   if (!q.items.some(i => (i.name || '').trim())) return toast('請至少填一項商品', 'err');
   const co = byId(DB.companies, q.company_id);
-  renderPDF(quotePaper(q), 'A4', buildFileName(q, co, 'quote'), 'quotePdf_' + q.company_id);
+  renderPDF(await quotePaper(q), 'A4', buildFileName(q, co, 'quote'), 'quotePdf_' + q.company_id);
 }
 
 function downloadDeliveryPDF(id) {
@@ -8883,11 +8883,11 @@ function downloadDeliveryPDF(id) {
 }
 
 /* 預覽 / 列印 */
-function previewQuotePDF(id) {
+async function previewQuotePDF(id) {
   const q = byId(DB.quotes, id);
   if (!q.customer_snapshot) return toast('請先選擇客戶', 'err');
   if (!q.items.some(i => (i.name || '').trim())) return toast('請至少填一項商品', 'err');
-  doPreview(quotePaper(q), 'A4');
+  doPreview(await quotePaper(q), 'A4');
 }
 function previewDeliveryPDF(id) {
   const d = byId(DB.deliveries, id);
@@ -9188,7 +9188,23 @@ function qpLayout(ctx) {
   };
 }
 
-function quotePaper(q) {
+// 先把 logo／印章／頁尾品牌圖載入快取，之後量測（qpLayout）才拿得到正確高度。
+// 否則首次列印/預覽時圖片尚未載入（尤其單張品牌長條圖是 height:auto），
+// 會量到 0 高度導致縮放版面第一次算錯、要再按一次才正常。
+function preloadImages(urls) {
+  const list = (urls || []).filter(Boolean);
+  if (!list.length) return Promise.resolve();
+  const load = src => new Promise(res => {
+    const im = new Image();
+    im.onload = im.onerror = () => res();
+    im.src = src;
+    if (im.complete) res();
+  });
+  // 最多等 4 秒，避免某張圖載不出來卡住整個列印
+  return Promise.race([Promise.all(list.map(load)), new Promise(r => setTimeout(r, 4000))]);
+}
+
+async function quotePaper(q) {
   // 文字用「送出當下的快照」；圖片一律讀「公司現有的」logo／印章／頁尾品牌圖。
   // 舊資料的快照若仍夾帶圖片，就沿用它作為後備，確保清理前後列印都正常。
   const _liveCo = byId(DB.companies, q.company_id) || {};
@@ -9204,6 +9220,8 @@ function quotePaper(q) {
   const taxRate = DB.settings.tax_rate || 0.05;
   const taxIncluded = q.price_display === 'tax_included';
   const inclAmts = taxIncluded ? taxInclusiveAmounts(items, taxRate, t.total) : null;
+
+  await preloadImages([co.logo_url, co.stamp_url, ...(co.brand_logos || [])]);
 
   const ctx = { q, co, c, t, taxRate, taxIncluded, inclAmts, items };
   const layout = qpLayout(ctx);
