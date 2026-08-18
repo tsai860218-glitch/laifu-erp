@@ -172,6 +172,7 @@ select.inp{padding-right:6px;cursor:pointer}
 .g2{grid-template-columns:1fr 1fr}
 .g3{grid-template-columns:repeat(3,1fr)}
 .g4{grid-template-columns:repeat(4,1fr)}
+.g5{grid-template-columns:repeat(5,1fr)}
 .req::after{content:' *';color:var(--red)}
 
 /* Tables */
@@ -924,7 +925,7 @@ body.st-d-closed .main{background:#F0FBF4}
   .editor{grid-template-columns:1fr}
   .side{position:static}
   .stats{grid-template-columns:1fr 1fr}
-  .g3,.g4{grid-template-columns:1fr 1fr}
+  .g3,.g4,.g5{grid-template-columns:1fr 1fr}
 }
 @media (max-width:640px){
   .sidebar{display:none}
@@ -932,7 +933,7 @@ body.st-d-closed .main{background:#F0FBF4}
   .content{padding:14px}
   .topbar{padding:0 14px;height:52px}
   .topbar h1{font-size:15px}
-  .g2,.g3,.g4{grid-template-columns:1fr}
+  .g2,.g3,.g4,.g5{grid-template-columns:1fr}
   .stats{grid-template-columns:1fr 1fr;gap:8px}
   .stat{padding:11px 12px}
   .stat .v{font-size:21px}
@@ -4860,10 +4861,10 @@ function markExpired() {
    §15 Dashboard
    =========================================================== */
 // 今年至今，依成交金額排行的客戶（前 5 名）
-function topCustomersThisYear(n) {
+function topCustomersThisYear(n, quotes) {
   const yr = today().slice(0, 4);
   const totals = {};
-  DB.quotes.forEach(q => {
+  (quotes || DB.quotes).forEach(q => {
     if (!q.quote_date || q.quote_date.slice(0, 4) !== yr) return;
     if (!['signed', 'partially_shipped', 'completed'].includes(q.status)) return;
     const name = q.customer_snapshot?.name || '—';
@@ -4872,32 +4873,44 @@ function topCustomersThisYear(n) {
   return Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, n || 5);
 }
 
+let dashDept = '';   // 總覽的「分部門檢視」目前選到的部門 id（空=全部部門）
+
 function viewDash(v) {
   const td = today(), ym = td.slice(0, 7);
-  const todayQuotes = DB.quotes.filter(q => q.quote_date === td && !isDraftNo(q.quote_no)).length;
-  const toShip = DB.quotes.filter(q => q.status === 'signed'
-    && !DB.deliveries.some(d => d.quote_id === q.id && d.status !== 'cancelled')).length;
-  const shippedToday = DB.deliveries.filter(d => d.shipped_at && d.shipped_at.slice(0, 10) === td).length;
-  const pendingDeliver = DB.deliveries.filter(d => d.status === 'pending_delivery').length;
+  // 分部門檢視：依「負責業務所屬部門」篩選報價／出貨；整份總覽的統計都以這兩份清單為準
+  const DQ = dashDept ? DB.quotes.filter(q => userDeptId(q.sales_user_id) === dashDept) : DB.quotes;
+  const DD = dashDept ? DB.deliveries.filter(d => userDeptId(d.sales_user_id) === dashDept) : DB.deliveries;
+  const todayQuotes = DQ.filter(q => q.quote_date === td && !isDraftNo(q.quote_no)).length;
+  const toShip = DQ.filter(q => q.status === 'signed'
+    && !DD.some(d => d.quote_id === q.id && d.status !== 'cancelled')).length;
+  const shippedToday = DD.filter(d => d.shipped_at && d.shipped_at.slice(0, 10) === td).length;
+  const pendingDeliver = DD.filter(d => d.status === 'pending_delivery').length;
   // 印表機租賃：本月應收月租（生效中合約的月租合計）與 3 個月內即將到期數
   const rtActive = (DB.rentals || []).filter(r => rentalStatus(r).k !== 'ended');
   const rtMonthly = rtActive.reduce((s, r) => s + (rentalRent(r).v || 0), 0);
   const rtExpiring = (DB.rentals || []).filter(r => rentalStatus(r).k === 'expiring').length;
 
-  const mQuotes = DB.quotes.filter(q => (q.quote_date || '').slice(0, 7) === ym && !isDraftNo(q.quote_no));
+  const mQuotes = DQ.filter(q => (q.quote_date || '').slice(0, 7) === ym && !isDraftNo(q.quote_no));
   const mDeals = mQuotes.filter(q => ['signed', 'partially_shipped', 'completed'].includes(q.status));
-  const mShip = DB.deliveries.filter(d => (d.delivery_date || '').slice(0, 7) === ym).length;
+  const mShip = DD.filter(d => (d.delivery_date || '').slice(0, 7) === ym).length;
   const dealAmt = mDeals.reduce((s, q) => s + quoteTotals(q).total, 0);
   const rate = mQuotes.length ? Math.round(mDeals.length / mQuotes.length * 100) : 0;
 
-  const noOrder = DB.quotes.filter(q => q.status === 'sent' && q.sent_at && (Date.now() - new Date(q.sent_at)) > 7 * 864e5);
-  const expSoon = DB.quotes.filter(q => q.status === 'sent' && q.valid_until && q.valid_until >= td && q.valid_until <= addDays(td, 3));
+  const noOrder = DQ.filter(q => q.status === 'sent' && q.sent_at && (Date.now() - new Date(q.sent_at)) > 7 * 864e5);
+  const expSoon = DQ.filter(q => q.status === 'sent' && q.valid_until && q.valid_until >= td && q.valid_until <= addDays(td, 3));
   const alerts = [];
   if (noOrder.length) alerts.push({ c: 'red', t: `${noOrder.length} 張報價已送出超過 7 天未下單`, h: 'quotes?status=sent' });
   if (expSoon.length) alerts.push({ c: 'red', t: `${expSoon.length} 張報價 3 天內到期`, h: 'quotes?status=sent' });
-  if (rtExpiring) alerts.push({ c: 'orange', t: `${rtExpiring} 筆租賃合約 3 個月內到期`, h: 'rentals?status=expiring' });
+  if (rtExpiring && !dashDept) alerts.push({ c: 'orange', t: `${rtExpiring} 筆租賃合約 3 個月內到期`, h: 'rentals?status=expiring' });
 
   v.innerHTML = `
+    <div class="toolbar" style="margin-bottom:4px">
+      <span class="grow"></span>
+      <label class="muted" style="font-size:12.5px">分部門檢視</label>
+      <select class="inp" id="dashDept" style="width:140px">${deptFilterOptions(dashDept)}</select>
+    </div>
+    ${dashDept ? `<div class="muted" style="margin:-2px 0 10px;font-size:12px">目前只顯示「${esc(deptName(dashDept))}」的報價與出貨統計（依負責業務所屬部門）。租賃為全公司資料，已隱藏。</div>` : ''}
+
     ${alerts.length ? `<div class="sec-title">待辦提醒</div>
       ${alerts.map(a => `<div class="banner ${a.c === 'red' ? 'warn' : 'info'}" style="cursor:pointer" onclick="go('${a.h}')">
         <span class="bi">${a.c === 'red' ? '🔴' : '🟠'}</span><div>${a.t}</div><span class="ba">→</span></div>`).join('')}` : ''}
@@ -4910,11 +4923,12 @@ function viewDash(v) {
       <div class="stat click ${pendingDeliver ? 'alert' : ''}" onclick="go('deliveries?status=pending_delivery')"><div class="k">待配送</div><div class="v">${pendingDeliver}<small>張</small></div></div>
     </div>
 
+    ${dashDept ? '' : `
     <div class="sec-title">印表機租賃</div>
     <div class="stats">
       <div class="stat click" onclick="go('rentals')"><div class="k">本月應收月租</div><div class="v">$${money(rtMonthly)}</div></div>
       <div class="stat click ${rtExpiring ? 'alert' : ''}" onclick="go('rentals?status=expiring')"><div class="k">即將到期</div><div class="v">${rtExpiring}<small>筆 · 3個月內</small></div></div>
-    </div>
+    </div>`}
 
     <div class="sec-title">本月（${ym.replace('-', ' / ')}）</div>
     <div class="stats">
@@ -4928,7 +4942,7 @@ function viewDash(v) {
     </div>
 
     ${(() => {
-      const top = topCustomersThisYear(5);
+      const top = topCustomersThisYear(5, DQ);
       if (!top.length) return '';
       const maxV = top[0][1];
       return `<div class="sec-title">今年客戶排行（依成交金額）</div>
@@ -4955,8 +4969,11 @@ function viewDash(v) {
 
     <div class="sec-title">最近報價</div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap">
-      ${quoteTable(DB.quotes.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 8), { noSort: true })}
+      ${quoteTable(DQ.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 8), { noSort: true })}
     </div></div></div>`;
+
+  const ddSel = document.getElementById('dashDept');
+  if (ddSel) ddSel.addEventListener('change', e => { dashDept = e.target.value; viewDash(v); });
 }
 
 /* ===========================================================
@@ -5043,6 +5060,19 @@ function currentUserDeptName() {
   if (!nm) return null;
   const u = (DB.users || []).find(x => x.name === nm);
   return u ? deptName(u.department) : null;
+}
+// 用使用者 id 反查其所屬部門 id（報價／出貨／產品分析的「分部門檢視」用；對不到回空字串）
+function userDeptId(userId) {
+  if (!userId) return '';
+  const u = (DB.users || []).find(x => x.id === userId);
+  return u ? (u.department || '') : '';
+}
+// 產生「分部門檢視」下拉選單的 <option>；selected 傳入目前選到的部門 id
+function deptFilterOptions(selected) {
+  return '<option value="">全部部門</option>' +
+    ensureDepartments().map(d =>
+      `<option value="${d.id}" ${selected === d.id ? 'selected' : ''}>${esc(d.name)}</option>`
+    ).join('');
 }
 // 商品列表預設顯示哪個部門的成本/牌價：網路部登入→網路部，否則業務部
 function priceDeptIsNet() { return currentUserDeptName() === '網路部'; }
@@ -6122,6 +6152,9 @@ function viewQuotes(v) {
         <option value="">全部公司</option>
         ${DB.companies.map(c => `<option value="${c.id}" ${f.co === c.id ? 'selected' : ''}>${esc(c.badge || c.code)}</option>`).join('')}
       </select>
+      <select class="inp" id="qdept" style="width:120px">
+        ${deptFilterOptions(f.dept || '')}
+      </select>
       <select class="inp" id="qsales" style="width:120px">
         <option value="">全部業務</option>
         ${DB.users.map(u => `<option value="${u.id}" ${f.sales === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
@@ -6147,6 +6180,7 @@ function viewQuotes(v) {
     const kw = document.getElementById('qs').value.trim().toLowerCase();
     const st = document.getElementById('qstatus').value;
     const co = document.getElementById('qco').value;
+    const dept = document.getElementById('qdept').value;
     const sa = document.getElementById('qsales').value;
     const d1 = document.getElementById('qd1').value, d2 = document.getElementById('qd2').value;
     let list = DB.quotes.slice();
@@ -6162,6 +6196,7 @@ function viewQuotes(v) {
     });
     if (st) list = list.filter(q => q.status === st);
     if (co) list = list.filter(q => q.company_id === co);
+    if (dept) list = list.filter(q => userDeptId(q.sales_user_id) === dept);
     if (sa) list = list.filter(q => q.sales_user_id === sa);
     if (d1) list = list.filter(q => q.quote_date >= d1);
     if (d2) list = list.filter(q => q.quote_date <= d2);
@@ -6178,7 +6213,7 @@ function viewQuotes(v) {
     updateBulkBar('q');
   };
   registerPageRunner('quotes', run);
-  ['qs', 'qstatus', 'qco', 'qsales', 'qd1', 'qd2'].forEach(id =>
+  ['qs', 'qstatus', 'qco', 'qdept', 'qsales', 'qd1', 'qd2'].forEach(id =>
     document.getElementById(id).addEventListener('input', () => run(true)));
   document.getElementById('qImpFile').onchange = e => {
     importQuotesExcel(e.target.files[0]);
@@ -7957,6 +7992,9 @@ function viewDeliveries(v) {
         <option value="">全部狀態</option>
         ${Object.keys(DS).map(k => `<option value="${k}" ${f.status === k ? 'selected' : ''}>${DS[k].label}</option>`).join('')}
       </select>
+      <select class="inp" id="ddept" style="width:120px">
+        ${deptFilterOptions(f.dept || '')}
+      </select>
       <select class="inp" id="dsales" style="width:120px">
         <option value="">全部業務</option>
         ${DB.users.map(u => `<option value="${u.id}" ${f.sales === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
@@ -8017,6 +8055,7 @@ function viewDeliveries(v) {
   const run = (resetPage) => {
     const kw = document.getElementById('ds').value.trim().toLowerCase();
     const st = document.getElementById('dstatus').value;
+    const dept = document.getElementById('ddept').value;
     const sa = document.getElementById('dsales').value;
     const { d1, d2 } = periodBounds();
     let list = DB.deliveries.slice();
@@ -8030,6 +8069,7 @@ function viewDeliveries(v) {
       return terms.every(t => hay.includes(t));
     });
     if (st) list = list.filter(d => d.status === st);
+    if (dept) list = list.filter(d => userDeptId(d.sales_user_id) === dept);
     if (sa) list = list.filter(d => d.sales_user_id === sa);
     if (d1) list = list.filter(d => d.delivery_date >= d1);
     if (d2) list = list.filter(d => d.delivery_date <= d2);
@@ -8047,7 +8087,7 @@ function viewDeliveries(v) {
     drawDSumBar(list); // 統計列用完整篩選結果，不是只算當前頁
   };
   registerPageRunner('deliveries', run);
-  ['ds', 'dstatus', 'dsales'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
+  ['ds', 'dstatus', 'ddept', 'dsales'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
   ['dPeriodMonth', 'dPeriodYear', 'dd1', 'dd2'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', () => run(true));
@@ -9836,7 +9876,7 @@ let pFilterState = { kw: '', majorId: '', subName: '', sup: '' };
    DB.settings.pa_merge_groups，會跟著雲端同步、也存本機）。全部前端即時計算，
    除了「合併設定」外不寫入任何資料。
    =========================================================== */
-let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, sel: null };
+let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, sel: null };
 
 function paMergeGroups() {
   const g = DB.settings && DB.settings.pa_merge_groups;
@@ -9864,6 +9904,7 @@ function paRecords() {
   (DB.deliveries || []).forEach(d => {
     if (d.status === 'cancelled') return;
     if (paState.company && d.company_id !== paState.company) return;
+    if (paState.dept && userDeptId(d.sales_user_id) !== paState.dept) return;
     const date = d.delivery_date || '';
     if (paState.from && date < paState.from) return;
     if (paState.to && date > paState.to) return;
@@ -9938,10 +9979,11 @@ function viewProductAnalysis(v) {
         <button class="btn sm" id="paMergeToggle">合併同產品</button>
         <button class="btn" id="paExport">⬇ 匯出 Excel</button>
       </div>
-      <div class="grid g4" style="gap:10px">
+      <div class="grid g5" style="gap:10px">
         <div class="field"><label>起始日期</label><input class="inp" type="date" id="paFrom"></div>
         <div class="field"><label>結束日期</label><input class="inp" type="date" id="paTo"></div>
         <div class="field"><label>公司別</label><select class="inp" id="paCompany">${coOpts}</select></div>
+        <div class="field"><label>部門</label><select class="inp" id="paDept">${deptFilterOptions(paState.dept)}</select></div>
         <div class="field"><label>排序</label><select class="inp" id="paSort">
           <option value="qty">依出貨量排序</option>
           <option value="amount">依出貨金額排序</option>
@@ -9969,6 +10011,7 @@ function viewProductAnalysis(v) {
   el('paFrom').value = paState.from;
   el('paTo').value = paState.to;
   el('paCompany').value = paState.company;
+  el('paDept').value = paState.dept;
   el('paSort').value = paState.sort;
   el('paKw').value = paState.kw;
 
@@ -9996,6 +10039,7 @@ function viewProductAnalysis(v) {
   el('paFrom').addEventListener('change', e => { paState.from = e.target.value; drawResults(); });
   el('paTo').addEventListener('change', e => { paState.to = e.target.value; drawResults(); });
   el('paCompany').addEventListener('change', e => { paState.company = e.target.value; drawResults(); });
+  el('paDept').addEventListener('change', e => { paState.dept = e.target.value; drawResults(); });
   el('paSort').addEventListener('change', e => { paState.sort = e.target.value; drawResults(); });
   el('paKw').addEventListener('input', e => { paState.kw = e.target.value; drawResults(); });  // 只重繪結果 → 可連續打字
   v.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => {
