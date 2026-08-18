@@ -1842,14 +1842,17 @@ async function firestoreLoadAll() {
     }
   }));
   // 三個 meta 文件同樣一起抓，不要再一個等一個
-  const [s, c, sch] = await Promise.all([
+  const [s, c, sch, del] = await Promise.all([
     fbDb.collection('meta').doc('settings').get().catch(() => null),
     fbDb.collection('meta').doc('counters').get().catch(() => null),
     fbDb.collection('meta').doc('schema').get().catch(() => null),
+    fbDb.collection('meta').doc('deletions').get().catch(() => null),
   ]);
   result.settings = (s && s.exists) ? s.data() : {};
   result.counters = (c && c.exists) ? c.data() : {};
   result._schema = (sch && sch.exists) ? (sch.data().v || 1) : 1;
+  // 墓碑（tombstone）：已刪除記錄的 id 清單，避免舊裝置把已刪的單「復活」補回來
+  result._deletions = (del && del.exists) ? (del.data() || {}) : {};
   return result;
 }
 
@@ -1954,6 +1957,8 @@ async function firestoreUploadAll(data) {
 // 注意收到的 cur 是凍結過的快照，不是活的 DB —— 見 firestoreSaveDiff() 的說明。
 function buildSyncOps(cur0, prev0) {
   const ops = [];
+  const newTombstones = {};              // 這一輪偵測到的刪除，記成墓碑
+  const nowISO = new Date().toISOString();
   for (const col of FS_COLLECTIONS) {
     const cur = cur0[col] || [], prev = prev0[col] || [];
     const prevMap = new Map(prev.map(x => [x.id, x]));
@@ -1966,8 +1971,18 @@ function buildSyncOps(cur0, prev0) {
       }
     }
     for (const old of prev) {
-      if (!curIds.has(old.id)) ops.push({ type: 'delete', ref: fbDb.collection(col).doc(old.id) });
+      if (!curIds.has(old.id)) {
+        ops.push({ type: 'delete', ref: fbDb.collection(col).doc(old.id) });
+        newTombstones[old.id] = nowISO;   // 刪除的當下就登記墓碑
+      }
     }
+  }
+  // 把新墓碑併進「已刪除清單」並寫上雲端。這樣其他裝置下次載入時就知道這些單是被刻意刪掉的，
+  // 不會再被「資料遺失保護」當成漏傳而復活。cur0 就是這一輪的已同步基準，一起更新才不會下一輪又重送。
+  if (Object.keys(newTombstones).length) {
+    cur0._deletions = Object.assign({}, cur0._deletions || {}, newTombstones);
+    if (typeof DB !== 'undefined' && DB) DB._deletions = Object.assign({}, DB._deletions || {}, newTombstones);
+    ops.push({ type: 'set', ref: fbDb.collection('meta').doc('deletions'), data: cur0._deletions });
   }
   if (JSON.stringify(cur0.settings) !== JSON.stringify(prev0.settings)) {
     ops.push({ type: 'set', ref: fbDb.collection('meta').doc('settings'), data: cur0.settings });
@@ -2123,6 +2138,19 @@ function firestoreListen() {
     _lastSynced.counters = JSON.parse(JSON.stringify(remote));
     try { localStorage.setItem(KEY, slimCacheString()); } catch (e) {}
   });
+  // 墓碑即時監聽：別台刪了單、寫上墓碑後，本機立刻把對應記錄移除（就算本機沒收到該筆的 removed 事件也保險）
+  fbDb.collection('meta').doc('deletions').onSnapshot(doc => {
+    if (doc.metadata.hasPendingWrites || !doc.exists) return;
+    const remoteDel = doc.data() || {};
+    DB._deletions = Object.assign({}, DB._deletions || {}, remoteDel);
+    _lastSynced._deletions = JSON.parse(JSON.stringify(DB._deletions));
+    const removed = dropTombstoned(DB, remoteDel);
+    // 本機的「已同步基準」也要同步移除，否則 buildSyncOps 會把這些剛被墓碑刪掉的記錄當成「本機刪除」再送一次
+    (typeof FS_COLLECTIONS !== 'undefined' ? FS_COLLECTIONS : []).forEach(col => {
+      if (Array.isArray(_lastSynced[col])) _lastSynced[col] = dropDeadFrom(_lastSynced[col], remoteDel);
+    });
+    if (removed) { try { localStorage.setItem(KEY, slimCacheString()); } catch (e) {} render(); }
+  }, err => console.warn('墓碑（deletions）即時同步掛載失敗，先略過', err));
   fbDb.collection('meta').doc('settings').onSnapshot(doc => {
     if (doc.metadata.hasPendingWrites || !doc.exists) return;
     if (Date.now() - _listenerAttachedAt < 1500) {
@@ -2347,6 +2375,29 @@ function restoreImagesFrom(remote) {
   });
 }
 
+// 從本機 DB 移除「已登記墓碑（被刻意刪除）」的記錄，避免它們被下面的資料遺失保護／補送邏輯復活。
+// deletions 是 { id: 刪除時間 } 的物件；只要 id 在裡面，就代表這筆是被刪掉的，不該再出現。
+// 從單一陣列移除 id 在 deletions 裡的記錄，回傳新陣列
+function dropDeadFrom(arr, deletions) {
+  if (!Array.isArray(arr) || !deletions) return arr;
+  const dead = new Set(Object.keys(deletions));
+  if (!dead.size) return arr;
+  return arr.filter(rec => !(rec && rec.id != null && dead.has(rec.id)));
+}
+function dropTombstoned(db, deletions) {
+  if (!db || !deletions) return 0;
+  const dead = new Set(Object.keys(deletions));
+  if (!dead.size) return 0;
+  let removed = 0;
+  (typeof FS_COLLECTIONS !== 'undefined' ? FS_COLLECTIONS : []).forEach(col => {
+    if (!Array.isArray(db[col])) return;
+    const before = db[col].length;
+    db[col] = db[col].filter(rec => !(rec && rec.id != null && dead.has(rec.id)));
+    removed += before - db[col].length;
+  });
+  return removed;
+}
+
 // 用「剛抓下來的雲端資料」逐筆校正本機 DB，避免舊裝置把新雲端資料蓋掉或刪掉：
 //  - 雲端有、本機沒有的記錄：補進本機（之後差異比對才不會把它當成「本機刪掉了」而送出刪除）
 //  - 兩邊都有、雲端 last_modified_at 較新的：採用雲端版（不要用較舊的本機蓋過去）
@@ -2522,6 +2573,10 @@ async function load() {
           //   只有本機確實較新、或雲端根本沒有的，才會保留下來稍後補送。這樣才不會發生
           //   「A 電腦在家改好，B 電腦一開就用舊資料把成果洗掉、還刪掉新增的單」。
           if (remoteForDiff) reconcileNewerRemote(DB, remoteForDiff);
+          // 套用雲端墓碑：本機快取若還留著「已在別台刪掉」的單，先移除，
+          // 否則接下來的補送會把它當成漏傳的新資料又推回雲端（就是「刪掉過幾天又出現」的成因）。
+          DB._deletions = Object.assign({}, DB._deletions || {}, (remoteForDiff && remoteForDiff._deletions) || {});
+          dropTombstoned(DB, DB._deletions);
           _lastSynced = (remoteForDiff && !isFirestoreEmpty(remoteForDiff)) ? remoteForDiff : emptyDB();
           // 重要：這裡必須「立刻同步並等待完成」，不能只是排程250ms後才送。
           // 因為load()結束後緊接著會呼叫firestoreListen()掛上即時監聽，監聽一掛上就會馬上
@@ -2560,12 +2615,16 @@ async function load() {
         //   寫上雲端（例如某些出貨單／租賃單被 Firestore 拒絕）。把它們補回畫面、標記待同步並
         //   重新上傳，避免「重新整理後那幾筆就不見了」。此處只會「補回」，不會刪除雲端任何資料。
         let recovered = 0;
+        // 已被刻意刪除的 id（雲端墓碑）——這些即使本機快取還有，也不能當成「漏傳」補回來
+        const dead = new Set(Object.keys((remote && remote._deletions) || {}));
         if (localDB) {
           FS_COLLECTIONS.forEach(c => {
             if (!Array.isArray(localDB[c])) return;
             DB[c] = DB[c] || [];
             const have = new Set(DB[c].map(x => x && x.id));
-            localDB[c].forEach(rec => { if (rec && rec.id && !have.has(rec.id)) { DB[c].push(rec); recovered++; } });
+            localDB[c].forEach(rec => {
+              if (rec && rec.id && !have.has(rec.id) && !dead.has(rec.id)) { DB[c].push(rec); recovered++; }
+            });
           });
         }
 
@@ -4177,6 +4236,7 @@ function emptyDB() {
     quotes: [], deliveries: [], counters: {}, accounts: [], rentals: [],
     stock: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
+    _deletions: {},
     _created: new Date().toISOString()
   };
 }
