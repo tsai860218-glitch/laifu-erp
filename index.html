@@ -436,6 +436,15 @@ table.mini-tbl tfoot td{font-weight:700;background:var(--bg-2);border-top:1px so
 .irow .del:hover{background:var(--red-bg);color:var(--red)}
 .irow .inp{height:31px;font-size:14px}
 .irow .mfield label{display:none} /* 桌面版上方已經有「數量／未稅單價」欄位標題，這裡不用重複顯示，避免比其他欄位多一行造成對不齊 */
+/* 每列毛利小框：報價明細右側「小計」下方，成本顯示時才出現，僅內部參考不會列印 */
+.irow .amt .lp{margin-top:8px;padding:6px 8px;border:1px solid #BFDBFE;border-radius:7px;
+  background:var(--primary-050);text-align:left;font-weight:400}
+.irow .amt .lp .lp-h{font-size:10px;color:var(--primary-600);font-weight:700;margin-bottom:4px;letter-spacing:.02em}
+.irow .amt .lp .lp-r{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:11px;color:var(--text-2);padding:1px 0}
+.irow .amt .lp .lp-r b{font-family:var(--mono);font-weight:600;color:var(--text)}
+.irow .amt .lp .lp-sub{font-size:10px;color:var(--text-3);text-align:right;margin:1px 0 2px}
+.irow .amt .lp .lp-p{border-top:1px solid #DBEAFE;margin-top:3px;padding-top:4px;font-size:12px}
+.irow .amt .lp .lp-p b{font-weight:700}
 /* 拖曳排序：# 欄當把手 */
 .irow .idx[draggable]{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:grab;user-select:none}
 .irow .idx[draggable]:active{cursor:grabbing}
@@ -3249,6 +3258,36 @@ function calcCost(doc) {
   const sub = (doc.items || []).reduce((s, i) => s + lineAmount(i.qty, i.unit_price), 0);
   const profit = sub - cost;
   return { cost: round0(cost), profit: round0(profit), rate: sub ? profit / sub : 0 };
+}
+
+// 單一列的毛利小框內容：售價(未稅) − 成本(未稅) = 毛利，並附毛利率與「主機／配件」成本拆解。
+// 成本用 lineCost（主機成本×數量 ＋ 每項配件成本×數量），與整張單的 calcCost 邏輯一致。
+function lineProfitInner(it) {
+  const rev = lineAmount(it.qty, it.unit_price);   // 售價（未稅小計）
+  const cost = lineCost(it, false);                // 成本（未稅）：報價單，組件/配件依主件數量計
+  const profit = round0(rev - cost);
+  const rate = rev ? profit / rev : 0;
+  // 拆成「主機（或BOM組件）成本」與「配件成本」兩塊，讓小字說明對得起來
+  const itQty = +it.qty || 0;
+  let mainCost = 0;
+  if (it.components && it.components.length) {
+    it.components.forEach(c => { if (c.is_included === false) return; mainCost += exTaxCost(c.cost, c.cost_tax) * (+c.qty || 0) * itQty; });
+  } else {
+    const raw = it.default_cost != null ? it.default_cost : it.cost;
+    mainCost += exTaxCost(raw, it.cost_tax) * itQty;
+  }
+  mainCost = round0(mainCost);
+  const asmCost = round0((it.assembly_items || []).reduce((s, a) => s + exTaxCost(a.cost, a.cost_tax) * (+a.qty || 0), 0));
+  const pc = profit >= 0 ? 'var(--green)' : 'var(--red)';
+  return `<div class="lp-h">本列毛利</div>
+    <div class="lp-r"><span>售價</span><b>${money(rev)}</b></div>
+    <div class="lp-r"><span>成本</span><b>${money(cost)}</b></div>
+    ${asmCost ? `<div class="lp-sub">主機 ${money(mainCost)}＋配件 ${money(asmCost)}</div>` : ''}
+    <div class="lp-r lp-p"><span>毛利</span><b style="color:${pc}">${money(profit)}</b></div>
+    <div class="lp-r"><span>毛利率</span><b style="color:${pc}">${(rate * 100).toFixed(1)}%</b></div>`;
+}
+function lineProfitHtml(it) {
+  return `<div class="lp" data-lp="${it.id}" title="內部參考，不會列印">${lineProfitInner(it)}</div>`;
 }
 
 /* ===========================================================
@@ -7393,7 +7432,7 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
             + (refPrice ? `${taxIncl ? '　' : ''}牌價參考：${moneyD(taxIncl ? toIncl(refPrice) : refPrice)}（不會自動帶入，也不會列印）` : '')
           : '依設定，業務不可修改單價'}"></div>
       ${refPrice && !it.unit_price ? `<div class="hint" style="margin-top:2px">牌價 ${moneyD(taxIncl ? toIncl(refPrice) : refPrice)}${taxIncl ? '（含稅）' : ''} 參考用</div>` : ''}</div>
-    <div class="amt" data-amt="${it.id}">${money(taxIncl && inclAmt != null ? inclAmt : amt)}</div>
+    <div class="amt"><span data-amt="${it.id}">${money(taxIncl && inclAmt != null ? inclAmt : amt)}</span>${costOn ? lineProfitHtml(it) : ''}</div>
     ${editable ? `<button class="del" onclick="delItem('${it.id}')" aria-label="刪除">×</button>` : '<span></span>'}
     ${hasBom && open ? bomBox(it, editable) : ''}
     ${!hasBom && asmOpen[it.id] ? assemblyBox(it, editable) : ''}
@@ -7658,6 +7697,12 @@ function drawTotals() {
         <span>毛利率</span><b style="font-family:var(--mono);font-size:17px;color:${c.rate >= 0.15 ? 'var(--green)' : c.rate >= 0 ? 'var(--orange)' : 'var(--red)'}">${(c.rate * 100).toFixed(1)}%</b></div>
       <button class="btn sm ghost" style="width:100%;margin-top:9px" onclick="setCost(false);drawItems()">隱藏</button>
     </div>`;
+
+  // 同步每一列右側的毛利小框（成本顯示時這些元素才存在）
+  (q.items || []).forEach(it => {
+    const e = document.querySelector(`[data-lp="${it.id}"]`);
+    if (e) e.innerHTML = lineProfitInner(it);
+  });
 }
 
 function mobileSticky(q) {
