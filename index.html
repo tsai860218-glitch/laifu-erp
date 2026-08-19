@@ -442,7 +442,8 @@ table.mini-tbl tfoot td{font-weight:700;background:var(--bg-2);border-top:1px so
 .irow .amt .lp .lp-h{font-size:10px;color:var(--primary-600);font-weight:700;margin-bottom:4px;letter-spacing:.02em}
 .irow .amt .lp .lp-r{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:11px;color:var(--text-2);padding:1px 0}
 .irow .amt .lp .lp-r b{font-family:var(--mono);font-weight:600;color:var(--text)}
-.irow .amt .lp .lp-sub{font-size:10px;color:var(--text-3);text-align:right;margin:1px 0 2px}
+.irow .amt .lp .lp-sub2{font-size:10px;color:var(--text-3);padding:0}
+.irow .amt .lp .lp-sub2 b{font-weight:400;color:var(--text-3)}
 .irow .amt .lp .lp-p{border-top:1px solid #DBEAFE;margin-top:3px;padding-top:4px;font-size:12px}
 .irow .amt .lp .lp-p b{font-weight:700}
 /* 拖曳排序：# 欄當把手 */
@@ -930,6 +931,12 @@ body.st-d-closed .main{background:#F0FBF4}
 /* ============================================================
    Mobile  —  §20
    ============================================================ */
+@media (max-width:1200px){
+  /* 視窗變窄時，把右側總計欄移到明細下方，讓商品明細吃滿整個寬度，
+     品名／規格才不會被擠成細細一直條（側欄仍完整保留，只是改放下方） */
+  .editor{grid-template-columns:1fr}
+  .side{position:static}
+}
 @media (max-width:900px){
   .editor{grid-template-columns:1fr}
   .side{position:static}
@@ -3282,7 +3289,8 @@ function lineProfitInner(it) {
   return `<div class="lp-h">本列毛利</div>
     <div class="lp-r"><span>售價</span><b>${money(rev)}</b></div>
     <div class="lp-r"><span>成本</span><b>${money(cost)}</b></div>
-    ${asmCost ? `<div class="lp-sub">主機 ${money(mainCost)}＋配件 ${money(asmCost)}</div>` : ''}
+    ${asmCost ? `<div class="lp-r lp-sub2"><span>·主機</span><b>${money(mainCost)}</b></div>
+    <div class="lp-r lp-sub2"><span>·配件</span><b>${money(asmCost)}</b></div>` : ''}
     <div class="lp-r lp-p"><span>毛利</span><b style="color:${pc}">${money(profit)}</b></div>
     <div class="lp-r"><span>毛利率</span><b style="color:${pc}">${(rate * 100).toFixed(1)}%</b></div>`;
 }
