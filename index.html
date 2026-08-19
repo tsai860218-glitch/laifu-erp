@@ -5134,6 +5134,22 @@ function deptFilterOptions(selected) {
       `<option value="${d.id}" ${selected === d.id ? 'selected' : ''}>${esc(d.name)}</option>`
     ).join('');
 }
+// 產生「業務」篩選下拉的 <option>；deptId 有值時只列該部門的業務。
+// 目前已選的那位一定保留（就算不在該部門），避免選項憑空消失讓篩選看起來被清掉。
+function salesFilterOptions(deptId, selectedId) {
+  let users = DB.users || [];
+  if (deptId) users = users.filter(u => (u.department || '') === deptId || u.id === selectedId);
+  return '<option value="">全部業務</option>' +
+    users.map(u => `<option value="${u.id}" ${u.id === selectedId ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+}
+// 部門下拉改變時，把對應的「業務」下拉換成該部門的業務；若原本選的業務不在新部門就清掉選取
+function rebindSalesByDept(deptSelId, salesSelId) {
+  const dsel = document.getElementById(deptSelId).value;
+  const ssel = document.getElementById(salesSelId);
+  const cur = ssel.value;
+  const keep = cur && (DB.users || []).some(u => u.id === cur && (u.department || '') === dsel);
+  ssel.innerHTML = salesFilterOptions(dsel, keep ? cur : '');
+}
 // 商品列表預設顯示哪個部門的成本/牌價：網路部登入→網路部，否則業務部
 function priceDeptIsNet() { return currentUserDeptName() === '網路部'; }
 // 依部門取得成本/牌價。網路部「不沿用」業務部：沒填(0)就是 0（顯示端會呈現空白）
@@ -6216,8 +6232,7 @@ function viewQuotes(v) {
         ${deptFilterOptions(f.dept || '')}
       </select>
       <select class="inp" id="qsales" style="width:120px">
-        <option value="">全部業務</option>
-        ${DB.users.map(u => `<option value="${u.id}" ${f.sales === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
+        ${salesFilterOptions(f.dept || '', f.sales || '')}
       </select>
       <input class="inp" type="date" id="qd1" style="width:150px" value="${esc(f.d1 || '')}">
       <input class="inp" type="date" id="qd2" style="width:150px" value="${esc(f.d2 || '')}">
@@ -6237,12 +6252,16 @@ function viewQuotes(v) {
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="qlist"></div><div id="qPageBar"></div></div></div>`;
 
   const run = (resetPage) => {
-    const kw = document.getElementById('qs').value.trim().toLowerCase();
+    const kwRaw = document.getElementById('qs').value.trim();
+    const kw = kwRaw.toLowerCase();
     const st = document.getElementById('qstatus').value;
     const co = document.getElementById('qco').value;
     const dept = document.getElementById('qdept').value;
     const sa = document.getElementById('qsales').value;
     const d1 = document.getElementById('qd1').value, d2 = document.getElementById('qd2').value;
+    // 把目前的篩選條件寫回 route.q，這樣雲端同步觸發整頁重繪時，工具列會照原本的選擇重建，
+    // 不會在幾秒後自己跳回「全部部門／全部業務」等預設值
+    f.kw = kwRaw; f.status = st; f.co = co; f.dept = dept; f.sales = sa; f.d1 = d1; f.d2 = d2;
     let list = DB.quotes.slice();
     // 多關鍵字：以空白分隔，每個關鍵字都要命中（可跨欄位），例如「客戶名 商品名」
     const terms = kw.split(/\s+/).filter(Boolean);
@@ -6273,8 +6292,13 @@ function viewQuotes(v) {
     updateBulkBar('q');
   };
   registerPageRunner('quotes', run);
-  ['qs', 'qstatus', 'qco', 'qdept', 'qsales', 'qd1', 'qd2'].forEach(id =>
+  ['qs', 'qstatus', 'qco', 'qsales', 'qd1', 'qd2'].forEach(id =>
     document.getElementById(id).addEventListener('input', () => run(true)));
+  // 部門改變：先把「業務」下拉換成該部門的業務（原選的業務若不在新部門就清掉），再重新篩選
+  document.getElementById('qdept').addEventListener('change', () => {
+    rebindSalesByDept('qdept', 'qsales');
+    run(true);
+  });
   document.getElementById('qImpFile').onchange = e => {
     importQuotesExcel(e.target.files[0]);
     e.target.value = '';
@@ -8056,8 +8080,7 @@ function viewDeliveries(v) {
         ${deptFilterOptions(f.dept || '')}
       </select>
       <select class="inp" id="dsales" style="width:120px">
-        <option value="">全部業務</option>
-        ${DB.users.map(u => `<option value="${u.id}" ${f.sales === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}
+        ${salesFilterOptions(f.dept || '', f.sales || '')}
       </select>
       <button class="btn" onclick="go('deliveries')">清除</button>
       ${columnsButton('dlist')}
@@ -8113,11 +8136,15 @@ function viewDeliveries(v) {
   };
 
   const run = (resetPage) => {
-    const kw = document.getElementById('ds').value.trim().toLowerCase();
+    const kwRaw = document.getElementById('ds').value.trim();
+    const kw = kwRaw.toLowerCase();
     const st = document.getElementById('dstatus').value;
     const dept = document.getElementById('ddept').value;
     const sa = document.getElementById('dsales').value;
     const { d1, d2 } = periodBounds();
+    // 把篩選條件寫回 route.q，避免雲端同步觸發整頁重繪時，工具列在幾秒後跳回預設值
+    // （日期區間由上方「每月/每年/自訂」分頁決定，不寫進 f）
+    f.kw = kwRaw; f.status = st; f.dept = dept; f.sales = sa;
     let list = DB.deliveries.slice();
     // 多關鍵字：以空白分隔，每個關鍵字都要命中（可跨欄位），例如「客戶名 商品名」
     const terms = kw.split(/\s+/).filter(Boolean);
@@ -8147,7 +8174,12 @@ function viewDeliveries(v) {
     drawDSumBar(list); // 統計列用完整篩選結果，不是只算當前頁
   };
   registerPageRunner('deliveries', run);
-  ['ds', 'dstatus', 'ddept', 'dsales'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
+  ['ds', 'dstatus', 'dsales'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
+  // 部門改變：先把「業務」下拉換成該部門的業務（原選的業務若不在新部門就清掉），再重新篩選
+  document.getElementById('ddept').addEventListener('change', () => {
+    rebindSalesByDept('ddept', 'dsales');
+    run(true);
+  });
   ['dPeriodMonth', 'dPeriodYear', 'dd1', 'dd2'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', () => run(true));
