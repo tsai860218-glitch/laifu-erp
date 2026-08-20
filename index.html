@@ -635,6 +635,11 @@ body.cost-on.mobile .cost-warn{display:flex}
 .dp-info>div.wide{flex:0 0 100%}
 .dp-info span{color:#666;flex:0 0 16mm;letter-spacing:.06em;white-space:nowrap}
 .dp-info b{font-weight:700;min-width:0;word-break:break-all}
+/* 客戶PO單號在出貨單上以紅字醒目標示（含列印顏色） */
+.dp-info>div.po-row span,.dp-info>div.po-row b{color:#D0021B;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.dp-info>div.po-row b{font-weight:800}
+/* 客戶PO單號輸入格：填了值就以紅字提示（空白時仍是灰色 placeholder） */
+input.inp.po-hl-inp{color:#D0021B;font-weight:600}
 
 .dp-tbl{width:100%;border-collapse:collapse;margin-top:1.4mm;font-size:7.5pt;table-layout:fixed}
 /* 依商品筆數動態縮放整張表格(字體/內距/列高一起等比例變化)：商品少時放大方便閱讀，商品多時縮小盡量塞進單頁 */
@@ -4195,8 +4200,8 @@ function seed() {
   ];
 
   const users = [
-    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
+    { id: 'u_1', name: '業務助理', phone: '', email: '', role: '管理者', is_active: true },
+    { id: 'u_2', name: '業務', phone: '', email: '', role: '行政', is_active: true }
   ];
 
   const suppliers = [
@@ -6512,6 +6517,7 @@ async function importQuotesExcel(file) {
             created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
             edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '從Excel匯入建立' }],
             note: noteRow ? String(noteRow['備註']).trim() : '',
+            customer_po: '',
             items: g.rows.map(r => ({
               id: uid('qi'), product_id: null, sort_order: 0,
               part_no: '', brand: String(r['品牌'] ?? '').trim(), name: String(r['商品名稱'] ?? '').trim(),
@@ -6603,7 +6609,7 @@ function newQuote() {
     price_display: 'breakdown',
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '建立草稿' }],
-    note: '', items: [], created_at: new Date().toISOString()
+    note: '', customer_po: '', items: [], created_at: new Date().toISOString()
   };
   DB.quotes.push(q); save();
   go('quote/' + q.id);
@@ -6692,6 +6698,9 @@ function viewQuote(v) {
         <div class="total" id="totalBox"></div>
         <div class="cost-panel" id="costBox"></div>
         <div class="card"><div class="card-b">
+          <div class="field" style="margin:0 0 10px"><label>客戶PO單號</label>
+            <input class="inp po-hl-inp" id="fpo" ${editable ? '' : 'disabled'}
+              placeholder="客戶採購單號（不會印在報價單上）" value="${esc(q.customer_po || '')}"></div>
           <div class="field" style="margin:0"><label>備註（會印在報價單上）</label>
             <textarea class="inp" id="fnote" rows="4" ${editable ? '' : 'disabled'}
               placeholder="留空就不印備註">${esc(q.note || '')}</textarea></div>
@@ -6708,12 +6717,13 @@ function viewQuote(v) {
     ${supDatalist()}`;
 
   bindCustAC(q, editable);
-  ['fdate', 'fvalid', 'fnote'].forEach(id => {
+  ['fdate', 'fvalid', 'fnote', 'fpo'].forEach(id => {
     const el = document.getElementById(id); if (!el) return;
     el.addEventListener('change', () => {
       q.quote_date = document.getElementById('fdate').value;
       q.valid_until = document.getElementById('fvalid').value;
       q.note = document.getElementById('fnote').value;
+      q.customer_po = document.getElementById('fpo').value;
       save();
     });
   });
@@ -7982,7 +7992,7 @@ function makeDelivery(q, co, o) {
     price_display: q.price_display || 'breakdown',
     created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
     edit_log: [{ by: currentOperator() || '（未設定名字）', at: new Date().toISOString(), action: '開立出貨單' }],
-    invoiced: false, invoice_date: '', invoice_no: '', customer_po: '',
+    invoiced: false, invoice_date: '', invoice_no: '', customer_po: q.customer_po || '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
   // 一律以「待配送」開單；配送方式只作記錄，不再影響初始狀態
@@ -8148,7 +8158,7 @@ function deliveryTable(list, opts) {
           <input class="inp" style="height:28px;font-size:12px" data-invno="${d.id}" value="${esc(d.invoice_no || '')}"
             placeholder="發票號碼" onchange="setDvField('${d.id}','invoice_no',this.value)"></td>
         <td onclick="event.stopPropagation()">
-          <input class="inp" style="height:28px;font-size:12px" data-custpo="${d.id}" value="${esc(d.customer_po || '')}"
+          <input class="inp po-hl-inp" style="height:28px;font-size:12px" data-custpo="${d.id}" value="${esc(d.customer_po || '')}"
             placeholder="客戶PO單號" onchange="setDvField('${d.id}','customer_po',this.value)"></td>
         <td class="prod-col muted" title="${esc(d.note || '')}">${esc(d.note || '—')}</td>
         <td class="c nowrap" onclick="event.stopPropagation()">
@@ -8580,6 +8590,8 @@ function viewDelivery(v) {
                 <input class="inp" data-d="delivery_target" value="${esc(d.delivery_target || '')}" placeholder="自行輸入" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label>交貨單位聯絡人</label>
                 <input class="inp" data-d="delivery_contact" value="${esc(d.delivery_contact || '')}" placeholder="例：王小姐 0912-345-678" ${editable ? '' : 'disabled'}></div>
+              <div class="field"><label>客戶PO單號</label>
+                <input class="inp po-hl-inp" data-d="customer_po" value="${esc(d.customer_po || '')}" placeholder="客戶採購單號（會印在出貨單上）" ${editable ? '' : 'disabled'}></div>
               <div class="field" style="grid-column:span 2"><label>送貨地址</label>
                 <input class="inp" list="shipAddrList" data-d="ship_address" value="${esc(d.ship_address || '')}"
                   placeholder="可從客戶地址挑選，或自行輸入不同送貨地點" ${editable ? '' : 'disabled'}>
@@ -9548,6 +9560,7 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
       <div><span>統一編號</span><b>${esc(c.tax_id || '—')}</b></div>
       <div><span>出貨日期</span><b>${fmtDate(d.delivery_date)}</b></div>
       <div><span>聯絡人</span><b>${esc(c.contact_person || '')}　${esc(c.phone || '')}</b></div>
+      ${d.customer_po ? `<div class="po-row"><span>客戶PO單號</span><b>${esc(d.customer_po)}</b></div>` : ''}
       <div><span>來源報價</span><b>${esc(d.quote_no || '')}</b></div>
     </div>
 
