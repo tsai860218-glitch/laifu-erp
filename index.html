@@ -2017,12 +2017,36 @@ let _syncQueued = false;     // 跑的期間又有人改東西 → 這一輪結�
 let _syncRetryDelay = 0;     // 失敗重試的退避時間
 let _lastSyncError = '';     // 最近一次同步失敗的看得懂原因（顯示在同步狀態上）
 
+// 報價／出貨在編輯時（save()）就已經蓋過 last_modified_at，不在這裡重複蓋。
+const STAMP_SKIP_COLS = new Set(['quotes', 'deliveries']);
+// 送雲端前，把「內容跟上次同步不一樣」的主檔記錄（商品、客戶、廠商、業務、分類…）蓋上最新修改時間。
+// 有了時間戳，reconcileNewerRemote 與即時監聽才能用「較新者勝」判斷，
+// 擋掉『剛編輯完、卻有一份較舊的雲端快照姍姍來遲把修改蓋回去』的情況（就是商品編輯後過陣子又跳回舊值的原因）。
+// 一定要蓋在「活的 DB」上（不是快照），這樣 DB 與 _lastSynced 才會一致，不會每次同步都誤判成又有變動而重送。
+function stampDirtyRecords() {
+  if (!_lastSynced) return;
+  const now = new Date().toISOString();
+  for (const col of FS_COLLECTIONS) {
+    if (STAMP_SKIP_COLS.has(col)) continue;
+    const cur = DB[col];
+    if (!Array.isArray(cur)) continue;
+    const prevMap = new Map((Array.isArray(_lastSynced[col]) ? _lastSynced[col] : []).map(x => [x.id, x]));
+    for (const item of cur) {
+      if (!item || item.id == null) continue;
+      const old = prevMap.get(item.id);
+      if (!old) { if (item.last_modified_at == null) item.last_modified_at = now; continue; } // 全新記錄
+      if (JSON.stringify(item) !== JSON.stringify(old)) item.last_modified_at = now;           // 內容有改
+    }
+  }
+}
+
 // 只同步「真的有變動」的那幾筆，不是每次都整包重寫
 async function firestoreSaveDiff() {
   if (!fbDb || !fbUser || !DB || !_lastSynced) return;
   if (_syncInFlight) { _syncQueued = true; return; }
   _syncInFlight = true;
   try {
+    stampDirtyRecords(); // 先蓋修改時間（在凍結快照之前，快照才會帶到新的時間戳）
     // ★ 關鍵：先把這一輪要送出去的內容「凍結」成快照。
     // 底下 await 期間使用者還在打字，DB 會繼續被就地修改；如果等寫入回來才拿
     // 「當下的 DB」當已同步基準，那些在傳輸途中新增的修改會被誤判成已經同步過，
@@ -2130,7 +2154,15 @@ function firestoreListen() {
         const localDirty = idx >= 0 && (lidx < 0 || JSON.stringify(arr[idx]) !== JSON.stringify(larr[lidx]));
         if (localDirty) return;
         if (ch.type === 'removed') { if (idx >= 0) arr.splice(idx, 1); }
-        else { if (idx >= 0) arr[idx] = data; else arr.push(data); }
+        else {
+          // 第三層防護：別讓「較舊的遠端快照」蓋掉本機較新的記錄。
+          // （例如剛編輯完商品、同步成功後，又收到一份較舊的快照——沒有這道防護就會被舊值蓋回去）
+          if (idx >= 0) {
+            const lt = arr[idx] && arr[idx].last_modified_at, rt = data.last_modified_at;
+            if (lt && (!rt || lt > rt)) return;  // 本機這筆較新 → 這份遠端資料是舊的，跳過
+            arr[idx] = data;
+          } else arr.push(data);
+        }
         if (ch.type === 'removed') { if (lidx >= 0) larr.splice(lidx, 1); }
         else { if (lidx >= 0) larr[lidx] = data; else larr.push(data); }
         appliedAny = true;
@@ -4779,6 +4811,23 @@ function go(h) { location.hash = h; }
 
 let _lastRoute = null;
 
+// 列表頁（報價／出貨）的篩選條件存這裡，不放在 route.q。
+// 因為每次 render() 都會 route = parseHash() 把 route.q 重建成空物件，
+// 若把搜尋/部門/業務等條件放 route.q，雲端同步一觸發整頁重繪就會被清掉、
+// 造成「打字搜尋後又跳回全部」。改存這裡就能撐過重繪，只有真的切換到別頁時才重置。
+let listFilters = {};
+let _navPageChanged = true; // 這次 render 是不是從別的頁面切過來的（true=換頁，要用全新的篩選）
+function listFilterState(key) {
+  // 換頁進來時重置成網址帶的參數（一般是空的）；同一頁重繪則沿用先前條件
+  if (!listFilters[key] || _navPageChanged) listFilters[key] = Object.assign({}, route.q);
+  return listFilters[key];
+}
+function clearListFilter(key) {
+  listFilters[key] = {};
+  if (location.hash.slice(1).split('?')[0] === key) render(); // 已在本頁：直接重繪
+  else location.hash = key;                                    // 否則換頁，交給 hashchange 重繪
+}
+
 // 離開一張還沒送出、但已經填了東西的草稿報價單時，跳出三選一：繼續編輯／直接離開（維持草稿）／現在就送出
 function draftLeaveConfirm(q, targetHash) {
   openModal({
@@ -4847,6 +4896,9 @@ function render() {
     dvEditFor = null; dvSnapshot = null;
   }
   _lastRoute = route;
+
+  // 是不是換到不同頁面（用來決定列表篩選要不要重置；同頁重繪則保留使用者的篩選）
+  _navPageChanged = !prevRoute || prevRoute.k !== route.k;
 
   const def = ROUTES.find(r => r.k === route.k) || ROUTES[0];
   closeFloatAC();
@@ -6262,7 +6314,7 @@ function bindTableSort(wrapId, stateObj, renderFn) {
 }
 
 function viewQuotes(v) {
-  const f = route.q;
+  const f = listFilterState('quotes');
   qSelected.clear();
   v.innerHTML = `
     <div class="toolbar">
@@ -6283,7 +6335,7 @@ function viewQuotes(v) {
       </select>
       <input class="inp" type="date" id="qd1" style="width:150px" value="${esc(f.d1 || '')}">
       <input class="inp" type="date" id="qd2" style="width:150px" value="${esc(f.d2 || '')}">
-      <button class="btn" onclick="go('quotes')">清除</button>
+      <button class="btn" onclick="clearListFilter('quotes')">清除</button>
       ${columnsButton('qlist')}
       <button class="btn" onclick="exportQuotesExcel()">⬇ 匯出 Excel</button>
       <button class="btn" onclick="document.getElementById('qImpFile').click()">⬆ 匯入 Excel</button>
@@ -8118,7 +8170,7 @@ function toggleDSelAll(checked, ids) {
 let dPeriodMode = 'all'; // all | month | year | custom
 
 function viewDeliveries(v) {
-  const f = route.q;
+  const f = listFilterState('deliveries');
   dSelected.clear();
   const nowYM = today().slice(0, 7);       // YYYY-MM
   const nowY = today().slice(0, 4);        // YYYY
@@ -8135,7 +8187,7 @@ function viewDeliveries(v) {
       <select class="inp" id="dsales" style="width:120px">
         ${salesFilterOptions(f.dept || '', f.sales || '')}
       </select>
-      <button class="btn" onclick="go('deliveries')">清除</button>
+      <button class="btn" onclick="clearListFilter('deliveries')">清除</button>
       ${columnsButton('dlist')}
       <button class="btn" onclick="exportDeliveriesExcel()">⬇ 匯出 Excel</button>
       <button class="btn" onclick="document.getElementById('dImpFile').click()">⬆ 匯入 Excel</button>
