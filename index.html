@@ -577,6 +577,7 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-tbl .pn{font-family:var(--mono);font-size:7.5pt;color:#333;word-break:break-all}
 .pp-tbl .sp{font-size:7.5pt;color:#333;margin-top:.4mm;line-height:1.35;white-space:pre-wrap}
 .pp-tbl tr.blank td{height:7.4mm}
+.pp-tbl tr.blank td.blank-mark{text-align:center;color:#999;letter-spacing:.35em}
 /* 報價單「塞好塞滿一頁」用的縮放級距：由大到小挑第一個能整份塞進單頁的字級 */
 .pp-tbl.z-100{zoom:1}
 .pp-tbl.z-93{zoom:.93}
@@ -920,6 +921,7 @@ body.st-q-expired .main{background:#FFF4F4}
 body.st-q-cancelled .main{background:#F5F5F5}
 
 /* 出貨：待配送→已出貨→結案 */
+.ship-way{font-size:11px;color:var(--text-3);margin-top:2px;font-weight:400}
 body.st-d-pending_delivery .main{background:#FFF6E9}
 body.st-d-shipped .main{background:#EEF5FF}
 body.st-d-closed .main{background:#F0FBF4}
@@ -8185,7 +8187,10 @@ function deliveryTable(list, opts) {
         <td class="c">${d.items.length}</td>
         <td class="r money nowrap">${money(t.subtotal)}</td>
         <td class="c">${buy ? `<span class="bdg orange plain">${buy}</span>` : '<span class="muted">—</span>'}</td>
-        <td class="nowrap">${badge(DS, d.status)}</td>
+        <td class="nowrap">${badge(DS, d.status)}${(d.status === 'pending_delivery' || d.status === 'shipped') ? (() => {
+          const sm = d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : (d.shipping_method || '');
+          return sm ? `<div class="ship-way">${esc(sm)}</div>` : '';
+        })() : ''}</td>
         <td class="c inv-cell" onclick="event.stopPropagation()">
           <label class="fi-chk" style="justify-content:center">
             <input type="checkbox" ${d.invoiced ? 'checked' : ''} onchange="toggleDvInvoiced('${d.id}', this)"></label>
@@ -9223,10 +9228,20 @@ function qpPageHtml(ctx, pg) {
   const spacerPx = pg.spacerPx || 0;      // 續頁模式最後一頁：把摘要／發票章推到頁底的隱形墊高
   const blanks = pg.blanks || 0;
   const padPx = pg.padPx || 0;
-  const blankRow = h => `<tr class="blank"><td${h ? ` style="height:${h}px"` : ''}>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`;
-  const blankRows = blanks
-    ? Array(Math.max(0, blanks - 1)).fill(blankRow(0)).join('') + blankRow(padPx)
-    : '';
+  // 只有「縮小字級，塞滿同一頁」模式、且真的用空白列填滿時，
+  // 第一列空白列在「項目」欄（第 3 格）標示「以下空白」；另起一頁模式不標。
+  const fitMode = docSetting('a4_layout_mode') !== 'spill';
+  const blankRow = (h, mark) => `<tr class="blank"><td${h ? ` style="height:${h}px"` : ''}>&nbsp;</td><td></td><td class="blank-mark">${mark || ''}</td><td></td><td></td><td></td></tr>`;
+  let blankRows = '';
+  if (blanks > 0) {
+    const arr = [];
+    for (let i = 0; i < blanks; i++) {
+      const h = (i === blanks - 1) ? padPx : 0;            // 最後一列吃掉墊高
+      const mark = (fitMode && i === 0) ? '以下空白' : '';   // 第一列（限塞滿模式）標示
+      arr.push(blankRow(h, mark));
+    }
+    blankRows = arr.join('');
+  }
   return `<div class="paper a4">
       ${isFirst ? `<div class="pp-head">
         <div class="pp-co-wrap">
