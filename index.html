@@ -2295,12 +2295,12 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 17;                    // ← 每次改結構就 +1
+const SCHEMA_V = 18;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
   tax_rate: 0.05,
-  valid_days: 30,
+  valid_days: 7,
   a5_rows: 8,
   a4_rows: 12,
   a4_layout_mode: 'fit',
@@ -2330,6 +2330,34 @@ const QUOTE_DIRTY_WINDOW = 4000; // 4 秒內離開才算「剛改過、可能是
 const OPERATOR_KEY = 'erp_operator_name';
 function currentOperator() { return localStorage.getItem(OPERATOR_KEY) || ''; }
 function setOperator(name) { try { localStorage.setItem(OPERATOR_KEY, name); } catch (e) {} }
+
+// 「單據設定」中，除了稅率以外的幾項改成「這台裝置／登入各自設定」：
+// 只存本機 localStorage、不上雲端、不會被別人的設定蓋掉。稅率仍是全公司共用（存 DB.settings）。
+const USER_DOC_SETTING_FIELDS = ['valid_days', 'a4_layout_mode', 'date_format', 'allow_price_edit'];
+let _uds = null, _udsKey = null;
+function userSettingsBucket() {
+  // 依目前操作者名字分桶，讓同一台電腦不同人各自保留；沒設名字就用共用桶
+  const who = (currentOperator() || '_default').trim() || '_default';
+  return 'erp_user_doc_settings::' + who;
+}
+function loadUserDocSettings() {
+  const key = userSettingsBucket();
+  if (_uds && _udsKey === key) return _uds;
+  try { _uds = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { _uds = {}; }
+  _udsKey = key;
+  return _uds;
+}
+function saveUserDocSettings(obj) {
+  const key = userSettingsBucket();
+  _uds = obj || {}; _udsKey = key;
+  try { localStorage.setItem(key, JSON.stringify(_uds)); } catch (e) {}
+}
+// 取這四項的實際生效值：優先用本機各自設定，沒有就退回全公司預設（DB.settings）
+function docSetting(key) {
+  const u = loadUserDocSettings();
+  if (u && u[key] != null) return u[key];
+  return DB.settings ? DB.settings[key] : undefined;
+}
 
 function promptOperator(force) {
   if (!force && currentOperator()) return;
@@ -3108,6 +3136,15 @@ function migrate(db) {
     });
   }
 
+  if (v < 18) {
+    // 報價有效天數的內建預設從 30 改為 7（此為「還沒各自設定天數」時的退回基準）。
+    // 只在仍是舊預設 30、或從未設定時才調整，不覆蓋刻意設過其他天數的公司值。
+    db.settings = db.settings || {};
+    if (db.settings.valid_days == null || db.settings.valid_days === 30) {
+      db.settings.valid_days = 7;
+    }
+  }
+
   db.warehouses = db.warehouses || [{ id: 'wh_main', name: '主倉', is_default: true, note: '' }];
   db.movements  = db.movements  || [];
   db.stock_locks= db.stock_locks|| [];
@@ -3403,14 +3440,14 @@ function addDays(iso, d) {
 function fmtDate(iso, style) {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-').map(Number);
-  const st = style || DB.settings.date_format;
+  const st = style || docSetting('date_format');
   if (st === 'roc') return `民國${y - 1911}年${m}月${d}日`;
   return `${y}年${m}月${d}日`;
 }
 function fmtDateShort(iso) {
   if (!iso) return '—';
   const [y, m, d] = iso.split('-').map(Number);
-  return DB.settings.date_format === 'roc' ? `${y - 1911}/${m}/${d}` : `${y}/${m}/${d}`;
+  return docSetting('date_format') === 'roc' ? `${y - 1911}/${m}/${d}` : `${y}/${m}/${d}`;
 }
 const ymd = iso => (iso || today()).replace(/-/g, '');
 
@@ -4200,8 +4237,8 @@ function seed() {
   ];
 
   const users = [
-    { id: 'u_1', name: '業務助理', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '業務', phone: '', email: '', role: '行政', is_active: true }
+    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
+    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
   ];
 
   const suppliers = [
@@ -6511,7 +6548,7 @@ async function importQuotesExcel(file) {
               fax: site ? site.fax : '', address: site ? site.address : '', email: site ? site.email : ''
             },
             sales_user_id: salesUser ? salesUser.id : '', sales_name: salesName,
-            quote_date: today(), valid_until: addDays(today(), DB.settings.valid_days),
+            quote_date: today(), valid_until: addDays(today(), docSetting('valid_days')),
             status: 'draft', revision: 1, unlocked: true, price_display: 'breakdown',
             order_method: null, order_note: '', signed_back_at: null, signed_back_file: null, sent_at: null,
             created_by_op: currentOperator(), last_modified_by: currentOperator(), last_modified_at: new Date().toISOString(),
@@ -6603,7 +6640,7 @@ function newQuote() {
     id: uid('q'), quote_no: draftNo(), company_id: co.id, customer_id: null,
     customer_snapshot: null, company_snapshot: null,
     sales_user_id: null, sales_name: '',
-    quote_date: today(), valid_until: addDays(today(), DB.settings.valid_days),
+    quote_date: today(), valid_until: addDays(today(), docSetting('valid_days')),
     status: 'draft', revision: 1, unlocked: false,
     order_method: null, order_note: '', signed_back_at: null, signed_back_file: null,
     price_display: 'breakdown',
@@ -7003,7 +7040,7 @@ function deleteQuote(id) {
 
 function renewQuote(id) {
   const q = byId(DB.quotes, id);
-  q.valid_until = addDays(today(), DB.settings.valid_days);
+  q.valid_until = addDays(today(), docSetting('valid_days'));
   q.status = 'sent'; q.sent_at = new Date().toISOString();
   appendEditLog(q, '延長效期並重新送出');
   saveNow(); render(); toast('已延長效期至 ' + fmtDateShort(q.valid_until), 'ok');
@@ -7027,7 +7064,7 @@ function cloneQuote(id) {
   const q = JSON.parse(JSON.stringify(src));
   q.id = uid('q'); q.quote_no = draftNo(); q.status = 'draft';
   q.revision = 1; q.unlocked = false;
-  q.quote_date = today(); q.valid_until = addDays(today(), DB.settings.valid_days);
+  q.quote_date = today(); q.valid_until = addDays(today(), docSetting('valid_days'));
   q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null; q.sent_at = null;
   q.company_snapshot = null; q.created_at = new Date().toISOString();
   // 複製出來的新報價，建立人員／最後修改人改成「現在按複製的人」，不要沿用原單的建立人；
@@ -7462,7 +7499,7 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
   const amt = lineAmount(it.qty, it.unit_price);
   const hasBom = it.components && it.components.length;
   const open = bomOpen[it.id];
-  const priceEditable = editable && (DB.settings.allow_price_edit || !it.product_id);
+  const priceEditable = editable && (docSetting('allow_price_edit') || !it.product_id);
   const refProduct = it.product_id ? byId(DB.products, it.product_id) : null;
   const refPrice = refProduct ? refProduct.list_price : 0;
 
@@ -9301,7 +9338,7 @@ const QP_FIT_TIERS = ['z-100', 'z-93', 'z-86', 'z-79', 'z-72', 'z-65', 'z-58'];
 
 function qpLayout(ctx) {
   const items = ctx.items;
-  const mode = DB.settings.a4_layout_mode === 'spill' ? 'spill' : 'fit';
+  const mode = docSetting('a4_layout_mode') === 'spill' ? 'spill' : 'fit';
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
   document.body.appendChild(host);
@@ -11317,29 +11354,32 @@ function viewSettings(v) {
 
     <div class="sec-title">單據設定</div>
     <div class="card"><div class="card-b">
+      <div class="banner info"><span class="bi">ℹ</span><div>
+        除了<b>稅率</b>是全公司共用之外，以下<b>報價有效天數、報價單版面、日期格式、報價單價</b>四項改成
+        <b>依使用者各自設定</b>——只存在你這台裝置／登入，不會同步到雲端，也不會被其他人的設定蓋掉。</div></div>
       <div class="grid g4">
-        <div class="field"><label>稅率</label>
+        <div class="field"><label>稅率<span style="color:var(--text-3);font-weight:400">（全公司）</span></label>
           <input class="inp num" type="number" step="0.01" id="stax" value="${s.tax_rate}">
           <div class="hint">0.05 = 5%</div></div>
-        <div class="field"><label>報價有效天數</label>
-          <input class="inp num" type="number" id="svalid" value="${s.valid_days}"></div>
-        <div class="field"><label>報價單版面（品項多時）</label>
+        <div class="field"><label>報價有效天數<span style="color:var(--text-3);font-weight:400">（各自）</span></label>
+          <input class="inp num" type="number" id="svalid" value="${docSetting('valid_days')}"></div>
+        <div class="field"><label>報價單版面（品項多時）<span style="color:var(--text-3);font-weight:400">（各自）</span></label>
           <select class="inp" id="sa4mode">
-            <option value="fit" ${(s.a4_layout_mode || 'fit') === 'fit' ? 'selected' : ''}>縮小字級，塞滿同一頁</option>
-            <option value="spill" ${s.a4_layout_mode === 'spill' ? 'selected' : ''}>維持字級，另起一頁</option>
+            <option value="fit" ${(docSetting('a4_layout_mode') || 'fit') === 'fit' ? 'selected' : ''}>縮小字級，塞滿同一頁</option>
+            <option value="spill" ${docSetting('a4_layout_mode') === 'spill' ? 'selected' : ''}>維持字級，另起一頁</option>
           </select></div>
       </div>
       <div class="hint" style="margin:-4px 0 10px">「塞滿同一頁」：品項多時自動縮小字級與列高，全部擠進一張 A4。「另起一頁」：字級不變，第一頁排滿後把發票章／頁尾品牌圖移到下一頁最底部。出貨單（A5）則一律自動依內容分頁，確保不超出紙張。</div>
       <div class="grid g2">
-        <div class="field"><label>日期格式</label>
+        <div class="field"><label>日期格式<span style="color:var(--text-3);font-weight:400">（各自）</span></label>
           <select class="inp" id="sdate">
-            <option value="roc" ${s.date_format === 'roc' ? 'selected' : ''}>民國（民國115年8月16日）</option>
-            <option value="ad" ${s.date_format === 'ad' ? 'selected' : ''}>西元（2026年8月16日）</option>
+            <option value="roc" ${docSetting('date_format') === 'roc' ? 'selected' : ''}>民國（民國115年8月16日）</option>
+            <option value="ad" ${docSetting('date_format') === 'ad' ? 'selected' : ''}>西元（2026年8月16日）</option>
           </select></div>
-        <div class="field"><label>報價單價</label>
+        <div class="field"><label>報價單價<span style="color:var(--text-3);font-weight:400">（各自）</span></label>
           <select class="inp" id="sprice">
-            <option value="1" ${s.allow_price_edit ? 'selected' : ''}>可自由修改</option>
-            <option value="0" ${!s.allow_price_edit ? 'selected' : ''}>鎖定（主檔商品用牌價）</option>
+            <option value="1" ${docSetting('allow_price_edit') ? 'selected' : ''}>可自由修改</option>
+            <option value="0" ${!docSetting('allow_price_edit') ? 'selected' : ''}>鎖定（主檔商品用牌價）</option>
           </select></div>
       </div>
       <button class="btn primary" id="saveSet">儲存設定</button>
@@ -11405,12 +11445,17 @@ function viewSettings(v) {
     </div></div>`;
 
   document.getElementById('saveSet').onclick = () => {
+    // 稅率：全公司共用，存 DB.settings 並同步雲端
     s.tax_rate = +document.getElementById('stax').value || 0.05;
-    s.valid_days = +document.getElementById('svalid').value || 30;
-    s.a4_layout_mode = document.getElementById('sa4mode').value === 'spill' ? 'spill' : 'fit';
-    s.date_format = document.getElementById('sdate').value;
-    s.allow_price_edit = document.getElementById('sprice').value === '1';
-    saveNow(); render(); toast('設定已儲存', 'ok');
+    saveNow();
+    // 其餘四項：依使用者各自設定，只存本機、不上雲端、不會蓋到別人
+    const u = loadUserDocSettings();
+    u.valid_days = +document.getElementById('svalid').value || 7;
+    u.a4_layout_mode = document.getElementById('sa4mode').value === 'spill' ? 'spill' : 'fit';
+    u.date_format = document.getElementById('sdate').value;
+    u.allow_price_edit = document.getElementById('sprice').value === '1';
+    saveUserDocSettings(u);
+    render(); toast('設定已儲存（稅率為全公司共用，其餘為本機各自設定）', 'ok');
   };
   document.getElementById('sAutoBackup').onchange = e => {
     s.auto_backup_interval = e.target.value;
