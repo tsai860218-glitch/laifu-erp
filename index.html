@@ -928,6 +928,7 @@ body.st-q-cancelled .main{background:#F5F5F5}
 .card.tsec-bid{background:#FFFBF3;border-color:#EFDFBC}
 .card.tsec-bid>.card-h{background:#FBF0D8;color:#8A5A00}
 .tq-row{padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer}
+.ttime{color:var(--primary-600);font-weight:700}
 .tq-row:hover{background:#F3F6FB;border-color:var(--primary-600)}
 body.st-d-pending_delivery .main{background:#FFF6E9}
 body.st-d-shipped .main{background:#EEF5FF}
@@ -6126,8 +6127,8 @@ function viewTenders(v) {
             <td>${esc(t.agency_name || '—')}</td>
             <td>${esc(t.tender_name || '—')}</td>
             <td class="nowrap">${t.announce_seq ? '第 ' + esc(String(t.announce_seq)) + ' 次' : '—'}</td>
-            <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' ' + esc(t.bid_deadline_time) : '') : '—'}</td>
-            <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' ' + esc(t.open_time) : '') : '—'}</td>
+            <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' <b class="ttime">' + esc(t.bid_deadline_time) + '</b>' : '') : '—'}</td>
+            <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' <b class="ttime">' + esc(t.open_time) + '</b>' : '') : '—'}</td>
             <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
             <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
             <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
