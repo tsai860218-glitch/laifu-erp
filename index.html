@@ -6056,10 +6056,10 @@ const T_COLS = [
   ['tender_no', '標案案號', 'nowrap'],
   ['agency_name', '機關名稱', ''],
   ['tender_name', '標案名稱', ''],
-  ['budget_amount', '預算金額', 'r'],
   ['bid_deadline', '截止投標', 'nowrap'],
   ['open', '開標時間', 'nowrap'],
   ['status', '狀態', 'nowrap'],
+  ['budget_amount', '預算金額', 'r'],
   ['bid_amount', '投標金額', 'r'],
   ['award_amount', '得標金額', 'r'],
   ['note', '備註', '']
@@ -6119,10 +6119,10 @@ function viewTenders(v) {
             <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
             <td>${esc(t.agency_name || '—')}</td>
             <td>${esc(t.tender_name || '—')}</td>
-            <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
             <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' ' + esc(t.bid_deadline_time) : '') : '—'}</td>
             <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' ' + esc(t.open_time) : '') : '—'}</td>
             <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
+            <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
             <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
             <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
             <td class="muted">${esc(t.note || '')}</td>
