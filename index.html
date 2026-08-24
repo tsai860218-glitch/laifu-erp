@@ -6013,8 +6013,10 @@ let sSelected = new Set();
    =========================================================== */
 const TS = {
   bidding:   { label: '投標中', color: 'blue' },
-  abandoned: { label: '棄標',   color: 'gray' },
-  won:       { label: '已得標', color: 'green' }
+  won:       { label: '已得標', color: 'green' },
+  lost:      { label: '未得標', color: 'red' },
+  failed:    { label: '流標',   color: 'orange' },
+  abandoned: { label: '棄標',   color: 'gray' }
 };
 const AWARD_METHODS = ['最低標', '最有利標', '複數決標', '其他'];
 
@@ -6056,6 +6058,7 @@ const T_COLS = [
   ['tender_no', '標案案號', 'nowrap'],
   ['agency_name', '機關名稱', ''],
   ['tender_name', '標案名稱', ''],
+  ['announce_seq', '招標公告', 'nowrap'],
   ['bid_deadline', '截止投標', 'nowrap'],
   ['open', '開標時間', 'nowrap'],
   ['status', '狀態', 'nowrap'],
@@ -6069,6 +6072,7 @@ function tenderSortValue(t, key) {
     case 'tender_no': return t.tender_no || '';
     case 'agency_name': return t.agency_name || '';
     case 'tender_name': return t.tender_name || '';
+    case 'announce_seq': return t.announce_seq || 0;
     case 'budget_amount': return t.budget_amount || 0;
     case 'bid_amount': return t.bid_amount || 0;
     case 'award_amount': return t.award_amount || 0;
@@ -6090,6 +6094,8 @@ function viewTenders(v) {
         <option value="">全部狀態</option>
         <option value="bidding" ${f.status === 'bidding' ? 'selected' : ''}>投標中</option>
         <option value="won" ${f.status === 'won' ? 'selected' : ''}>已得標</option>
+        <option value="lost" ${f.status === 'lost' ? 'selected' : ''}>未得標</option>
+        <option value="failed" ${f.status === 'failed' ? 'selected' : ''}>流標</option>
         <option value="abandoned" ${f.status === 'abandoned' ? 'selected' : ''}>棄標</option>
       </select>
       <button class="btn" onclick="clearListFilter('tenders')">清除</button>
@@ -6119,6 +6125,7 @@ function viewTenders(v) {
             <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
             <td>${esc(t.agency_name || '—')}</td>
             <td>${esc(t.tender_name || '—')}</td>
+            <td class="nowrap">${t.announce_seq ? '第 ' + esc(String(t.announce_seq)) + ' 次' : '—'}</td>
             <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' ' + esc(t.bid_deadline_time) : '') : '—'}</td>
             <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' ' + esc(t.open_time) : '') : '—'}</td>
             <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
@@ -6280,8 +6287,10 @@ function viewTender(v) {
           <div class="field"><label>狀態</label>
             <select class="inp" data-t="status" ${dis}>
               <option value="bidding" ${(t.status || 'bidding') === 'bidding' ? 'selected' : ''}>投標中</option>
-              <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
               <option value="won" ${t.status === 'won' ? 'selected' : ''}>已得標</option>
+              <option value="lost" ${t.status === 'lost' ? 'selected' : ''}>未得標</option>
+              <option value="failed" ${t.status === 'failed' ? 'selected' : ''}>流標</option>
+              <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
             </select></div>
         </div>
         ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
