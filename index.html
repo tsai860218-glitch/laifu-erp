@@ -927,6 +927,8 @@ body.st-q-cancelled .main{background:#F5F5F5}
 .card.tsec-agency>.card-h{background:#E4EFFF;color:#0C447C}
 .card.tsec-bid{background:#FFFBF3;border-color:#EFDFBC}
 .card.tsec-bid>.card-h{background:#FBF0D8;color:#8A5A00}
+.tq-row{padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer}
+.tq-row:hover{background:#F3F6FB;border-color:var(--primary-600)}
 body.st-d-pending_delivery .main{background:#FFF6E9}
 body.st-d-shipped .main{background:#EEF5FF}
 body.st-d-closed .main{background:#F0FBF4}
@@ -6023,6 +6025,7 @@ function newTender() {
     tender_no: '', tender_name: '',
     agency_name: '', agency_address: '', agency_contact: '', agency_phone: '', agency_fax: '', agency_email: '',
     budget_amount: 0, award_amount: 0, award_method: '',
+    bid_amount: 0, quote_id: null,
     announce_seq: 1, announce_date: '',
     bid_deadline_date: '', bid_deadline_time: '08:30',
     open_date: '', open_time: '10:00', open_place: '',
@@ -6131,6 +6134,49 @@ function viewTenders(v) {
   run();
 }
 
+function unlinkTenderQuote(tid) {
+  const t = byId(DB.tenders, tid); if (!t || !canEdit()) return;
+  t.quote_id = null; saveNow(); render();
+}
+
+// 連結報價單：搜尋挑一張報價單掛到這個標案上；投標金額若還空著，順手帶入該報價單的含稅總額
+function pickTenderQuote(tid) {
+  const t = byId(DB.tenders, tid); if (!t || !canEdit()) return;
+  openModal({
+    title: '連結報價單',
+    body: `<div class="field" style="margin:0 0 8px"><input class="inp" id="tqSearch" placeholder="搜尋報價單號／客戶／品名…" autocomplete="off"></div>
+      <div id="tqList" style="max-height:52vh;overflow:auto"></div>`,
+    footer: `<button class="btn" data-no>取消</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      const listEl = el.querySelector('#tqList');
+      const draw = () => {
+        const kw = el.querySelector('#tqSearch').value.trim().toLowerCase();
+        let qs = DB.quotes.slice().sort((a, b) => (b.quote_date || '').localeCompare(a.quote_date || ''));
+        if (kw) qs = qs.filter(q => (`${q.quote_no || ''} ${(q.customer_snapshot || {}).name || ''} ${(q.items || []).map(i => i.name || '').join(' ')}`).toLowerCase().includes(kw));
+        qs = qs.slice(0, 60);
+        listEl.innerHTML = qs.length ? qs.map(q => {
+          const nm = (q.customer_snapshot || {}).name || '—';
+          return `<div class="tq-row" data-id="${q.id}">
+              <div><b>${esc(q.quote_no || '（草稿）')}</b>　<span class="muted">${esc(nm)}</span></div>
+              <div class="muted" style="font-size:12px">${fmtDateShort(q.quote_date)}　${money(quoteTotals(q).total)}</div>
+            </div>`;
+        }).join('') : `<div class="muted" style="padding:12px">找不到符合的報價單</div>`;
+        listEl.querySelectorAll('.tq-row').forEach(r => r.onclick = () => {
+          t.quote_id = r.dataset.id;
+          const q = byId(DB.quotes, r.dataset.id);
+          if (q && !t.bid_amount) t.bid_amount = quoteTotals(q).total; // 投標金額空著才自動帶入
+          saveNow(); close(); render();
+          toast('已連結報價單', 'ok');
+        });
+      };
+      el.querySelector('#tqSearch').addEventListener('input', draw);
+      draw();
+      setTimeout(() => { const s = el.querySelector('#tqSearch'); if (s) s.focus(); }, 30);
+    }
+  });
+}
+
 function viewTender(v) {
   const t = byId(DB.tenders, route.id);
   if (!t) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這筆標案</h3></div>`; return; }
@@ -6142,6 +6188,26 @@ function viewTender(v) {
 
   document.getElementById('pageTitle').textContent = t.tender_name || t.tender_no || '新標案';
   document.getElementById('pageCrumb').textContent = t.agency_name || '';
+
+  // 連結報價單的顯示：已連結→可點開的報價單號＋變更/移除；未連結→選擇按鈕
+  let qlink;
+  if (t.quote_id) {
+    const lq = byId(DB.quotes, t.quote_id);
+    if (lq) {
+      const nm = (lq.customer_snapshot || {}).name || '';
+      qlink = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <a class="btn sm" onclick="go('quote/${lq.id}')">📄 ${esc(lq.quote_no || '（草稿）')}${nm ? ' · ' + esc(nm) : ''}</a>
+        ${ed ? `<button class="btn sm" onclick="pickTenderQuote('${t.id}')">變更</button>
+                <button class="btn sm danger" onclick="unlinkTenderQuote('${t.id}')">移除</button>` : ''}</div>`;
+    } else {
+      qlink = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="muted">（連結的報價單已不存在）</span>
+        ${ed ? `<button class="btn sm" onclick="pickTenderQuote('${t.id}')">重新選擇</button>
+                <button class="btn sm danger" onclick="unlinkTenderQuote('${t.id}')">移除</button>` : ''}</div>`;
+    }
+  } else {
+    qlink = ed ? `<button class="btn" onclick="pickTenderQuote('${t.id}')">＋ 選擇報價單</button>` : `<span class="muted">—</span>`;
+  }
 
   v.innerHTML = `
     <div class="toolbar">
@@ -6182,6 +6248,10 @@ function viewTender(v) {
               <option value="" ${!t.award_method ? 'selected' : ''}>—</option>
               ${AWARD_METHODS.map(m => `<option value="${m}" ${t.award_method === m ? 'selected' : ''}>${m}</option>`).join('')}
             </select></div>
+        </div>
+        <div class="grid g2">
+          <div class="field"><label>投標金額</label><input class="inp num" type="number" data-t="bid_amount" value="${t.bid_amount || ''}" ${dis}></div>
+          <div class="field"><label>連結報價單</label>${qlink}</div>
         </div>
         <div class="grid g3">
           <div class="field"><label>招標公告　第 O 次</label><input class="inp num" type="number" min="1" data-t="announce_seq" value="${t.announce_seq || ''}" ${dis}></div>
