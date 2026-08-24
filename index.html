@@ -922,6 +922,11 @@ body.st-q-cancelled .main{background:#F5F5F5}
 
 /* 出貨：待配送→已出貨→結案 */
 .ship-way{font-size:11px;color:var(--text-3);margin-top:2px;font-weight:400}
+/* 標案編輯頁：機關資料（藍底）與標案資料（琥珀底）用底色區別 */
+.card.tsec-agency{background:#F3F8FF;border-color:#CFE0F5}
+.card.tsec-agency>.card-h{background:#E4EFFF;color:#0C447C}
+.card.tsec-bid{background:#FFFBF3;border-color:#EFDFBC}
+.card.tsec-bid>.card-h{background:#FBF0D8;color:#8A5A00}
 body.st-d-pending_delivery .main{background:#FFF6E9}
 body.st-d-shipped .main{background:#EEF5FF}
 body.st-d-closed .main{background:#F0FBF4}
@@ -6021,7 +6026,7 @@ function newTender() {
     announce_seq: 1, announce_date: '',
     bid_deadline_date: '', bid_deadline_time: '08:30',
     open_date: '', open_time: '10:00', open_place: '',
-    e_bidding: '', bid_bond: '',
+    e_bidding: '', bid_bond: '', bid_bond_amount: 0,
     status: 'bidding', abandon_reason: '',
     note: '',
     created_by_op: currentOperator(), last_modified_by: currentOperator(),
@@ -6040,6 +6045,35 @@ function delTender(id) {
       saveNow(); go('tenders');
       toast('已刪除標案', 'ok');
     }, true);
+}
+
+let tSortState = { key: 'bid_deadline', dir: 'asc' };
+// 總表欄位順序與排序鍵：標案案號／機關名稱／標案名稱／預算金額／截止投標／開標時間／狀態／得標金額／備註
+const T_COLS = [
+  ['tender_no', '標案案號', 'nowrap'],
+  ['agency_name', '機關名稱', ''],
+  ['tender_name', '標案名稱', ''],
+  ['budget_amount', '預算金額', 'r'],
+  ['bid_deadline', '截止投標', 'nowrap'],
+  ['open', '開標時間', 'nowrap'],
+  ['status', '狀態', 'nowrap'],
+  ['award_amount', '得標金額', 'r'],
+  ['note', '備註', '']
+];
+function tenderSortValue(t, key) {
+  switch (key) {
+    case 'tender_no': return t.tender_no || '';
+    case 'agency_name': return t.agency_name || '';
+    case 'tender_name': return t.tender_name || '';
+    case 'budget_amount': return t.budget_amount || 0;
+    case 'award_amount': return t.award_amount || 0;
+    // 沒填日期的排最後（升冪時）
+    case 'bid_deadline': return (t.bid_deadline_date || '9999-99-99') + ' ' + (t.bid_deadline_time || '');
+    case 'open': return (t.open_date || '9999-99-99') + ' ' + (t.open_time || '');
+    case 'status': return (TS[t.status || 'bidding'] || {}).label || '';
+    case 'note': return t.note || '';
+    default: return '';
+  }
 }
 
 function viewTenders(v) {
@@ -6066,8 +6100,7 @@ function viewTenders(v) {
     let list = DB.tenders.slice();
     if (kw) list = list.filter(t => (`${t.tender_no || ''} ${t.tender_name || ''} ${t.agency_name || ''}`).toLowerCase().includes(kw));
     if (st) list = list.filter(t => (t.status || 'bidding') === st);
-    // 截止投標近的排前面；沒填日期的排後面
-    list.sort((a, b) => (a.bid_deadline_date || '9999').localeCompare(b.bid_deadline_date || '9999'));
+    list = sortRows(list, tSortState, tenderSortValue);
     const info = paginateList('tenders', list, resetPage);
     const page = info.pageItems;
     keepScroll('tlist');
@@ -6075,20 +6108,21 @@ function viewTenders(v) {
       ? `<div class="empty"><div class="e">${icon('accounts')}</div><h3>${DB.tenders.length ? '沒有符合條件的標案' : '還沒有標案'}</h3>
           ${canEdit() && !DB.tenders.length ? '<p>按右上角「＋ 新增標案」開始建立</p>' : ''}</div>`
       : `<table class="tbl"><thead><tr>
-          <th>標案案號</th><th>標案名稱</th><th>機關名稱</th>
-          <th class="r">預算金額</th><th class="r">得標金額</th>
-          <th class="nowrap">截止投標</th><th class="nowrap">開標時間</th><th class="nowrap">狀態</th></tr></thead><tbody>
+          ${T_COLS.map(([k, label, cls]) => `<th class="sortable ${cls || ''}" data-sortkey="${k}">${label}${sortArrow(tSortState, k)}</th>`).join('')}
+          </tr></thead><tbody>
         ${page.map(t => `<tr onclick="go('tender/${t.id}')">
             <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
-            <td>${esc(t.tender_name || '—')}</td>
             <td>${esc(t.agency_name || '—')}</td>
+            <td>${esc(t.tender_name || '—')}</td>
             <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
-            <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
             <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' ' + esc(t.bid_deadline_time) : '') : '—'}</td>
             <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' ' + esc(t.open_time) : '') : '—'}</td>
             <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
+            <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
+            <td class="muted">${esc(t.note || '')}</td>
           </tr>`).join('')}</tbody></table>`;
     document.getElementById('tPageBar').innerHTML = list.length ? pageBarHtml('tenders', info) : '';
+    bindTableSort('tlist', tSortState, run);
     makeColumnsResizable('tlist', 'tenders');
   };
   registerPageRunner('tenders', run);
@@ -6117,7 +6151,7 @@ function viewTender(v) {
       ${ed ? `<button class="btn danger" onclick="delTender('${t.id}')">🗑 刪除標案</button>` : ''}
     </div>
 
-    <div class="card" style="margin-bottom:14px">
+    <div class="card tsec-agency" style="margin-bottom:14px">
       <div class="card-h" style="min-height:auto;padding:8px 14px"><b>機關資料</b></div>
       <div class="card-b">
         <div class="grid g2">
@@ -6133,7 +6167,7 @@ function viewTender(v) {
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:14px">
+    <div class="card tsec-bid" style="margin-bottom:14px">
       <div class="card-h" style="min-height:auto;padding:8px 14px"><b>標案資料</b></div>
       <div class="card-b">
         <div class="grid g2">
@@ -6158,17 +6192,18 @@ function viewTender(v) {
           <div class="field"><label>截止投標</label>
             <div style="display:flex;gap:6px">
               <input class="inp" type="date" data-t="bid_deadline_date" value="${esc(t.bid_deadline_date || '')}" ${dis}>
-              <input class="inp" type="time" data-t="bid_deadline_time" value="${esc(t.bid_deadline_time || '08:30')}" style="width:110px" ${dis}>
+              <input class="inp" type="time" data-t="bid_deadline_time" value="${esc(t.bid_deadline_time || '08:30')}" style="width:136px" ${dis}>
             </div></div>
           <div class="field"><label>開標時間</label>
             <div style="display:flex;gap:6px">
               <input class="inp" type="date" data-t="open_date" value="${esc(t.open_date || '')}" ${dis}>
-              <input class="inp" type="time" data-t="open_time" value="${esc(t.open_time || '10:00')}" style="width:110px" ${dis}>
+              <input class="inp" type="time" data-t="open_time" value="${esc(t.open_time || '10:00')}" style="width:136px" ${dis}>
             </div></div>
         </div>
-        <div class="grid g3">
+        <div class="grid g4">
           <div class="field"><label>是否提供電子領標</label><select class="inp" data-t="e_bidding" ${dis}>${yn(t.e_bidding)}</select></div>
           <div class="field"><label>是否須繳納押標金</label><select class="inp" data-t="bid_bond" ${dis}>${yn(t.bid_bond)}</select></div>
+          <div class="field"><label>押標金金額</label><input class="inp num" type="number" data-t="bid_bond_amount" value="${t.bid_bond_amount || ''}" ${dis}></div>
           <div class="field"><label>狀態</label>
             <select class="inp" data-t="status" ${dis}>
               <option value="bidding" ${(t.status || 'bidding') === 'bidding' ? 'selected' : ''}>投標中</option>
