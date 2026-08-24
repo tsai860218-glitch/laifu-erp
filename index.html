@@ -6060,6 +6060,7 @@ const T_COLS = [
   ['bid_deadline', '截止投標', 'nowrap'],
   ['open', '開標時間', 'nowrap'],
   ['status', '狀態', 'nowrap'],
+  ['bid_amount', '投標金額', 'r'],
   ['award_amount', '得標金額', 'r'],
   ['note', '備註', '']
 ];
@@ -6069,6 +6070,7 @@ function tenderSortValue(t, key) {
     case 'agency_name': return t.agency_name || '';
     case 'tender_name': return t.tender_name || '';
     case 'budget_amount': return t.budget_amount || 0;
+    case 'bid_amount': return t.bid_amount || 0;
     case 'award_amount': return t.award_amount || 0;
     // 沒填日期的排最後（升冪時）
     case 'bid_deadline': return (t.bid_deadline_date || '9999-99-99') + ' ' + (t.bid_deadline_time || '');
@@ -6121,6 +6123,7 @@ function viewTenders(v) {
             <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' ' + esc(t.bid_deadline_time) : '') : '—'}</td>
             <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' ' + esc(t.open_time) : '') : '—'}</td>
             <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
+            <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
             <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
             <td class="muted">${esc(t.note || '')}</td>
           </tr>`).join('')}</tbody></table>`;
