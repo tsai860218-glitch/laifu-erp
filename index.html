@@ -1613,7 +1613,7 @@ if (IS_DEV) {
 
 // 有填雲端設定、金鑰不是預設模板，且不在開發模式時，才啟用雲端。
 const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY') && !IS_DEV;
-const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals'];
+const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals', 'tenders'];
 // 這幾個進銷存集合「不上雲端」：它們是後來新增的，多數 Firestore 安全性規則尚未開放，
 // 一旦放進上面的同步清單，寫入雲端是「整批一次送」的，只要其中一個集合被規則擋住，
 // 整批就會被拒、連帶讓整個雲端同步卡住（表現就是「連不到雲端」）。因此改為只存本機。
@@ -2297,7 +2297,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 18;                    // ← 每次改結構就 +1
+const SCHEMA_V = 19;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -3148,6 +3148,7 @@ function migrate(db) {
   }
 
   db.warehouses = db.warehouses || [{ id: 'wh_main', name: '主倉', is_default: true, note: '' }];
+  db.tenders = db.tenders || [];   // 標案管理
   db.movements  = db.movements  || [];
   db.stock_locks= db.stock_locks|| [];
   db.rentals = db.rentals || [];
@@ -4357,7 +4358,7 @@ function emptyDB() {
     companies: s.companies,
     users: [], suppliers: [], customers: [], products: [], categories: [],
     quotes: [], deliveries: [], counters: {}, accounts: [], rentals: [],
-    stock: [],
+    stock: [], tenders: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
     _deletions: {},
     _created: new Date().toISOString()
@@ -4826,6 +4827,7 @@ const ROUTES = [
   { k: 'quotes',    t: '報價管理', ico: 'quote', tab: true  },
   { k: 'deliveries',t: '出貨管理', ico: 'delivery', tab: true  },
   { k: 'customers', t: '客戶管理', ico: 'customer', tab: true  },
+  { k: 'tenders',   t: '標案管理', ico: 'accounts', tab: false },
   { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '商品／庫存' },
   { k: 'panalysis', t: '產品分析', ico: 'product', tab: false, group: '商品／庫存' },
   { k: 'rentals',   t: '印表機租賃', ico: 'rental', tab: false, group: '主檔' },
@@ -4964,6 +4966,7 @@ function render() {
     customers: viewCustomers, products: viewProducts,
     panalysis: viewProductAnalysis,
     rentals: viewRentals, rental: viewRentalDetail,
+    tenders: viewTenders, tender: viewTender,
     suppliers: viewSuppliers, users: viewUsers, settings: viewSettings,
     departments: viewDepartments,
     stock: viewStock,
@@ -5027,7 +5030,7 @@ function renderNav() {
       html += `<div class="nav-group"><div class="nav-label">${r.group}</div></div>`;
       lastGroup = r.group;
     }
-    const active = route.k === r.k || (route.k === 'quote' && r.k === 'quotes') || (route.k === 'delivery' && r.k === 'deliveries') || (route.k === 'rental' && r.k === 'rentals');
+    const active = route.k === r.k || (route.k === 'quote' && r.k === 'quotes') || (route.k === 'delivery' && r.k === 'deliveries') || (route.k === 'rental' && r.k === 'rentals') || (route.k === 'tender' && r.k === 'tenders');
     const cnt = (r.k === 'deliveries' && pend) ? `<span class="count">${pend}</span>` : '';
     html += `<div class="nav-item ${active ? 'active' : ''}" onclick="go('${r.k}')">
                <span class="ico">${icon(r.ico)}</span><span>${r.t}</span>${cnt}</div>`;
@@ -5997,6 +6000,194 @@ function editUser(id, cb) {
    常用代理商
    =========================================================== */
 let sSelected = new Set();
+
+/* ===========================================================
+   標案管理
+   =========================================================== */
+const TS = {
+  bidding:   { label: '投標中', color: 'blue' },
+  abandoned: { label: '棄標',   color: 'gray' },
+  won:       { label: '已得標', color: 'green' }
+};
+const AWARD_METHODS = ['最低標', '最有利標', '複數決標', '其他'];
+
+function newTender() {
+  if (!canEdit()) return;
+  const t = {
+    id: uid('t'),
+    tender_no: '', tender_name: '',
+    agency_name: '', agency_address: '', agency_contact: '', agency_phone: '', agency_fax: '', agency_email: '',
+    budget_amount: 0, award_amount: 0, award_method: '',
+    announce_seq: 1, announce_date: '',
+    bid_deadline_date: '', bid_deadline_time: '08:30',
+    open_date: '', open_time: '10:00', open_place: '',
+    e_bidding: '', bid_bond: '',
+    status: 'bidding', abandon_reason: '',
+    note: '',
+    created_by_op: currentOperator(), last_modified_by: currentOperator(),
+    last_modified_at: new Date().toISOString(), created_at: new Date().toISOString()
+  };
+  DB.tenders.push(t);
+  saveNow();
+  go('tender/' + t.id);
+}
+
+function delTender(id) {
+  const t = byId(DB.tenders, id); if (!t) return;
+  confirmBox('刪除標案',
+    `將<b>永久刪除</b>標案「${esc(t.tender_name || t.tender_no || '未命名')}」，不可復原。<br><br>確定要刪除嗎？`, () => {
+      DB.tenders = DB.tenders.filter(x => x.id !== id);
+      saveNow(); go('tenders');
+      toast('已刪除標案', 'ok');
+    }, true);
+}
+
+function viewTenders(v) {
+  const f = listFilterState('tenders');
+  v.innerHTML = `
+    <div class="toolbar">
+      <div class="grow"><input class="inp" id="ts_kw" placeholder="搜尋標案案號／名稱／機關…" value="${esc(f.kw || '')}"></div>
+      <select class="inp" id="ts_status" style="width:130px">
+        <option value="">全部狀態</option>
+        <option value="bidding" ${f.status === 'bidding' ? 'selected' : ''}>投標中</option>
+        <option value="won" ${f.status === 'won' ? 'selected' : ''}>已得標</option>
+        <option value="abandoned" ${f.status === 'abandoned' ? 'selected' : ''}>棄標</option>
+      </select>
+      <button class="btn" onclick="clearListFilter('tenders')">清除</button>
+      ${canEdit() ? `<button class="btn primary" onclick="newTender()">＋ 新增標案</button>` : ''}
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="tlist"></div><div id="tPageBar"></div></div></div>`;
+
+  const run = (resetPage) => {
+    const kw = document.getElementById('ts_kw').value.trim().toLowerCase();
+    const st = document.getElementById('ts_status').value;
+    f.kw = document.getElementById('ts_kw').value.trim();
+    f.status = st;
+    let list = DB.tenders.slice();
+    if (kw) list = list.filter(t => (`${t.tender_no || ''} ${t.tender_name || ''} ${t.agency_name || ''}`).toLowerCase().includes(kw));
+    if (st) list = list.filter(t => (t.status || 'bidding') === st);
+    // 截止投標近的排前面；沒填日期的排後面
+    list.sort((a, b) => (a.bid_deadline_date || '9999').localeCompare(b.bid_deadline_date || '9999'));
+    const info = paginateList('tenders', list, resetPage);
+    const page = info.pageItems;
+    keepScroll('tlist');
+    document.getElementById('tlist').innerHTML = !list.length
+      ? `<div class="empty"><div class="e">${icon('accounts')}</div><h3>${DB.tenders.length ? '沒有符合條件的標案' : '還沒有標案'}</h3>
+          ${canEdit() && !DB.tenders.length ? '<p>按右上角「＋ 新增標案」開始建立</p>' : ''}</div>`
+      : `<table class="tbl"><thead><tr>
+          <th>標案案號</th><th>標案名稱</th><th>機關名稱</th>
+          <th class="r">預算金額</th><th class="r">得標金額</th>
+          <th class="nowrap">截止投標</th><th class="nowrap">狀態</th></tr></thead><tbody>
+        ${page.map(t => `<tr onclick="go('tender/${t.id}')">
+            <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
+            <td>${esc(t.tender_name || '—')}</td>
+            <td>${esc(t.agency_name || '—')}</td>
+            <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
+            <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
+            <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' ' + esc(t.bid_deadline_time) : '') : '—'}</td>
+            <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
+          </tr>`).join('')}</tbody></table>`;
+    document.getElementById('tPageBar').innerHTML = list.length ? pageBarHtml('tenders', info) : '';
+    makeColumnsResizable('tlist', 'tenders');
+  };
+  registerPageRunner('tenders', run);
+  document.getElementById('ts_kw').addEventListener('input', () => run(true));
+  document.getElementById('ts_status').addEventListener('change', () => run(true));
+  run();
+}
+
+function viewTender(v) {
+  const t = byId(DB.tenders, route.id);
+  if (!t) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這筆標案</h3></div>`; return; }
+  const ed = canEdit();
+  const dis = ed ? '' : 'disabled';
+  const yn = (val) => `<option value="" ${!val ? 'selected' : ''}>—</option>
+    <option value="是" ${val === '是' ? 'selected' : ''}>是</option>
+    <option value="否" ${val === '否' ? 'selected' : ''}>否</option>`;
+
+  document.getElementById('pageTitle').textContent = t.tender_name || t.tender_no || '新標案';
+  document.getElementById('pageCrumb').textContent = t.agency_name || '';
+
+  v.innerHTML = `
+    <div class="toolbar">
+      <button class="btn" onclick="go('tenders')">← 返回標案總表</button>
+      <div style="flex:1"></div>
+      ${badge(TS, t.status || 'bidding')}
+      ${ed ? `<button class="btn danger" onclick="delTender('${t.id}')">🗑 刪除標案</button>` : ''}
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-h" style="min-height:auto;padding:8px 14px"><b>機關資料</b></div>
+      <div class="card-b">
+        <div class="grid g2">
+          <div class="field"><label>機關名稱</label><input class="inp" data-t="agency_name" value="${esc(t.agency_name || '')}" ${dis}></div>
+          <div class="field"><label>機關地址</label><input class="inp" data-t="agency_address" value="${esc(t.agency_address || '')}" ${dis}></div>
+        </div>
+        <div class="grid g3">
+          <div class="field"><label>聯絡人</label><input class="inp" data-t="agency_contact" value="${esc(t.agency_contact || '')}" ${dis}></div>
+          <div class="field"><label>連絡電話</label><input class="inp" data-t="agency_phone" value="${esc(t.agency_phone || '')}" ${dis}></div>
+          <div class="field"><label>傳真號碼</label><input class="inp" data-t="agency_fax" value="${esc(t.agency_fax || '')}" ${dis}></div>
+        </div>
+        <div class="field" style="margin:0"><label>電子郵件信箱</label><input class="inp" type="email" data-t="agency_email" value="${esc(t.agency_email || '')}" ${dis}></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-h" style="min-height:auto;padding:8px 14px"><b>標案資料</b></div>
+      <div class="card-b">
+        <div class="grid g2">
+          <div class="field"><label>標案案號</label><input class="inp" data-t="tender_no" value="${esc(t.tender_no || '')}" ${dis}></div>
+          <div class="field"><label>標案名稱</label><input class="inp" data-t="tender_name" value="${esc(t.tender_name || '')}" ${dis}></div>
+        </div>
+        <div class="grid g3">
+          <div class="field"><label>預算金額</label><input class="inp num" type="number" data-t="budget_amount" value="${t.budget_amount || ''}" ${dis}></div>
+          <div class="field"><label>得標金額</label><input class="inp num" type="number" data-t="award_amount" value="${t.award_amount || ''}" ${dis}></div>
+          <div class="field"><label>決標方式</label>
+            <select class="inp" data-t="award_method" ${dis}>
+              <option value="" ${!t.award_method ? 'selected' : ''}>—</option>
+              ${AWARD_METHODS.map(m => `<option value="${m}" ${t.award_method === m ? 'selected' : ''}>${m}</option>`).join('')}
+            </select></div>
+        </div>
+        <div class="grid g3">
+          <div class="field"><label>招標公告　第 O 次</label><input class="inp num" type="number" min="1" data-t="announce_seq" value="${t.announce_seq || ''}" ${dis}></div>
+          <div class="field"><label>公告日</label><input class="inp" type="date" data-t="announce_date" value="${esc(t.announce_date || '')}" ${dis}></div>
+          <div class="field"><label>開標地點</label><input class="inp" data-t="open_place" value="${esc(t.open_place || '')}" ${dis}></div>
+        </div>
+        <div class="grid g2">
+          <div class="field"><label>截止投標</label>
+            <div style="display:flex;gap:6px">
+              <input class="inp" type="date" data-t="bid_deadline_date" value="${esc(t.bid_deadline_date || '')}" ${dis}>
+              <input class="inp" type="time" data-t="bid_deadline_time" value="${esc(t.bid_deadline_time || '08:30')}" style="width:110px" ${dis}>
+            </div></div>
+          <div class="field"><label>開標時間</label>
+            <div style="display:flex;gap:6px">
+              <input class="inp" type="date" data-t="open_date" value="${esc(t.open_date || '')}" ${dis}>
+              <input class="inp" type="time" data-t="open_time" value="${esc(t.open_time || '10:00')}" style="width:110px" ${dis}>
+            </div></div>
+        </div>
+        <div class="grid g3">
+          <div class="field"><label>是否提供電子領標</label><select class="inp" data-t="e_bidding" ${dis}>${yn(t.e_bidding)}</select></div>
+          <div class="field"><label>是否須繳納押標金</label><select class="inp" data-t="bid_bond" ${dis}>${yn(t.bid_bond)}</select></div>
+          <div class="field"><label>狀態</label>
+            <select class="inp" data-t="status" ${dis}>
+              <option value="bidding" ${(t.status || 'bidding') === 'bidding' ? 'selected' : ''}>投標中</option>
+              <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
+              <option value="won" ${t.status === 'won' ? 'selected' : ''}>已得標</option>
+            </select></div>
+        </div>
+        ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
+          <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
+        <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
+      </div>
+    </div>`;
+
+  v.querySelectorAll('[data-t]').forEach(el => el.addEventListener('change', () => {
+    const k = el.dataset.t;
+    t[k] = el.type === 'number' ? (+el.value || 0) : el.value;
+    save();
+    if (k === 'status') render();  // 切到「棄標」時顯示原因欄，切走則收起
+  }));
+}
 
 function viewSuppliers(v) {
   sSelected.clear();
