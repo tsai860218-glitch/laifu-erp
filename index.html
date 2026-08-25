@@ -7624,6 +7624,78 @@ function addItem(pid) {
   }, 40);
 }
 
+// 用分類找商品：左邊分類樹（可無限層往下鑽）＋右邊該分類底下的商品清單，點一下帶入這一列
+function pickByCategory(itemId) {
+  const q = QE;
+  const it = byId(q.items, itemId);
+  if (!it) return;
+  openModal({
+    title: '選分類找商品',
+    body: `
+      <div style="display:flex;gap:12px;align-items:flex-start;height:60vh;min-height:340px">
+        <aside id="pcbCats" style="width:200px;flex:0 0 auto;overflow:auto;max-height:100%;font-size:13px"></aside>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;max-height:100%">
+          <input class="inp" id="pcbSearch" placeholder="在此分類內再搜尋 品名／料號／品牌…" autocomplete="off" style="margin-bottom:8px">
+          <div id="pcbList" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:8px"></div>
+        </div>
+      </div>`,
+    footer: `<button class="btn ghost" data-no>關閉</button>`,
+    onMount(el, close) {
+      let selCat = it.product_id ? (byId(DB.products, it.product_id) || {}).category_id || '' : '';
+      const catBox = el.querySelector('#pcbCats');
+      const listBox = el.querySelector('#pcbList');
+      const search = el.querySelector('#pcbSearch');
+      const kwNow = () => (search.value || '').trim().toLowerCase();
+
+      const drawCats = () => {
+        const path = selCat ? categoryPath(selCat) : [];
+        const crumbs = [`<span data-c="" style="cursor:pointer;${selCat ? 'color:var(--accent)' : 'font-weight:700'}">全部</span>`]
+          .concat(path.map((c, i) => `<span style="color:var(--text-3)"> › </span><span data-c="${c.id}" style="cursor:pointer;${i === path.length - 1 ? 'font-weight:700' : 'color:var(--accent)'}">${esc(c.name)}</span>`)).join('');
+        const kids = selCat ? subCategoriesOf(selCat) : majorCategories();
+        const cnt = id => DB.products.filter(p => p.is_active !== false && productInCategory(p, id) && productMatchKw(p, kwNow())).length;
+        const rows = kids.length
+          ? kids.map(c => {
+            const has = subCategoriesOf(c.id).length > 0;
+            return `<div data-drill="${c.id}" style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;cursor:pointer">
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}${has ? ' <span class="muted">▸</span>' : ''}</span>
+              <span class="muted" style="font-size:11px">${cnt(c.id)}</span></div>`;
+          }).join('')
+          : `<div class="muted" style="font-size:12px;padding:4px 6px">${selCat ? '（沒有更下層分類）' : '尚未建立分類'}</div>`;
+        catBox.innerHTML = `<div style="font-size:12px;margin:0 2px 6px">${crumbs}</div>
+          <div style="border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg-2)">${rows}</div>`;
+        catBox.querySelectorAll('[data-c]').forEach(x => x.onclick = () => { selCat = x.dataset.c || ''; drawCats(); drawList(); });
+        catBox.querySelectorAll('[data-drill]').forEach(x => x.onclick = () => { selCat = x.dataset.drill; drawCats(); drawList(); });
+      };
+
+      const drawList = () => {
+        const kw = kwNow();
+        const list = DB.products.filter(p => p.is_active !== false && productInCategory(p, selCat) && productMatchKw(p, kw))
+          .sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0));
+        if (!list.length) { listBox.innerHTML = `<div class="empty" style="padding:24px"><p>這個分類沒有符合的商品</p></div>`; return; }
+        listBox.innerHTML = list.slice(0, 300).map(p => {
+          const cat = p.category_id ? categoryPathName(p.category_id) : (p.category || '');
+          return `<div data-pick="${p.id}" style="display:flex;gap:10px;align-items:center;padding:8px;border-bottom:1px solid var(--line);cursor:pointer">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.is_favorite ? '<span class="star">★</span> ' : ''}${esc(p.brand ? p.brand + ' ' : '')}${esc(p.name)}${p.has_bom ? ' <span class="bdg blue plain" style="height:15px;font-size:9px">BOM</span>' : ''}</div>
+              <div class="muted" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${partNoSourceBadge(p)} ${esc(primaryPartNo(p) || '—')}${cat ? '　' + esc(cat) : ''}${p.spec ? '　' + esc(p.spec) : ''}</div>
+            </div>
+            <div class="money" style="flex:0 0 auto;font-size:12.5px">${p.list_price ? money(p.list_price) : ''}</div>
+          </div>`;
+        }).join('');
+        listBox.querySelectorAll('[data-pick]').forEach(x => x.onclick = () => {
+          const p = byId(DB.products, x.dataset.pick); if (!p) return;
+          fillFromProduct(it, p); drawItems(); mobileSticky(q); toast(`已帶入 ${p.name}`); close();
+        });
+      };
+
+      search.addEventListener('input', () => { drawCats(); drawList(); });
+      el.querySelector('[data-no]').onclick = () => close();
+      drawCats(); drawList();
+      setTimeout(() => search.focus(), 30);
+    }
+  });
+}
+
 function delItem(id) {
   QE.items = QE.items.filter(i => i.id !== id);
   QE.items.forEach((i, n) => i.sort_order = n);
@@ -7785,16 +7857,22 @@ function drawItems() {
           if (!kw) return [];
           const k = kw.toLowerCase();
           return DB.products.filter(p => p.is_active &&
-            ((p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(k) ||
-             (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(k))))
+            (productMatchKw(p, k) || (p.name + p.brand + p.spec + (p.part_no || '') + (p.category || '')).toLowerCase().includes(k)))
             .sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0))
-            .slice(0, 40).map(p => ({
-              p, html: `<div class="m">
+            .slice(0, 40).map(p => {
+              const catName = p.category_id ? categoryPathName(p.category_id) : (p.category || '');
+              const catChip = catName
+                ? `<span style="display:inline-block;font-size:9px;font-weight:700;padding:0 5px;border-radius:4px;color:#3730A3;background:#EEF2FF;border:1px solid #C7D2FE;vertical-align:middle;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(catName)}</span> `
+                : '';
+              const pn = primaryPartNo(p);
+              return {
+                p, html: `<div class="m" style="min-width:0">
                 <div class="t">${p.is_favorite ? '<span class="star">★</span> ' : ''}${esc(p.brand ? p.brand + ' ' : '')}${esc(p.name)}
                   ${p.has_bom ? '<span class="bdg blue plain" style="height:16px;font-size:9px">BOM</span>' : ''}</div>
-                <div class="s">${esc(p.part_no || '')}　${esc(p.spec)}</div></div>
+                <div class="s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${catChip}${pn ? esc(pn) : ''}${p.spec ? `<span class="muted">　${esc(p.spec)}</span>` : ''}</div></div>
                 <div class="p">${money(p.list_price)}</div>`
-            }));
+              };
+            });
         },
         row => { fillFromProduct(it, row.p); drawItems(); mobileSticky(q); toast(`已帶入 ${row.p.name}`); });
     });
@@ -7901,6 +7979,7 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
             oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'">${esc(it.spec || '')}</textarea>
           <input class="inp f-un" data-fi="${it.id}" data-k="unit" placeholder="單位" value="${esc(it.unit || '')}" ${D}>
         </div>
+        ${editable ? `<div style="margin-top:2px"><button type="button" class="btn sm ghost" onclick="pickByCategory('${it.id}')" style="font-size:11px;padding:2px 8px" title="用分類找商品，不用記品名">🔍 選分類找商品</button></div>` : ''}
         ${itemMeta(it, editable)}
         ${hasBom ? `<button class="bom-toggle" onclick="toggleBom('${it.id}')">
           ${open ? '▾' : '▸'} 內部組成 ${it.components.filter(c => c.is_included !== false).length} 項${costOn ? '' : '（成本已隱藏）'}</button>` : ''}
