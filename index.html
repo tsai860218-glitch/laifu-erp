@@ -2057,10 +2057,31 @@ function stampDirtyRecords() {
 
 // 只同步「真的有變動」的那幾筆，不是每次都整包重寫
 async function firestoreSaveDiff() {
-  if (!fbDb || !fbUser || !DB || !_lastSynced) return;
+  if (!fbDb || !fbUser || !DB) return;
   if (_syncInFlight) { _syncQueued = true; return; }
   _syncInFlight = true;
   try {
+    // 自我修復同步基準：正常情況下 _lastSynced 會在開機載入雲端成功後建立。
+    // 但若開機當下雲端剛好連不上（Edge 偶爾會這樣），載入會落到「先用本機」的分支、
+    // 讓 _lastSynced 一直是 null。之後每次存檔的增量同步都會在上面提早結束、東西推不上雲端，
+    // 非得重新整理走「補送」路徑才上得去——這正是「A 打單、B/C 重整看不到，A 重整後才同步」的成因。
+    // 這裡在仍有連線時就地把基準補建立起來（先抓雲端、逐筆校正避免蓋掉別人較新的資料），讓這次存檔就能送出。
+    if (!_lastSynced) {
+      const base = await firestoreLoadAll().catch(() => null);
+      if (!base) {
+        try { localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (e) {}
+        _lastSyncError = '雲端連線中斷，稍後自動重試';
+        setSyncStatus('error');
+        _syncQueued = true;
+        _syncRetryDelay = Math.min(_syncRetryDelay ? _syncRetryDelay * 2 : 3000, 60000);
+        return; // finally 會依 _syncRetryDelay 自動重試
+      }
+      restoreImagesFrom(base);
+      reconcileNewerRemote(DB, base);
+      DB._deletions = Object.assign({}, DB._deletions || {}, base._deletions || {});
+      dropTombstoned(DB, DB._deletions);
+      _lastSynced = !isFirestoreEmpty(base) ? base : emptyDB();
+    }
     stampDirtyRecords(); // 先蓋修改時間（在凍結快照之前，快照才會帶到新的時間戳）
     // ★ 關鍵：先把這一輪要送出去的內容「凍結」成快照。
     // 底下 await 期間使用者還在打字，DB 會繼續被就地修改；如果等寫入回來才拿
