@@ -6528,14 +6528,10 @@ const PROD_COLS = [
   ['fav', '★ 我的最愛'], ['part_no', '料號'], ['name', '品名'], ['brand', '品牌'], ['category', '分類'],
   ['supplier', '進貨廠商'], ['cost', '成本'], ['price', '牌價'], ['bom', 'BOM'], ['note', '備註']
 ];
-// 商品列表欄位：啟用進銷存時，在「分類」後、「進貨廠商」前插入 庫存／儲位／貨況 三欄
+// 商品總表欄位：庫存相關（帳面/可用/鎖貨/代理/儲位/貨況）不列在報價用的商品總表，
+// 需要看庫存請到「進銷存／庫存」頁或點商品開右側明細抽屜。
 function prodColDefs() {
-  const cols = PROD_COLS.slice();
-  if (invEnabled()) {
-    const i = cols.findIndex(c => c[0] === 'supplier');
-    cols.splice(i, 0, ['stock_qty', '庫存'], ['stock_loc', '儲位'], ['stock_cond', '貨況']);
-  }
-  return cols;
+  return PROD_COLS.slice();
 }
 // 用函式做延遲查表：D_COLS / RT_COLS 定義在檔案後面，執行期呼叫時它們都已初始化
 function getColDefs(id) {
@@ -7874,12 +7870,17 @@ function drawItems() {
               const catChip = catName
                 ? `<span style="display:inline-block;font-size:9px;font-weight:700;padding:0 5px;border-radius:4px;color:#3730A3;background:#EEF2FF;border:1px solid #C7D2FE;vertical-align:middle;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(catName)}</span> `
                 : '';
+              // 自訂屬性小標籤（容量／適用主機…）：依分類定義顯示有填值的屬性
+              const attrChips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => {
+                const v = ((p.attrs || {})[d.name] || '').trim();
+                return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;vertical-align:middle;margin-right:4px">${esc(d.name)} ${esc(v)}</span>` : '';
+              }).filter(Boolean).join('');
               const pn = primaryPartNo(p);
               return {
                 p, html: `<div class="m" style="min-width:0">
                 <div class="t">${p.is_favorite ? '<span class="star">★</span> ' : ''}${esc(p.brand ? p.brand + ' ' : '')}${esc(p.name)}
                   ${p.has_bom ? '<span class="bdg blue plain" style="height:16px;font-size:9px">BOM</span>' : ''}</div>
-                <div class="s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${catChip}${pn ? esc(pn) : ''}${p.spec ? `<span class="muted">　${esc(p.spec)}</span>` : ''}</div></div>
+                <div class="s" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${catChip}${attrChips}${pn ? esc(pn) : ''}${p.spec ? `<span class="muted">　${esc(p.spec)}</span>` : ''}</div></div>
                 <div class="p">${money(p.list_price)}</div>`
               };
             });
@@ -11119,7 +11120,7 @@ function viewProducts(v) {
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
               onclick="toggleSelAll('p', this.checked, ${esc(JSON.stringify(page.map(p => p.id)))})"></th>
-          ${th('fav', '★', 'c')}${th('part_no', '料號')}${th('name', '品名')}${th('brand', '品牌')}${th('category', '分類')}${invEnabled() ? th('stock_qty', '帳面', 'r stk-col') + th('stock_avail', '可用', 'r stk-col') + th('stock_lock', '鎖貨', 'r stk-col') + th('stock_agent', '代理', 'r stk-col') + th('stock_loc', '儲位', 'stk-col') + th('stock_cond', '貨況', 'stk-col') : ''}${th('supplier', '進貨廠商')}
+          ${th('fav', '★', 'c')}${th('part_no', '料號')}${th('name', '品名')}${th('brand', '品牌')}${th('category', '分類')}${th('supplier', '進貨廠商')}
           ${th('cost', `成本<span style="color:${dCol};font-weight:800">·${dNm}</span>`, 'r cost-col')}${th('price', `牌價<span style="color:${dCol};font-weight:800">·${dNm}</span>`, 'r')}${th('bom', 'BOM', 'c')}${th('note', '備註')}
           <th style="width:56px" onclick="event.stopPropagation()"></th>
         </tr></thead><tbody>
@@ -11131,12 +11132,6 @@ function viewProducts(v) {
             ${p.spec ? `<div class="muted">${esc(p.spec)}</div>` : ''}</td>
           <td onclick="openProductDrawer('${p.id}')">${esc(p.brand || '—')}</td>
           <td onclick="openProductDrawer('${p.id}')">${p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '—'}</td>
-          ${invEnabled() ? (() => { const ss = stockSummary(p.id); const av = productAvailable(p.id); const lk = productLocked(p.id); const ag = agentStockQty(p.id); const low = isBelowSafety(p.id); return `<td onclick="openProductDrawer('${p.id}')" class="r stk-col"><b class="${ss.qty > 0 ? '' : 'muted'}">${ss.qty}</b></td>
-          <td onclick="openProductDrawer('${p.id}')" class="r stk-col"><b class="${av > 0 ? '' : 'muted'}" style="${low ? 'color:var(--red)' : ''}" title="${low ? '低於安全庫存' : ''}">${av}${low ? ' ⚠' : ''}</b></td>
-          <td onclick="openProductDrawer('${p.id}')" class="r stk-col">${lk > 0 ? `<span class="bdg gray plain">${lk}</span>` : '<span class="muted">—</span>'}</td>
-          <td onclick="openProductDrawer('${p.id}')" class="r stk-col">${ag > 0 ? `<span class="bdg blue plain">${ag}</span>` : '<span class="muted">—</span>'}</td>
-          <td onclick="openProductDrawer('${p.id}')" class="stk-col">${ss.locs.length ? esc(ss.locs.join('、')) : '<span class="muted">—</span>'}</td>
-          <td onclick="openProductDrawer('${p.id}')" class="stk-col">${ss.conds.length ? esc(ss.conds.join('、')) : '<span class="muted">—</span>'}</td>`; })() : ''}
           <td onclick="openProductDrawer('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
           <td onclick="openProductDrawer('${p.id}')" class="r money cost-col" style="color:${dCol}">${p.has_bom && !net ? '<span class="muted">組合</span>' : (net && !prodCostFor(p, net) ? '<span class="muted">—</span>' : money(prodCostFor(p, net)))}</td>
           <td onclick="openProductDrawer('${p.id}')" class="r money" style="color:${dCol};font-weight:600">${net && !prodPriceFor(p, net) ? '<span class="muted">—</span>' : money(prodPriceFor(p, net))}</td>
