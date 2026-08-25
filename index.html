@@ -2326,7 +2326,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 19;                    // ← 每次改結構就 +1
+const SCHEMA_V = 20;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -3176,6 +3176,26 @@ function migrate(db) {
     }
   }
 
+  if (v < 20) {
+    // ── 料號來源 + 代理商料號 + 多層分類（category_id）+ 分類自訂篩選屬性（全部新增，不動舊資料）──
+    db.products.forEach(p => {
+      // 料號來源：有入庫的公司自編＝company；代理商叫貨／其他供貨＝以代理商料號為主＝agent
+      if (p.part_no_source == null)
+        p.part_no_source = (p.stock_mode === 'agent' || p.stock_mode === 'other') ? 'agent' : 'company';
+      // 每一筆代理商庫存補上「代理商料號」欄
+      (p.agent_stocks || []).forEach(a => { if (a.part_no == null) a.part_no = ''; });
+      // 自訂篩選屬性值（例：容量、顏色…），key 用屬性名稱
+      if (p.attrs == null || typeof p.attrs !== 'object') p.attrs = {};
+      // 由既有的分類「名稱」補上 category_id（對回目前 DB.categories，找不到就留空）
+      if (p.category_id == null) {
+        const c = (db.categories || []).find(x => x.name === p.category);
+        p.category_id = c ? c.id : null;
+      }
+    });
+    // 每個分類補上「可篩選屬性」定義清單（會被底下的子分類一起沿用）
+    (db.categories || []).forEach(c => { if (!Array.isArray(c.attr_defs)) c.attr_defs = []; });
+  }
+
   db.warehouses = db.warehouses || [{ id: 'wh_main', name: '主倉', is_default: true, note: '' }];
   db.tenders = db.tenders || [];   // 標案管理
   db.movements  = db.movements  || [];
@@ -3206,14 +3226,34 @@ function categoryColor(name) {
   const i = (DB.categories || []).findIndex(c => c.name === name);
   return CATEGORY_PALETTE[(i < 0 ? 0 : i) % CATEGORY_PALETTE.length];
 }
-// 分類階層輔助函式：大分類 = parent_id為null；小分類 = parent_id指向某個大分類
+// 分類階層輔助函式（可無限層）：頂層分類 = parent_id為null；子分類 = parent_id指向上層分類
 const majorCategories = () => (DB.categories || []).filter(c => !c.parent_id);
 const subCategoriesOf = pid => (DB.categories || []).filter(c => c.parent_id === pid);
-// 篩選用：這個大分類本身的名稱 + 底下所有小分類的名稱，一起比對商品的category欄位
-function categoryFilterNames(majorId) {
-  const major = byId(DB.categories, majorId);
-  if (!major) return [];
-  return [major.name, ...subCategoriesOf(majorId).map(c => c.name)];
+// 某節點的所有子孫 id（含自己），用來做「選了上層就連同底下所有子分類一起篩」
+function categoryDescendantIds(catId) {
+  const out = [catId]; let i = 0;
+  while (i < out.length) { subCategoriesOf(out[i]).forEach(c => out.push(c.id)); i++; }
+  return out;
+}
+// 從最上層到這個節點的完整路徑（麵包屑）
+function categoryPath(catId) {
+  const path = []; let c = byId(DB.categories, catId); let guard = 0;
+  while (c && guard++ < 30) { path.unshift(c); c = c.parent_id ? byId(DB.categories, c.parent_id) : null; }
+  return path;
+}
+function categoryPathName(catId) { return categoryPath(catId).map(c => c.name).join(' › '); }
+function categoryDepth(catId) { return categoryPath(catId).length; }
+// 這個分類（含所有祖先）定義的可篩選屬性，依名稱去重，供商品編輯 & 商品列表左側勾選面板使用
+function categoryAttrDefs(catId) {
+  const seen = new Set(); const defs = [];
+  categoryPath(catId).forEach(c => (c.attr_defs || []).forEach(d => {
+    const nm = (d.name || '').trim(); if (!nm || seen.has(nm)) return; seen.add(nm); defs.push({ id: d.id, name: nm });
+  }));
+  return defs;
+}
+// 篩選用（相容舊呼叫）：這個分類本身 + 底下所有子孫分類的名稱，一起比對商品的 category 欄位
+function categoryFilterNames(catId) {
+  return categoryDescendantIds(catId).map(id => (byId(DB.categories, id) || {}).name).filter(Boolean);
 }
 function companyColor(co) {
   if (!co) return '#94A3B8';
@@ -4366,7 +4406,15 @@ function seed() {
       has_bom: false, is_active: true, is_favorite: false, components: [] }
   ];
 
-  const categories = ['桌上型電腦', '筆記型電腦', '印表機', '耗材', '週邊', '服務'].map(name => ({ id: uid('cat'), name }));
+  const categories = ['桌上型電腦', '筆記型電腦', '印表機', '耗材', '週邊', '服務'].map(name => ({ id: uid('cat'), name, parent_id: null, attr_defs: [] }));
+  // 示範資料：把商品接上 category_id，並補上料號來源／代理商料號／屬性等新欄位的預設
+  products.forEach(p => {
+    const c = categories.find(c => c.name === p.category);
+    p.category_id = c ? c.id : null;
+    if (p.part_no_source == null) p.part_no_source = 'company';
+    if (!Array.isArray(p.agent_stocks)) p.agent_stocks = [];
+    if (p.attrs == null) p.attrs = {};
+  });
 
   return {
     _schema: SCHEMA_V,
@@ -5932,7 +5980,8 @@ function receiveNewProduct() {
           const pid = uid('p');
           DB.products.push({
             id: pid, part_no: data.part_no, brand: data.brand, name, spec: data.spec, unit,
-            category: '', default_supplier: sup,
+            category: '', category_id: null, default_supplier: sup,
+            part_no_source: 'company', agent_stocks: [], attrs: {},
             list_price: data.list_price, default_cost: cost, net_price: 0, net_cost: 0,
             price_ref_date: '', price_ref_source: '', note: '',
             has_bom: false, is_active: true, is_favorite: false, components: []
@@ -8221,14 +8270,18 @@ function openSaveFreeToMasterModal(id) {
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
         const o = { id: uid('p'), has_bom: false, is_active: true, components: [],
-          price_ref_date: '', price_ref_source: '', note: '' };
+          price_ref_date: '', price_ref_source: '', note: '',
+          part_no_source: 'company', agent_stocks: [], attrs: {}, category_id: null };
         el.querySelectorAll('[data-f]').forEach(i =>
           o[i.dataset.f] = i.type === 'checkbox' ? i.checked
             : (i.type === 'number' ? +i.value || 0 : i.value.trim()));
         if (!o.name) return toast('請填品名', 'err');
         o.is_favorite = !!o.is_favorite;
-        if (o.category && !DB.categories.some(c => c.name === o.category))
-          DB.categories.push({ id: uid('cat'), name: o.category });
+        if (o.category) {
+          let c = DB.categories.find(c => c.name === o.category);
+          if (!c) { c = { id: uid('cat'), name: o.category, parent_id: null, attr_defs: [] }; DB.categories.push(c); }
+          o.category_id = c.id;
+        }
         DB.products.push(o);
         it.product_id = o.id;
         save(); close(); drawItems();
@@ -10444,7 +10497,7 @@ let pSortState = { key: null, dir: 'asc' };
 function productSortValue(p, key) {
   switch (key) {
     case 'fav': return p.is_favorite ? 1 : 0;
-    case 'part_no': return p.part_no || '';
+    case 'part_no': return primaryPartNo(p) || '';
     case 'name': return p.name || '';
     case 'brand': return p.brand || '';
     case 'category': return p.category || '';
@@ -10460,7 +10513,7 @@ function productSortValue(p, key) {
   }
 }
 
-let pFilterState = { kw: '', majorId: '', subName: '', sup: '' };
+let pFilterState = { kw: '', catId: '', brands: [], attrs: {}, sups: [] };
 
 /* ===========================================================
    §產品分析 —— 依出貨單統計各產品在不同客戶的出貨量與金額
@@ -10798,21 +10851,28 @@ function viewProductAnalysis(v) {
   }
 }
 
+// 商品是否屬於某個分類（含其所有子孫分類）；相容沒有 category_id 的舊資料用名稱比對
+function productInCategory(p, catId) {
+  if (!catId) return true;
+  const ids = categoryDescendantIds(catId);
+  if (p.category_id && ids.includes(p.category_id)) return true;
+  const names = ids.map(id => (byId(DB.categories, id) || {}).name).filter(Boolean);
+  return names.includes(p.category);
+}
+function productMatchKw(p, kw) {
+  if (!kw) return true;
+  return (p.name + p.brand + p.spec + (p.category || '')).toLowerCase().includes(kw) ||
+    allPartNos(p).includes(kw) ||
+    (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(kw));
+}
+
 function viewProducts(v) {
   pSelected.clear();
   const fs = pFilterState;
+  fs.brands = fs.brands || []; fs.attrs = fs.attrs || {}; fs.sups = fs.sups || [];
   v.innerHTML = `
     <div class="toolbar">
-      <div class="grow"><input class="inp" id="ps" placeholder="搜尋品名 / 料號 / 品牌 / 規格…" value="${esc(fs.kw)}"></div>
-      <select class="inp" id="pMajorCat" style="width:130px">
-        <option value="">全部大分類</option>${majorCategories().map(c => `<option value="${c.id}" ${c.id === fs.majorId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
-      </select>
-      <select class="inp" id="pSubCat" style="width:130px">
-        <option value="">全部小分類</option>${(fs.majorId ? subCategoriesOf(fs.majorId) : []).map(s => `<option ${s.name === fs.subName ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
-      </select>
-      <select class="inp" id="psup" style="width:150px">
-        <option value="">全部進貨廠商</option>${[...new Set(DB.products.map(p => p.default_supplier).filter(Boolean))].sort().map(s => `<option ${s === fs.sup ? 'selected' : ''}>${esc(s)}</option>`).join('')}
-      </select>
+      <div class="grow"><input class="inp" id="ps" placeholder="搜尋品名 / 料號（含代理商料號）/ 品牌 / 規格…" value="${esc(fs.kw)}"></div>
       <button class="btn ghost" onclick="manageCategories()">管理分類</button>
       ${columnsButton('plist')}
       <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button>
@@ -10822,32 +10882,127 @@ function viewProducts(v) {
       <button class="btn sm" onclick="pSelected.clear();document.getElementById('ps').dispatchEvent(new Event('input'))">取消選取</button>
       <button class="btn sm danger" onclick="bulkDeleteProducts()">🗑 刪除已選取</button>
     </div>
-    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="plist"></div><div id="pPageBar"></div></div></div>`;
+    <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <aside id="pFacets" style="width:212px;flex:0 0 auto;font-size:13px"></aside>
+      <div style="flex:1;min-width:280px">
+        <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="plist"></div><div id="pPageBar"></div></div></div>
+      </div>
+    </div>`;
 
-  // 選了大分類，小分類選單要跟著換成那個大分類底下的小分類；換大分類時小分類篩選重置。
-  // 注意：這個一定要在重新查詢「之前」做完，而且要接在同一個事件裡。
-  // select 的 input 事件比 change 早觸發，如果分成兩個 handler，會先拿上一個大分類殘留的
-  // 小分類名稱去篩，畫面就莫名其妙變成空的。
-  const syncSubCatOptions = () => {
-    const majorId = document.getElementById('pMajorCat').value;
-    const subSel = document.getElementById('pSubCat');
-    const subs = majorId ? subCategoriesOf(majorId) : [];
-    subSel.innerHTML = `<option value="">全部小分類</option>` + subs.map(s => `<option>${esc(s.name)}</option>`).join('');
-    fs.subName = '';
+  // ── 左側篩選面板（分類樹 ＋ 品牌 ／ 屬性 ／ 進貨廠商 勾選）──
+  const facetBox = (title, inner) =>
+    `<div style="margin-bottom:14px"><div style="font-weight:700;font-size:12px;color:var(--text-2);margin:0 2px 6px">${title}</div>${inner}</div>`;
+  const checkRow = (attr, val, label, count, checked) =>
+    `<label style="display:flex;align-items:center;gap:6px;padding:2px 2px;cursor:pointer">
+       <input type="checkbox" data-${attr}="${esc(val)}" ${checked ? 'checked' : ''}>
+       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span>
+       <span class="muted" style="font-size:11px">${count}</span></label>`;
+
+  const renderFacets = () => {
+    const box = document.getElementById('pFacets');
+    if (!box) return;
+    const kw = (document.getElementById('ps').value || '').trim().toLowerCase();
+    // 依「目前分類 + 關鍵字」得到的基準清單，用來算各選項的數量（品牌／屬性選取本身不縮小選項清單）
+    const base = DB.products.filter(p => productInCategory(p, fs.catId) && productMatchKw(p, kw));
+
+    // 1) 分類：麵包屑 + 目前層的子分類（可一路往下鑽，無限層）
+    const path = fs.catId ? categoryPath(fs.catId) : [];
+    const crumbs = [`<span data-cat="" style="cursor:pointer;${fs.catId ? 'color:var(--accent)' : 'font-weight:700'}">全部</span>`]
+      .concat(path.map((c, i) =>
+        `<span style="color:var(--text-3)"> › </span><span data-cat="${c.id}" style="cursor:pointer;${i === path.length - 1 ? 'font-weight:700' : 'color:var(--accent)'}">${esc(c.name)}</span>`))
+      .join('');
+    const children = fs.catId ? subCategoriesOf(fs.catId) : majorCategories();
+    const catCount = catId => DB.products.filter(p => productInCategory(p, catId) && productMatchKw(p, kw)).length;
+    const childRows = children.length
+      ? children.map(c => {
+        const has = subCategoriesOf(c.id).length > 0;
+        return `<div data-drill="${c.id}" style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:6px;cursor:pointer">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}${has ? ' <span class="muted">▸</span>' : ''}</span>
+          <span class="muted" style="font-size:11px">${catCount(c.id)}</span></div>`;
+      }).join('')
+      : `<div class="muted" style="font-size:12px;padding:2px 4px">${fs.catId ? '（沒有更下層分類）' : '尚未建立分類'}</div>`;
+    const catInner = `<div style="font-size:12px;margin:0 2px 6px">${crumbs}</div>
+      <div style="border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg-2)">${childRows}</div>`;
+
+    // 2) 品牌
+    const brandCount = {};
+    base.forEach(p => { const b = (p.brand || '').trim(); if (b) brandCount[b] = (brandCount[b] || 0) + 1; });
+    const brands = Object.keys(brandCount).sort((a, b) => a.localeCompare(b));
+    const brandInner = brands.length
+      ? brands.map(b => checkRow('brand', b, b, brandCount[b], fs.brands.includes(b))).join('')
+      : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`;
+
+    // 3) 這個分類（含祖先）定義的自訂屬性（例：容量、顏色…）
+    const attrSections = fs.catId ? categoryAttrDefs(fs.catId).map(def => {
+      const nm = def.name;
+      const valCount = {};
+      base.forEach(p => { const val = ((p.attrs || {})[nm] || '').trim(); if (val) valCount[val] = (valCount[val] || 0) + 1; });
+      const vals = Object.keys(valCount).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const sel = fs.attrs[nm] || [];
+      const inner = vals.length
+        ? vals.map(val => checkRow('attrval', nm + '\u0001' + val, val, valCount[val], sel.includes(val))).join('')
+        : `<div class="muted" style="font-size:12px;padding:2px 4px">尚無資料</div>`;
+      return facetBox(esc(nm), inner);
+    }).join('') : '';
+
+    // 4) 進貨廠商
+    const supCount = {};
+    base.forEach(p => { const s = (p.default_supplier || '').trim(); if (s) supCount[s] = (supCount[s] || 0) + 1; });
+    const sups = Object.keys(supCount).sort((a, b) => a.localeCompare(b));
+    const supInner = sups.length
+      ? sups.map(s => checkRow('sup', s, s, supCount[s], fs.sups.includes(s))).join('')
+      : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`;
+
+    const anyFilter = fs.catId || fs.brands.length || fs.sups.length || Object.values(fs.attrs).some(a => a && a.length);
+    box.innerHTML =
+      (anyFilter ? `<div style="margin-bottom:10px"><button class="btn sm ghost" id="pClearFilters" style="width:100%">清除全部篩選</button></div>` : '') +
+      facetBox('分類', catInner) +
+      facetBox('品牌', brandInner) +
+      attrSections +
+      facetBox('進貨廠商', supInner);
+
+    // 事件：分類麵包屑
+    box.querySelectorAll('[data-cat]').forEach(el2 => el2.onclick = () => {
+      fs.catId = el2.dataset.cat || ''; fs.attrs = {}; renderFacets(); run(true);
+    });
+    // 事件：往下鑽分類
+    box.querySelectorAll('[data-drill]').forEach(el2 => el2.onclick = () => {
+      fs.catId = el2.dataset.drill; fs.attrs = {}; renderFacets(); run(true);
+    });
+    // 事件：品牌
+    box.querySelectorAll('[data-brand]').forEach(cb => cb.onchange = () => {
+      const b = cb.dataset.brand;
+      fs.brands = cb.checked ? [...new Set([...fs.brands, b])] : fs.brands.filter(x => x !== b);
+      renderFacets(); run(true);
+    });
+    // 事件：屬性值（key 為 屬性名\u0001值）
+    box.querySelectorAll('[data-attrval]').forEach(cb => cb.onchange = () => {
+      const [nm, val] = cb.dataset.attrval.split('\u0001');
+      const cur = fs.attrs[nm] || [];
+      fs.attrs[nm] = cb.checked ? [...new Set([...cur, val])] : cur.filter(x => x !== val);
+      if (!fs.attrs[nm].length) delete fs.attrs[nm];
+      renderFacets(); run(true);
+    });
+    // 事件：進貨廠商
+    box.querySelectorAll('[data-sup]').forEach(cb => cb.onchange = () => {
+      const s = cb.dataset.sup;
+      fs.sups = cb.checked ? [...new Set([...fs.sups, s])] : fs.sups.filter(x => x !== s);
+      renderFacets(); run(true);
+    });
+    const clr = box.querySelector('#pClearFilters');
+    if (clr) clr.onclick = () => { fs.catId = ''; fs.brands = []; fs.attrs = {}; fs.sups = []; renderFacets(); run(true); };
   };
 
   const run = (resetPage) => {
     const kw = document.getElementById('ps').value.trim().toLowerCase();
-    const majorId = document.getElementById('pMajorCat').value;
-    const subName = document.getElementById('pSubCat').value;
-    const sup = document.getElementById('psup').value;
-    fs.kw = document.getElementById('ps').value; fs.majorId = majorId; fs.subName = subName; fs.sup = sup;
-    const majorNames = majorId ? categoryFilterNames(majorId) : null;
+    fs.kw = document.getElementById('ps').value;
+    const attrPairs = Object.entries(fs.attrs).filter(([, arr]) => arr && arr.length);
     let list = DB.products.filter(p =>
-      (!kw || (p.name + p.brand + p.spec + (p.part_no || '') + p.category).toLowerCase().includes(kw) ||
-        (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(kw))) &&
-      (subName ? p.category === subName : (!majorNames || majorNames.includes(p.category))) &&
-      (!sup || p.default_supplier === sup));
+      productMatchKw(p, kw) &&
+      productInCategory(p, fs.catId) &&
+      (!fs.brands.length || fs.brands.includes((p.brand || '').trim())) &&
+      (!fs.sups.length || fs.sups.includes((p.default_supplier || '').trim())) &&
+      attrPairs.every(([nm, arr]) => arr.includes(((p.attrs || {})[nm] || '').trim())));
     list = pSortState.key ? sortRows(list, pSortState, productSortValue)
       : list.slice().sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0) || a.name.localeCompare(b.name));
     const info = paginateList('products', list, resetPage);
@@ -10874,7 +11029,7 @@ function viewProducts(v) {
         ${page.map(p => `<tr>
           <td onclick="event.stopPropagation()"><input type="checkbox" ${pSelected.has(p.id) ? 'checked' : ''} onchange="toggleSel('p','${p.id}', this.checked)"></td>
           <td onclick="event.stopPropagation();toggleFav('${p.id}')" style="cursor:pointer;text-align:center;font-size:15px;color:${p.is_favorite ? 'var(--orange)' : 'var(--line-2)'}">★</td>
-          <td onclick="openProductDrawer('${p.id}')" style="font-family:var(--mono);font-size:11.5px">${esc(p.part_no || '—')}</td>
+          <td onclick="openProductDrawer('${p.id}')" style="font-size:11.5px">${partNoSourceBadge(p)} <span style="font-family:var(--mono)">${esc(primaryPartNo(p) || '—')}</span></td>
           <td onclick="openProductDrawer('${p.id}')"><b>${esc(p.name)}</b>
             ${p.spec ? `<div class="muted">${esc(p.spec)}</div>` : ''}</td>
           <td onclick="openProductDrawer('${p.id}')">${esc(p.brand || '—')}</td>
@@ -10898,9 +11053,9 @@ function viewProducts(v) {
     applyColVis('plist');
     updateBulkBar('p');
   };
-  ['ps', 'pSubCat', 'psup'].forEach(id => document.getElementById(id).addEventListener('input', () => run(true)));
-  document.getElementById('pMajorCat').addEventListener('input', () => { syncSubCatOptions(); run(true); });
+  document.getElementById('ps').addEventListener('input', () => { renderFacets(); run(true); });
   registerPageRunner('products', run);
+  renderFacets();
   run();
 }
 
@@ -10925,86 +11080,130 @@ function bulkDeleteProducts() {
    商品分類主檔：可自行新增／改名／刪除
    =========================================================== */
 function manageCategories() {
+  const attrOpen = new Set();
   openModal({
     title: '管理商品分類',
     body: `
       <div class="banner info" style="margin-bottom:12px"><span class="bi">ℹ</span><div>
-        分兩層：<b>大分類</b>（例如「電腦組裝」）底下可以有<b>小分類</b>（例如「記憶體」「機殼」「硬碟」）。
-        改名會自動套用到所有使用這個分類的商品。</div></div>
-      <div id="catList2"></div>
-      <div class="grid g2" style="margin-top:10px;align-items:end">
-        <div class="field" style="margin:0"><label>新分類名稱</label><input class="inp" id="newCatName"></div>
-        <div class="field" style="margin:0"><label>屬於哪個大分類</label>
-          <select class="inp" id="newCatParent">
-            <option value="">（無，這是一個新的大分類）</option>
-          </select></div>
-      </div>
-      <button class="btn primary" id="addCatBtn" style="margin-top:8px;width:100%">＋ 新增</button>`,
+        分類可<b>自訂無限層</b>：任一層都能「＋子」新增子分類。每個分類可設定<b>篩選屬性</b>（例：容量、顏色），
+        子分類會自動沿用上層的屬性。改名／刪除會同步套用到商品。</div></div>
+      <div style="margin-bottom:10px"><button class="btn sm primary" id="addTopCat">＋ 新增頂層分類</button></div>
+      <div id="catTree"></div>`,
     footer: `<button class="btn primary" data-no>完成</button>`,
     onMount(el, close) {
+      const prodCountExact = cid =>
+        DB.products.filter(p => p.category_id === cid || (!p.category_id && p.category === (byId(DB.categories, cid) || {}).name)).length;
+
+      const rowHtml = (cat, depth) => {
+        const kids = subCategoriesOf(cat.id);
+        const defs = cat.attr_defs || [];
+        const inherited = categoryAttrDefs(cat.id).filter(d => !defs.some(x => x.name === d.name));
+        let h = `<div class="site-row" style="padding:7px 8px;margin-bottom:4px;${depth === 0 ? 'background:var(--bg-2);' : ''}">
+          <div class="site-row-h" style="margin-bottom:0;padding-left:${depth * 18}px">
+            ${depth ? '<span class="muted" style="flex:0 0 auto">└</span>' : ''}
+            <input class="inp" data-cid="${cat.id}" value="${esc(cat.name)}" style="${depth === 0 ? 'font-weight:700' : ''}">
+            <span class="muted" style="font-size:11px;flex:0 0 auto">${prodCountExact(cat.id)} 項</span>
+            <button class="btn sm ghost" data-addchild="${cat.id}" style="flex:0 0 auto" title="新增子分類">＋子</button>
+            <button class="btn sm ghost" data-attr="${cat.id}" style="flex:0 0 auto">屬性${defs.length ? '・' + defs.length : ''}</button>
+            <button class="del" data-crm="${cat.id}" title="刪除分類">×</button>
+          </div>`;
+        if (attrOpen.has(cat.id)) {
+          h += `<div style="margin:6px 0 2px ${depth * 18 + 18}px;padding:8px 10px;border:1px dashed var(--line-2);border-radius:8px">
+            <div style="font-size:11.5px;color:var(--text-2);margin-bottom:6px">這個分類的篩選屬性（子分類會沿用）</div>
+            ${defs.length ? defs.map(d => `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+                <input class="inp" data-attrname="${cat.id}|${d.id}" value="${esc(d.name)}" style="flex:1">
+                <button class="del" data-attrrm="${cat.id}|${d.id}" title="刪除屬性">×</button></div>`).join('') : '<div class="muted" style="font-size:12px;margin-bottom:4px">尚未設定</div>'}
+            ${inherited.length ? `<div class="muted" style="font-size:11px;margin:4px 0">沿用上層：${inherited.map(d => esc(d.name)).join('、')}</div>` : ''}
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <input class="inp" data-newattr="${cat.id}" placeholder="新增屬性名稱（例：容量）" style="flex:1">
+              <button class="btn sm primary" data-addattr="${cat.id}" style="flex:0 0 auto">＋ 加屬性</button></div>
+          </div>`;
+        }
+        h += `</div>`;
+        return h + kids.map(k => rowHtml(k, depth + 1)).join('');
+      };
+
       const draw = () => {
-        el.querySelector('#newCatParent').innerHTML = `<option value="">（無，這是一個新的大分類）</option>` +
-          majorCategories().map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+        const tops = majorCategories();
+        el.querySelector('#catTree').innerHTML = tops.length
+          ? tops.map(c => rowHtml(c, 0)).join('')
+          : `<div class="empty" style="padding:20px"><p>還沒有分類</p></div>`;
+        bind();
+      };
 
-        const rows = [];
-        majorCategories().forEach(major => {
-          const n = DB.products.filter(p => p.category === major.name).length;
-          rows.push(`<div class="site-row" style="padding:8px 10px;margin-bottom:4px;background:var(--bg-2)">
-            <div class="site-row-h" style="margin-bottom:0">
-              <input class="inp" data-cid="${major.id}" value="${esc(major.name)}" style="font-weight:700">
-              <span class="muted" style="font-size:11px;flex:0 0 auto">大分類・${n} 項商品</span>
-              <button class="del" data-crm="${major.id}" title="刪除大分類">×</button>
-            </div></div>`);
-          subCategoriesOf(major.id).forEach(sub => {
-            const sn = DB.products.filter(p => p.category === sub.name).length;
-            rows.push(`<div class="site-row" style="padding:8px 10px 8px 24px;margin-bottom:4px">
-              <div class="site-row-h" style="margin-bottom:0">
-                <span class="muted" style="flex:0 0 auto">└</span>
-                <input class="inp" data-cid="${sub.id}" value="${esc(sub.name)}">
-                <span class="muted" style="font-size:11px;flex:0 0 auto">${sn} 項商品</span>
-                <button class="del" data-crm="${sub.id}" title="刪除小分類">×</button>
-              </div></div>`);
-          });
-        });
-        el.querySelector('#catList2').innerHTML = rows.length ? rows.join('') :
-          `<div class="empty" style="padding:20px"><p>還沒有分類</p></div>`;
-
-        el.querySelectorAll('[data-cid]').forEach(inp => inp.addEventListener('change', () => {
+      const bind = () => {
+        el.querySelectorAll('[data-cid]').forEach(inp => inp.onchange = () => {
           const cat = byId(DB.categories, inp.dataset.cid);
           const oldName = cat.name, newName = inp.value.trim();
           if (!newName) { inp.value = oldName; return toast('分類名稱不可空白', 'err'); }
-          if (DB.categories.some(c => c.id !== cat.id && c.name === newName))
-            return toast('已有相同名稱的分類', 'err'), (inp.value = oldName);
+          const siblings = DB.categories.filter(c => c.id !== cat.id && (c.parent_id || null) === (cat.parent_id || null));
+          if (siblings.some(c => c.name === newName)) { inp.value = oldName; return toast('這一層已有相同名稱的分類', 'err'); }
           cat.name = newName;
-          DB.products.forEach(p => { if (p.category === oldName) p.category = newName; });
-          saveNow(); toast('已更新分類，並套用到所有商品', 'ok');
-        }));
-        el.querySelectorAll('[data-crm]').forEach(b => b.onclick = () => {
-          const cat = byId(DB.categories, b.dataset.crm);
-          const subs = subCategoriesOf(cat.id);
-          const n = DB.products.filter(p => p.category === cat.name).length;
-          const subNote = subs.length ? `<br>底下的 ${subs.length} 個小分類也會一起刪除。` : '';
-          confirmBox('刪除分類', (n
-            ? `有 ${n} 項商品在使用「${esc(cat.name)}」，刪除後這些商品分類會清空。`
-            : `確定刪除「${esc(cat.name)}」？`) + subNote, () => {
-            const removeIds = new Set([cat.id, ...subs.map(s => s.id)]);
-            const removeNames = new Set([cat.name, ...subs.map(s => s.name)]);
-            DB.products.forEach(p => { if (removeNames.has(p.category)) p.category = ''; });
-            DB.categories = DB.categories.filter(c => !removeIds.has(c.id));
-            saveNow(); draw(); toast('已刪除分類');
+          DB.products.forEach(p => { if (p.category_id === cat.id || (!p.category_id && p.category === oldName)) p.category = newName; });
+          saveNow(); toast('已更新分類，並套用到商品', 'ok');
+        });
+        el.querySelectorAll('[data-addchild]').forEach(b => b.onclick = () => {
+          const pid = b.dataset.addchild;
+          promptBox('新增子分類', '分類名稱', '', name => {
+            name = (name || '').trim(); if (!name) return;
+            if (subCategoriesOf(pid).some(c => c.name === name)) return toast('這一層已有同名分類', 'err');
+            DB.categories.push({ id: uid('cat'), name, parent_id: pid, attr_defs: [] });
+            saveNow(); draw(); toast('已新增子分類', 'ok');
+          });
+        });
+        el.querySelectorAll('[data-attr]').forEach(b => b.onclick = () => {
+          const cid = b.dataset.attr; attrOpen.has(cid) ? attrOpen.delete(cid) : attrOpen.add(cid); draw();
+        });
+        el.querySelectorAll('[data-addattr]').forEach(b => b.onclick = () => {
+          const cid = b.dataset.addattr;
+          const inp = el.querySelector('[data-newattr="' + cid + '"]');
+          const nm = (inp.value || '').trim();
+          if (!nm) return toast('請輸入屬性名稱', 'err');
+          const cat = byId(DB.categories, cid); cat.attr_defs = cat.attr_defs || [];
+          if (cat.attr_defs.some(d => d.name === nm)) return toast('這個分類已有同名屬性', 'err');
+          cat.attr_defs.push({ id: uid('attr'), name: nm }); saveNow(); draw();
+        });
+        el.querySelectorAll('[data-attrname]').forEach(inp => inp.onchange = () => {
+          const [cid, aid] = inp.dataset.attrname.split('|');
+          const cat = byId(DB.categories, cid); const d = (cat.attr_defs || []).find(x => x.id === aid);
+          if (!d) return; const nn = inp.value.trim();
+          if (!nn) { inp.value = d.name; return toast('屬性名稱不可空白', 'err'); }
+          if (nn !== d.name && (cat.attr_defs || []).some(x => x.id !== aid && x.name === nn)) { inp.value = d.name; return toast('這個分類已有同名屬性', 'err'); }
+          if (nn !== d.name) DB.products.forEach(p => { if (p.attrs && p.attrs[d.name] != null) { p.attrs[nn] = p.attrs[d.name]; delete p.attrs[d.name]; } });
+          d.name = nn; saveNow(); toast('已更新屬性', 'ok');
+        });
+        el.querySelectorAll('[data-attrrm]').forEach(b => b.onclick = () => {
+          const [cid, aid] = b.dataset.attrrm.split('|');
+          const cat = byId(DB.categories, cid); const d = (cat.attr_defs || []).find(x => x.id === aid);
+          confirmBox('刪除屬性', d ? `確定刪除屬性「${esc(d.name)}」？（商品已填的值會保留在資料裡，只是不再出現在篩選）` : '確定刪除？', () => {
+            cat.attr_defs = (cat.attr_defs || []).filter(x => x.id !== aid); saveNow(); draw();
           }, true);
         });
+        el.querySelectorAll('[data-crm]').forEach(b => b.onclick = () => {
+          const cat = byId(DB.categories, b.dataset.crm);
+          const ids = categoryDescendantIds(cat.id);
+          const set = new Set(ids);
+          const names = new Set(ids.map(id => (byId(DB.categories, id) || {}).name));
+          const nprod = DB.products.filter(p => set.has(p.category_id) || (!p.category_id && names.has(p.category))).length;
+          const subN = ids.length - 1;
+          confirmBox('刪除分類',
+            (nprod ? `有 ${nprod} 項商品在使用這個分類，刪除後這些商品的分類會清空。` : `確定刪除「${esc(cat.name)}」？`)
+            + (subN ? `<br>底下的 ${subN} 個子分類也會一起刪除。` : ''), () => {
+              DB.products.forEach(p => { if (set.has(p.category_id) || (!p.category_id && names.has(p.category))) { p.category_id = null; p.category = ''; } });
+              DB.categories = DB.categories.filter(c => !set.has(c.id));
+              saveNow(); draw(); toast('已刪除分類');
+            }, true);
+        });
       };
+
       draw();
-      el.querySelector('#addCatBtn').onclick = () => {
-        const inp = el.querySelector('#newCatName');
-        const name = inp.value.trim();
-        const parentId = el.querySelector('#newCatParent').value || null;
-        if (!name) return toast('請輸入分類名稱', 'err');
-        if (DB.categories.some(c => c.name === name)) return toast('已有相同名稱的分類', 'err');
-        DB.categories.push({ id: uid('cat'), name, parent_id: parentId });
-        inp.value = '';
-        saveNow(); draw(); toast(parentId ? '已新增小分類' : '已新增大分類', 'ok');
+      el.querySelector('#addTopCat').onclick = () => {
+        promptBox('新增頂層分類', '分類名稱', '', name => {
+          name = (name || '').trim(); if (!name) return;
+          if (majorCategories().some(c => c.name === name)) return toast('已有同名頂層分類', 'err');
+          DB.categories.push({ id: uid('cat'), name, parent_id: null, attr_defs: [] });
+          saveNow(); draw(); toast('已新增', 'ok');
+        });
       };
       el.querySelector('[data-no]').onclick = () => { close(); render(); };
     }
@@ -11086,11 +11285,14 @@ function openProductDrawer(id, tab) {
   // ── 分頁1：基本資料 ──
   const infoHtml = `
     <div class="dw-grid">
-      ${dwRow('料號', esc(p.part_no || '—'))}
+      ${dwRow('料號來源', p.part_no_source === 'agent' ? '以代理商料號為主' : '公司自編（有入庫）')}
+      ${dwRow('料號', partNoSourceBadge(p) + ' ' + esc(primaryPartNo(p) || '—'))}
+      ${p.part_no_source === 'agent' && p.part_no ? dwRow('公司料號', esc(p.part_no)) : ''}
       ${dwRow('品名', `<b>${esc(p.name || '—')}</b>`)}
       ${dwRow('品牌', esc(p.brand || '—'))}
       ${dwRow('規格', esc(p.spec || '—'))}
-      ${dwRow('分類', p.category ? esc(p.category) : '—')}
+      ${dwRow('分類', p.category_id ? esc(categoryPathName(p.category_id)) : (p.category ? esc(p.category) : '—'))}
+      ${(p.category_id ? categoryAttrDefs(p.category_id) : []).filter(d => (p.attrs || {})[d.name]).map(d => dwRow(esc(d.name), esc((p.attrs || {})[d.name]))).join('')}
       ${dwRow('單位', esc(p.unit || '—'))}
       ${dwRow('進貨廠商', esc(p.default_supplier || '—'))}
       ${dwRow('供貨模式', prodModeBadge(p))}
@@ -11130,10 +11332,11 @@ function openProductDrawer(id, tab) {
     <div class="banner info" style="margin-bottom:10px"><span class="bi">ℹ</span><div>
       代理商庫存<b>不計入</b>公司可用庫存，供「客訂叫貨」時參考成本與交期。</div></div>
     ${agents.length ? `<table class="tbl" style="font-size:12.5px"><thead><tr>
-      <th>代理商</th>${seeCost ? '<th class="r">成本</th>' : ''}<th>交期</th><th class="r">庫存</th><th>備註</th><th style="width:40px"></th>
+      <th>代理商</th><th>代理商料號</th>${seeCost ? '<th class="r">成本</th>' : ''}<th>交期</th><th class="r">庫存</th><th>備註</th><th style="width:40px"></th>
       </tr></thead><tbody>
       ${agents.map(a => `<tr>
         <td>${esc(a.supplier_name || '—')}</td>
+        <td style="font-family:var(--mono);font-size:11.5px">${esc(a.part_no || '—')}</td>
         ${seeCost ? `<td class="r money">${a.cost ? money(a.cost) : '—'}</td>` : ''}
         <td>${esc(a.lead_time || '—')}</td>
         <td class="r"><b>${+a.qty || 0}</b></td>
@@ -11217,7 +11420,7 @@ function openProductDrawer(id, tab) {
 
   openDrawer({
     title: p.name || '商品明細',
-    sub: p.part_no || '',
+    sub: primaryPartNo(p) || '',
     active: ['info', 'price', 'agents', 'batches', 'stock', 'moves'].indexOf(active) < 0 ? 0
       : ['info', 'price', 'agents', 'batches', 'stock', 'moves'].indexOf(active),
     tabs: [
@@ -11245,6 +11448,30 @@ function dwStat(label, val, color) {
   const c = color === 'red' ? 'var(--red)' : color === 'green' ? 'var(--green)' : color === 'blue' ? '#2563eb' : color === 'gray' ? 'var(--text-3)' : 'var(--text)';
   return `<div class="dw-stat"><div class="dw-stat-v" style="color:${c}">${val}</div><div class="dw-stat-k">${esc(label)}</div></div>`;
 }
+// 料號來源徽章（不同顏色小標籤）：公司自編＝藍紫、代理商料號＝橘
+function partNoSourceBadge(p) {
+  const agent = p && p.part_no_source === 'agent';
+  const col = agent ? '#C2410C' : '#4338CA';
+  const bg  = agent ? '#FFF7ED' : '#EEF2FF';
+  const txt = agent ? '代理' : '公司';
+  const tip = agent ? '以代理商料號為主' : '公司自編料號';
+  return `<span title="${tip}" style="display:inline-block;font-size:10px;font-weight:800;padding:1px 5px;border-radius:4px;color:${col};background:${bg};border:1px solid ${col}44;vertical-align:middle">${txt}</span>`;
+}
+// 主要顯示的料號：來源為代理商時優先顯示第一筆有料號的代理商料號，否則用公司料號
+function primaryPartNo(p) {
+  if (!p) return '';
+  if (p.part_no_source === 'agent') {
+    const a = (p.agent_stocks || []).find(x => (x.part_no || '').trim());
+    if (a) return a.part_no;
+  }
+  return p.part_no || '';
+}
+// 商品所有料號（公司 + 各代理商）串起來，供搜尋比對用
+function allPartNos(p) {
+  const arr = [p.part_no || ''];
+  (p.agent_stocks || []).forEach(a => { if (a.part_no) arr.push(a.part_no); });
+  return arr.join(' ').toLowerCase();
+}
 // 供貨模式：公司庫存／代理商叫貨／寄倉／其他（自行輸入）
 const SUPPLY_MODES = [['company', '公司庫存'], ['agent', '代理商叫貨'], ['consignment', '寄倉'], ['other', '其他']];
 function supplyModeLabel(p) {
@@ -11266,12 +11493,16 @@ function prodAgentEdit(pid, agid) {
   const p = byId(DB.products, pid); if (!p) return;
   p.agent_stocks = p.agent_stocks || [];
   const a = agid ? p.agent_stocks.find(x => x.id === agid) : null;
-  const d = a || { supplier_name: '', cost: 0, lead_time: '', qty: 0, note: '' };
+  const d = a || { supplier_name: '', part_no: '', cost: 0, lead_time: '', qty: 0, note: '' };
   openModal({
     title: agid ? '編輯代理商庫存' : '新增代理商庫存',
     body: `
-      <div class="field"><label class="req">代理商／廠商</label>
-        <input class="inp" list="supList" id="ag_sup" value="${esc(d.supplier_name || '')}"></div>
+      <div class="grid g2">
+        <div class="field"><label class="req">代理商／廠商</label>
+          <input class="inp" list="supList" id="ag_sup" value="${esc(d.supplier_name || '')}"></div>
+        <div class="field"><label>代理商料號</label>
+          <input class="inp" id="ag_pn" value="${esc(d.part_no || '')}" placeholder="代理商給的料號，可搜尋"></div>
+      </div>
       <div class="grid g2">
         <div class="field"><label>成本（未稅）</label><input class="inp num" type="number" id="ag_cost" value="${d.cost || ''}"></div>
         <div class="field"><label>交期</label><input class="inp" id="ag_lead" value="${esc(d.lead_time || '')}" placeholder="例：現貨／3 天"></div>
@@ -11288,7 +11519,8 @@ function prodAgentEdit(pid, agid) {
         const sup = el.querySelector('#ag_sup').value.trim();
         if (!sup) return toast('請填代理商名稱', 'err');
         const rec = {
-          supplier_name: sup, cost: +el.querySelector('#ag_cost').value || 0,
+          supplier_name: sup, part_no: el.querySelector('#ag_pn').value.trim(),
+          cost: +el.querySelector('#ag_cost').value || 0,
           lead_time: el.querySelector('#ag_lead').value.trim(),
           qty: +el.querySelector('#ag_qty').value || 0, note: el.querySelector('#ag_note').value.trim()
         };
@@ -11365,26 +11597,42 @@ function editProduct(id, seed) {
     has_bom: false, is_active: true, is_favorite: false, components: []
   });
 
-  const catOptions = () => majorCategories().map(major => {
-    const subs = subCategoriesOf(major.id);
-    const majorOpt = `<option value="${esc(major.name)}" ${major.name === p.category ? 'selected' : ''}>${esc(major.name)}（不分小分類）</option>`;
-    if (!subs.length) return majorOpt;
-    return `<optgroup label="${esc(major.name)}">${majorOpt}${subs.map(s =>
-      `<option value="${esc(s.name)}" ${s.name === p.category ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>`;
-  }).join('');
+  // 分類下拉：整棵樹依層數縮排（可無限層），value 用分類 id
+  const catOptions = () => {
+    const rows = [];
+    const walk = (parentId, depth) => {
+      (parentId ? subCategoriesOf(parentId) : majorCategories()).forEach(c => {
+        rows.push(`<option value="${c.id}" ${c.id === p.category_id ? 'selected' : ''}>${'　'.repeat(depth)}${esc(c.name)}</option>`);
+        walk(c.id, depth + 1);
+      });
+    };
+    walk(null, 0);
+    return rows.join('');
+  };
 
   const m = openModal({
     title: id ? '編輯商品' : '新增商品', size: 'lg',
     body: `
-      <div class="grid g3">
-        <div class="field"><label>料號（Part No.）</label><input class="inp" data-f="part_no" value="${esc(p.part_no || '')}" placeholder="可用來搜尋整張單"></div>
+      <div class="grid g2">
+        <div class="field"><label>料號來源</label>
+          <select class="inp" id="pPartNoSrc">
+            <option value="company" ${(p.part_no_source || 'company') === 'company' ? 'selected' : ''}>公司自編（有入庫）</option>
+            <option value="agent" ${p.part_no_source === 'agent' ? 'selected' : ''}>以代理商料號為主</option>
+          </select>
+          <div class="hint" id="pPartNoSrcHint" style="margin-top:2px"></div></div>
+        <div class="field"><label>公司料號（Part No.）</label>
+          <input class="inp" data-f="part_no" value="${esc(p.part_no || '')}" placeholder="公司自編料號，可搜尋整張單"></div>
+      </div>
+      <div class="grid g2">
         <div class="field"><label>品牌</label><input class="inp" list="brandList" data-f="brand" value="${esc(p.brand)}" placeholder="可打字／選既有品牌"></div>
         <div class="field"><label>分類</label>
           <select class="inp" id="pcatSel">
             <option value="">未分類</option>${catOptions()}
             <option value="__new">＋ 新增分類…</option>
-          </select></div>
+          </select>
+          <div class="hint" id="pCatPathHint" style="margin-top:2px"></div></div>
       </div>
+      <div id="pAttrsWrap"></div>
       <div class="field"><label class="req">品名</label><input class="inp" data-f="name" value="${esc(p.name)}"></div>
       <div class="field"><label>規格</label><input class="inp" data-f="spec" value="${esc(p.spec)}"></div>
       <div class="grid g2">
@@ -11460,19 +11708,60 @@ function editProduct(id, seed) {
              ${id ? '<button class="btn" data-clone>複製為新商品</button>' : ''}
              <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
     onMount(el, close) {
+      // 分類屬性欄位：依所選分類（含祖先）動態產生，並帶入既有值 + 既有值自動完成
+      const attrValues = (nm) => {
+        const set = new Set();
+        DB.products.forEach(pr => { const val = ((pr.attrs || {})[nm] || '').trim(); if (val) set.add(val); });
+        return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      };
+      const renderAttrs = () => {
+        const wrap = el.querySelector('#pAttrsWrap');
+        const defs = p.category_id ? categoryAttrDefs(p.category_id) : [];
+        if (!defs.length) { wrap.innerHTML = ''; return; }
+        wrap.innerHTML = `<div class="sec-title" style="margin-top:2px">分類屬性（用於左側勾選篩選）</div>
+          <div class="grid g2">` + defs.map(d => {
+            const cur = (p.attrs || {})[d.name] || '';
+            const listId = 'attrdl_' + d.id;
+            return `<div class="field"><label>${esc(d.name)}</label>
+              <input class="inp" data-attr="${esc(d.name)}" list="${listId}" value="${esc(cur)}" placeholder="例：${esc(d.name)}">
+              <datalist id="${listId}">${attrValues(d.name).map(vv => `<option value="${esc(vv)}">`).join('')}</datalist></div>`;
+          }).join('') + `</div>`;
+      };
       const catSel = el.querySelector('#pcatSel');
+      const applyCat = (catId) => {
+        p.category_id = catId || null;
+        p.category = catId ? ((byId(DB.categories, catId) || {}).name || '') : '';
+        const hint = el.querySelector('#pCatPathHint');
+        if (hint) hint.textContent = catId ? categoryPathName(catId) : '';
+        renderAttrs();
+      };
       catSel.onchange = () => {
-        if (catSel.value !== '__new') { p.category = catSel.value; return; }
-        catSel.value = p.category || '';   // 先復原，等真的建好再切過去
-        promptBox('新增分類', '分類名稱', '', name => {
-          if (DB.categories.some(c => c.name === name)) return toast('已有相同名稱的分類', 'err');
-          const nc = { id: uid('cat'), name, parent_id: null };   // 這裡建的一律是大分類
+        if (catSel.value !== '__new') { applyCat(catSel.value); return; }
+        catSel.value = p.category_id || '';   // 先復原，等真的建好再切過去
+        const parentId = p.category_id || null;   // 有選分類就建在它底下，否則建頂層
+        const where = parentId ? `「${(byId(DB.categories, parentId) || {}).name}」底下` : '頂層';
+        promptBox('新增分類（' + where + '）', '分類名稱', '', name => {
+          name = (name || '').trim(); if (!name) return;
+          if (DB.categories.some(c => c.name === name && (c.parent_id || null) === parentId))
+            return toast('這一層已有相同名稱的分類', 'err');
+          const nc = { id: uid('cat'), name, parent_id: parentId, attr_defs: [] };
           DB.categories.push(nc); save();
-          p.category = nc.name;
           catSel.innerHTML = `<option value="">未分類</option>${catOptions()}<option value="__new">＋ 新增分類…</option>`;
-          catSel.value = nc.name;
+          catSel.value = nc.id; applyCat(nc.id);
         });
       };
+      // 料號來源提示
+      const srcSel = el.querySelector('#pPartNoSrc');
+      const srcHint = el.querySelector('#pPartNoSrcHint');
+      const syncSrcHint = () => {
+        srcHint.textContent = srcSel.value === 'agent'
+          ? '列表以第一筆代理商料號顯示；代理商料號請到「代理商」分頁各自輸入'
+          : '列表顯示上面填的公司料號';
+      };
+      srcSel.onchange = syncSrcHint;
+      syncSrcHint();
+      if (p.category_id) { const h = el.querySelector('#pCatPathHint'); if (h) h.textContent = categoryPathName(p.category_id); }
+      renderAttrs();
       const drawComps = () => {
         el.querySelector('#compList').innerHTML = !p.components.length
           ? `<div class="empty" style="padding:22px"><p>還沒有組成項目</p></div>`
@@ -11590,6 +11879,12 @@ function editProduct(id, seed) {
         if (o.has_bom && !p.components.length) return toast('組合商品至少要有一項組成', 'err');
         if (o.has_bom && p.components.some(c => !c.name.trim())) return toast('組成項目要填名稱', 'err');
         Object.assign(p, o);
+        // 料號來源
+        p.part_no_source = (el.querySelector('#pPartNoSrc').value === 'agent') ? 'agent' : 'company';
+        // 分類屬性值（category_id / category 已由 applyCat 設定在 p 上）
+        const attrsVal = {};
+        el.querySelectorAll('[data-attr]').forEach(i => { const val = i.value.trim(); if (val) attrsVal[i.dataset.attr] = val; });
+        p.attrs = attrsVal;
         if (p.has_bom) p.default_cost = p.components.filter(c => !c.is_optional)
           .reduce((s, c) => s + (+c.cost || 0) * (+c.qty || 0), 0);
         else p.components = [];
