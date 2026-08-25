@@ -1996,6 +1996,8 @@ function buildSyncOps(cur0, prev0) {
     const curIds = new Set();
     for (const item of cur) {
       curIds.add(item.id);
+      // 已墓碑（被刪除）的記錄絕不再上傳，避免把已刪的單又推回雲端造成復活
+      if (cur0._deletions && cur0._deletions[item.id]) continue;
       const old = prevMap.get(item.id);
       if (!old || JSON.stringify(old) !== JSON.stringify(item)) {
         ops.push({ type: 'set', ref: fbDb.collection(col).doc(item.id), data: JSON.parse(JSON.stringify(item)) });
@@ -2182,6 +2184,13 @@ function firestoreListen() {
         const data = ch.doc.data();
         const idx = arr.findIndex(x => x.id === data.id);
         const lidx = larr.findIndex(x => x.id === data.id);
+        // 已被刪除（有墓碑）的記錄：不論遠端送來新增或修改，一律不復活；順手把本機殘留的也清掉。
+        // （沒有這道防線時，某台舊裝置把已刪的單重新寫回雲端，就會透過即時監聽又跳回畫面——就是「刪掉又出現」的成因）
+        if (DB._deletions && DB._deletions[data.id] && ch.type !== 'removed') {
+          if (idx >= 0) arr.splice(idx, 1);
+          if (lidx >= 0) larr.splice(lidx, 1);
+          return;
+        }
         // 第二層防護：這筆記錄本機目前的版本，跟「上次確認同步成功」的版本比對：如果不一樣，
         // 代表本機有這筆記錄還沒送出去的修改，這種情況下不能讓收到的（可能是舊的）遠端資料
         // 蓋過去，不然使用者剛做的修改會憑空消失。本機的修改之後還是會透過正常同步機制送出去。
@@ -7631,6 +7640,7 @@ function pickByCategory(itemId) {
   if (!it) return;
   openModal({
     title: '選分類找商品',
+    size: 'wide',
     body: `
       <div style="display:flex;gap:12px;align-items:flex-start;height:60vh;min-height:340px">
         <aside id="pcbCats" style="width:200px;flex:0 0 auto;overflow:auto;max-height:100%;font-size:13px"></aside>
@@ -10983,78 +10993,76 @@ function viewProducts(v) {
     const kw = (document.getElementById('ps').value || '').trim().toLowerCase();
     // 依「目前分類 + 關鍵字」得到的基準清單，用來算各選項的數量（品牌／屬性選取本身不縮小選項清單）
     const base = DB.products.filter(p => productInCategory(p, fs.catId) && productMatchKw(p, kw));
+    const catCount = catId => DB.products.filter(p => productInCategory(p, catId) && productMatchKw(p, kw)).length;
 
-    // 1) 分類：麵包屑 + 目前層的子分類（可一路往下鑽，無限層）
+    // 分類導覽：最上層只列主分類；點主分類 → 列它的次分類；再往下可無限層
     const path = fs.catId ? categoryPath(fs.catId) : [];
-    const crumbs = [`<span data-cat="" style="cursor:pointer;${fs.catId ? 'color:var(--accent)' : 'font-weight:700'}">全部</span>`]
+    const crumbs = [`<span data-cat="" style="cursor:pointer;${fs.catId ? 'color:var(--accent)' : 'font-weight:700'}">全部分類</span>`]
       .concat(path.map((c, i) =>
         `<span style="color:var(--text-3)"> › </span><span data-cat="${c.id}" style="cursor:pointer;${i === path.length - 1 ? 'font-weight:700' : 'color:var(--accent)'}">${esc(c.name)}</span>`))
       .join('');
     const children = fs.catId ? subCategoriesOf(fs.catId) : majorCategories();
-    const catCount = catId => DB.products.filter(p => productInCategory(p, catId) && productMatchKw(p, kw)).length;
-    const childRows = children.length
-      ? children.map(c => {
-        const has = subCategoriesOf(c.id).length > 0;
-        return `<div data-drill="${c.id}" style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:6px;cursor:pointer">
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}${has ? ' <span class="muted">▸</span>' : ''}</span>
-          <span class="muted" style="font-size:11px">${catCount(c.id)}</span></div>`;
-      }).join('')
-      : `<div class="muted" style="font-size:12px;padding:2px 4px">${fs.catId ? '（沒有更下層分類）' : '尚未建立分類'}</div>`;
-    const catInner = `<div style="font-size:12px;margin:0 2px 6px">${crumbs}</div>
-      <div style="border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg-2)">${childRows}</div>`;
+    const childRows = children.map(c => {
+      const has = subCategoriesOf(c.id).length > 0;
+      return `<div data-drill="${c.id}" style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;cursor:pointer">
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}${has ? ' <span class="muted">▸</span>' : ''}</span>
+        <span class="muted" style="font-size:11px">${catCount(c.id)}</span></div>`;
+    }).join('');
+    // 葉節點（沒有更下層）就不再顯示空的子分類框，只留麵包屑
+    const childBox = children.length
+      ? `<div style="border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg-2)">${childRows}</div>`
+      : (fs.catId ? '' : `<div class="muted" style="font-size:12px;padding:2px 4px">尚未建立分類（可到上方「管理分類」新增）</div>`);
+    const catInner = `<div style="font-size:12px;margin:0 2px 6px">${crumbs}</div>${childBox}`;
 
-    // 2) 品牌
-    const brandCount = {};
-    base.forEach(p => { const b = (p.brand || '').trim(); if (b) brandCount[b] = (brandCount[b] || 0) + 1; });
-    const brands = Object.keys(brandCount).sort((a, b) => a.localeCompare(b));
-    const brandInner = brands.length
-      ? brands.map(b => checkRow('brand', b, b, brandCount[b], fs.brands.includes(b))).join('')
-      : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`;
-
-    // 3) 這個分類（含祖先）定義的自訂屬性（例：容量、顏色…）
-    const attrSections = fs.catId ? categoryAttrDefs(fs.catId).map(def => {
-      const nm = def.name;
-      const valCount = {};
-      base.forEach(p => { const val = ((p.attrs || {})[nm] || '').trim(); if (val) valCount[val] = (valCount[val] || 0) + 1; });
-      const vals = Object.keys(valCount).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      const sel = fs.attrs[nm] || [];
-      const inner = vals.length
-        ? vals.map(val => checkRow('attrval', nm + '\u0001' + val, val, valCount[val], sel.includes(val))).join('')
-        : `<div class="muted" style="font-size:12px;padding:2px 4px">尚無資料</div>`;
-      return facetBox(esc(nm), inner);
-    }).join('') : '';
-
-    // 4) 進貨廠商
-    const supCount = {};
-    base.forEach(p => { const s = (p.default_supplier || '').trim(); if (s) supCount[s] = (supCount[s] || 0) + 1; });
-    const sups = Object.keys(supCount).sort((a, b) => a.localeCompare(b));
-    const supInner = sups.length
-      ? sups.map(s => checkRow('sup', s, s, supCount[s], fs.sups.includes(s))).join('')
-      : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`;
-
+    let html = '';
     const anyFilter = fs.catId || fs.brands.length || fs.sups.length || Object.values(fs.attrs).some(a => a && a.length);
-    box.innerHTML =
-      (anyFilter ? `<div style="margin-bottom:10px"><button class="btn sm ghost" id="pClearFilters" style="width:100%">清除全部篩選</button></div>` : '') +
-      facetBox('分類', catInner) +
-      facetBox('品牌', brandInner) +
-      attrSections +
-      facetBox('進貨廠商', supInner);
+    if (anyFilter) html += `<div style="margin-bottom:10px"><button class="btn sm ghost" id="pClearFilters" style="width:100%">清除全部篩選</button></div>`;
+    html += facetBox('分類', catInner);
 
-    // 事件：分類麵包屑
+    // 選定分類後，下方才出現篩選條件：品牌 + 這個分類的自訂屬性（容量／適用主機…）+ 進貨廠商
+    if (fs.catId) {
+      const brandCount = {};
+      base.forEach(p => { const b = (p.brand || '').trim(); if (b) brandCount[b] = (brandCount[b] || 0) + 1; });
+      const brands = Object.keys(brandCount).sort((a, b) => a.localeCompare(b));
+      html += facetBox('品牌', brands.length
+        ? brands.map(b => checkRow('brand', b, b, brandCount[b], fs.brands.includes(b))).join('')
+        : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`);
+
+      categoryAttrDefs(fs.catId).forEach(def => {
+        const nm = def.name;
+        const valCount = {};
+        base.forEach(p => { const val = ((p.attrs || {})[nm] || '').trim(); if (val) valCount[val] = (valCount[val] || 0) + 1; });
+        const vals = Object.keys(valCount).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        const sel = fs.attrs[nm] || [];
+        html += facetBox(esc(nm), vals.length
+          ? vals.map(val => checkRow('attrval', nm + '\u0001' + val, val, valCount[val], sel.includes(val))).join('')
+          : `<div class="muted" style="font-size:12px;padding:2px 4px">尚無資料（在商品編輯裡填入「${esc(nm)}」就會出現）</div>`);
+      });
+      html += `<div style="margin:-6px 2px 14px"><button class="btn sm ghost" id="pAddAttr" style="width:100%;font-size:11px" title="例如：容量、適用主機。加了之後，商品編輯會出現對應欄位，這裡也能勾選篩選">＋ 新增可篩選屬性</button></div>`;
+
+      const supCount = {};
+      base.forEach(p => { const s = (p.default_supplier || '').trim(); if (s) supCount[s] = (supCount[s] || 0) + 1; });
+      const sups = Object.keys(supCount).sort((a, b) => a.localeCompare(b));
+      html += facetBox('進貨廠商', sups.length
+        ? sups.map(s => checkRow('sup', s, s, supCount[s], fs.sups.includes(s))).join('')
+        : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`);
+    } else {
+      html += `<div class="muted" style="font-size:12px;padding:2px 4px;margin-top:-8px">選一個分類後，這裡會出現品牌、容量等篩選條件</div>`;
+    }
+
+    box.innerHTML = html;
+
     box.querySelectorAll('[data-cat]').forEach(el2 => el2.onclick = () => {
       fs.catId = el2.dataset.cat || ''; fs.attrs = {}; renderFacets(); run(true);
     });
-    // 事件：往下鑽分類
     box.querySelectorAll('[data-drill]').forEach(el2 => el2.onclick = () => {
       fs.catId = el2.dataset.drill; fs.attrs = {}; renderFacets(); run(true);
     });
-    // 事件：品牌
     box.querySelectorAll('[data-brand]').forEach(cb => cb.onchange = () => {
       const b = cb.dataset.brand;
       fs.brands = cb.checked ? [...new Set([...fs.brands, b])] : fs.brands.filter(x => x !== b);
       renderFacets(); run(true);
     });
-    // 事件：屬性值（key 為 屬性名\u0001值）
     box.querySelectorAll('[data-attrval]').forEach(cb => cb.onchange = () => {
       const [nm, val] = cb.dataset.attrval.split('\u0001');
       const cur = fs.attrs[nm] || [];
@@ -11062,12 +11070,22 @@ function viewProducts(v) {
       if (!fs.attrs[nm].length) delete fs.attrs[nm];
       renderFacets(); run(true);
     });
-    // 事件：進貨廠商
     box.querySelectorAll('[data-sup]').forEach(cb => cb.onchange = () => {
       const s = cb.dataset.sup;
       fs.sups = cb.checked ? [...new Set([...fs.sups, s])] : fs.sups.filter(x => x !== s);
       renderFacets(); run(true);
     });
+    const addA = box.querySelector('#pAddAttr');
+    if (addA) addA.onclick = () => {
+      promptBox('新增可篩選屬性', '屬性名稱（例：容量、適用主機）', '', name => {
+        name = (name || '').trim(); if (!name) return;
+        const cat = byId(DB.categories, fs.catId); if (!cat) return;
+        cat.attr_defs = cat.attr_defs || [];
+        if (cat.attr_defs.some(d => d.name === name)) return toast('這個分類已有同名屬性', 'err');
+        cat.attr_defs.push({ id: uid('attr'), name });
+        saveNow(); renderFacets();
+      });
+    };
     const clr = box.querySelector('#pClearFilters');
     if (clr) clr.onclick = () => { fs.catId = ''; fs.brands = []; fs.attrs = {}; fs.sups = []; renderFacets(); run(true); };
   };
