@@ -11733,17 +11733,21 @@ function editProduct(id, seed, onSaved) {
     has_bom: false, is_active: true, is_favorite: false, components: []
   });
 
-  // 分類下拉：整棵樹依層數縮排（可無限層），value 用分類 id
+  // 分類下拉：每個「主分類」用 optgroup 當群組標題（粗體灰、不可選），
+  // 主分類本身列為「（不分次分類）」，次分類以下用「└」＋縮排，主/次一眼分得清楚
   const catOptions = () => {
-    const rows = [];
-    const walk = (parentId, depth) => {
-      (parentId ? subCategoriesOf(parentId) : majorCategories()).forEach(c => {
-        rows.push(`<option value="${c.id}" ${c.id === p.category_id ? 'selected' : ''}>${'　'.repeat(depth)}${esc(c.name)}</option>`);
-        walk(c.id, depth + 1);
-      });
-    };
-    walk(null, 0);
-    return rows.join('');
+    return majorCategories().map(major => {
+      const opts = [];
+      const walk = (cat, depth) => {
+        const label = depth === 0
+          ? `${esc(cat.name)}（不分次分類）`
+          : `${'　'.repeat(depth - 1)}└ ${esc(cat.name)}`;
+        opts.push(`<option value="${cat.id}" ${cat.id === p.category_id ? 'selected' : ''}>${label}</option>`);
+        subCategoriesOf(cat.id).forEach(ch => walk(ch, depth + 1));
+      };
+      walk(major, 0);
+      return `<optgroup label="${esc(major.name)}">${opts.join('')}</optgroup>`;
+    }).join('');
   };
 
   const m = openModal({
