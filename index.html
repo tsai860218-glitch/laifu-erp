@@ -1066,6 +1066,20 @@ body.mobile.has-sticky .sticky-total{display:flex}
 .login-card .inp{height:46px;text-align:center;font-size:16px;letter-spacing:.05em;margin-bottom:10px}
 .login-card .btn{height:46px}
 .login-err{min-height:18px;font-size:12px;color:var(--red);margin-bottom:10px}
+/* 商品管理左側分類列（統一淡底 + hover 變色；可展開=📁+▸、最底層=🏷；數量用 pill） */
+.pfcat{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;cursor:pointer;background:var(--bg-2);border:1px solid var(--line);margin-bottom:5px;transition:background .12s,border-color .12s}
+.pfcat:last-child{margin-bottom:0}
+.pfcat:hover{background:var(--primary-050);border-color:var(--primary-600)}
+.pfcat.branch{background:var(--card)}
+.pfcat-ic{flex:0 0 auto;font-size:13px;line-height:1}
+.pfcat-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}
+.pfcat.leaf .pfcat-nm{font-weight:500;color:var(--text)}
+.pfcat-arw{flex:0 0 auto;color:var(--primary-600);font-size:12px;font-weight:700}
+.pfcat-ct{flex:0 0 auto;font-size:10.5px;font-weight:700;color:var(--text-2);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:1px 8px;min-width:22px;text-align:center}
+.pfcrumb{font-size:12px;margin:0 2px 8px;line-height:1.6}
+.pfcrumb a{cursor:pointer;color:var(--primary-600)}
+.pfcrumb .cur{font-weight:700;color:var(--text-1)}
+.pfcrumb .sep{color:var(--text-3)}
 </style>
 </head>
 <body>
@@ -7990,7 +8004,7 @@ function itemRow(it, n, editable, taxIncl, inclAmt) {
             oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'">${esc(it.spec || '')}</textarea>
           <input class="inp f-un" data-fi="${it.id}" data-k="unit" placeholder="單位" value="${esc(it.unit || '')}" ${D}>
         </div>
-        ${editable ? `<div style="margin-top:2px"><button type="button" class="btn sm ghost" onclick="pickByCategory('${it.id}')" style="font-size:11px;padding:2px 8px" title="用分類找商品，不用記品名">🔍 選分類找商品</button></div>` : ''}
+        ${editable ? `<div style="margin-top:4px"><button type="button" class="btn ghost" onclick="pickByCategory('${it.id}')" style="font-size:13px;padding:7px 14px;font-weight:600" title="用分類找商品，不用記品名">🔍 選分類找商品</button></div>` : ''}
         ${itemMeta(it, editable)}
         ${hasBom ? `<button class="bom-toggle" onclick="toggleBom('${it.id}')">
           ${open ? '▾' : '▸'} 內部組成 ${it.components.filter(c => c.is_included !== false).length} 項${costOn ? '' : '（成本已隱藏）'}</button>` : ''}
@@ -10998,22 +11012,25 @@ function viewProducts(v) {
 
     // 分類導覽：最上層只列主分類；點主分類 → 列它的次分類；再往下可無限層
     const path = fs.catId ? categoryPath(fs.catId) : [];
-    const crumbs = [`<span data-cat="" style="cursor:pointer;${fs.catId ? 'color:var(--accent)' : 'font-weight:700'}">全部分類</span>`]
-      .concat(path.map((c, i) =>
-        `<span style="color:var(--text-3)"> › </span><span data-cat="${c.id}" style="cursor:pointer;${i === path.length - 1 ? 'font-weight:700' : 'color:var(--accent)'}">${esc(c.name)}</span>`))
-      .join('');
+    const crumbs = `<div class="pfcrumb"><a data-cat="" class="${fs.catId ? '' : 'cur'}">全部分類</a>`
+      + path.map((c, i) => `<span class="sep"> › </span>${i === path.length - 1
+          ? `<span class="cur">${esc(c.name)}</span>`
+          : `<a data-cat="${c.id}">${esc(c.name)}</a>`}`).join('')
+      + `</div>`;
     const children = fs.catId ? subCategoriesOf(fs.catId) : majorCategories();
     const childRows = children.map(c => {
       const has = subCategoriesOf(c.id).length > 0;
-      return `<div data-drill="${c.id}" style="display:flex;align-items:center;gap:6px;padding:5px 6px;border-radius:6px;cursor:pointer">
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}${has ? ' <span class="muted">▸</span>' : ''}</span>
-        <span class="muted" style="font-size:11px">${catCount(c.id)}</span></div>`;
+      return `<div class="pfcat ${has ? 'branch' : 'leaf'}" data-drill="${c.id}">
+        <span class="pfcat-ic">${has ? '📁' : '🏷'}</span>
+        <span class="pfcat-nm">${esc(c.name)}</span>
+        ${has ? '<span class="pfcat-arw">▸</span>' : ''}
+        <span class="pfcat-ct">${catCount(c.id)}</span></div>`;
     }).join('');
     // 葉節點（沒有更下層）就不再顯示空的子分類框，只留麵包屑
     const childBox = children.length
-      ? `<div style="border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg-2)">${childRows}</div>`
+      ? `<div>${childRows}</div>`
       : (fs.catId ? '' : `<div class="muted" style="font-size:12px;padding:2px 4px">尚未建立分類（可到上方「管理分類」新增）</div>`);
-    const catInner = `<div style="font-size:12px;margin:0 2px 6px">${crumbs}</div>${childBox}`;
+    const catInner = `${crumbs}${childBox}`;
 
     let html = '';
     const anyFilter = fs.catId || fs.brands.length || fs.sups.length || Object.values(fs.attrs).some(a => a && a.length);
