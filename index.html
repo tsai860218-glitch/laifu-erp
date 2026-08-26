@@ -7653,7 +7653,7 @@ function pickByCategory(itemId) {
     size: 'wide',
     body: `
       <div style="display:flex;gap:12px;align-items:flex-start;height:60vh;min-height:340px">
-        <aside id="pcbCats" style="width:200px;flex:0 0 auto;overflow:auto;max-height:100%;font-size:13px"></aside>
+        <aside id="pcbCats" style="width:210px;flex:0 0 auto;overflow:auto;max-height:100%;font-size:13px"></aside>
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;max-height:100%">
           <input class="inp" id="pcbSearch" placeholder="在此分類內再搜尋 品名／料號／品牌…" autocomplete="off" style="margin-bottom:8px">
           <div id="pcbList" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:8px"></div>
@@ -7662,42 +7662,96 @@ function pickByCategory(itemId) {
     footer: `<button class="btn ghost" data-no>關閉</button>`,
     onMount(el, close) {
       let selCat = it.product_id ? (byId(DB.products, it.product_id) || {}).category_id || '' : '';
+      let selBrands = [];
+      let selAttrs = {};
       const catBox = el.querySelector('#pcbCats');
       const listBox = el.querySelector('#pcbList');
       const search = el.querySelector('#pcbSearch');
       const kwNow = () => (search.value || '').trim().toLowerCase();
+      // 基準清單（分類 + 關鍵字），用來算品牌／屬性各選項數量（勾選本身不縮小選項）
+      const baseList = () => DB.products.filter(p => p.is_active !== false && productInCategory(p, selCat) && productMatchKw(p, kwNow()));
 
-      const drawCats = () => {
+      const checkRow = (attr, val, label, count, checked) =>
+        `<label style="display:flex;align-items:center;gap:6px;padding:3px 2px;cursor:pointer">
+           <input type="checkbox" data-${attr}="${esc(val)}" ${checked ? 'checked' : ''}>
+           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px">${esc(label)}</span>
+           <span class="muted" style="font-size:11px">${count}</span></label>`;
+      const facetBox = (title, inner) =>
+        `<div style="margin-top:12px"><div style="font-weight:700;font-size:12px;color:var(--text-2);margin:0 2px 6px">${title}</div>${inner}</div>`;
+
+      const drawSide = () => {
         const path = selCat ? categoryPath(selCat) : [];
-        const crumbs = [`<span data-c="" style="cursor:pointer;${selCat ? 'color:var(--accent)' : 'font-weight:700'}">全部</span>`]
-          .concat(path.map((c, i) => `<span style="color:var(--text-3)"> › </span><span data-c="${c.id}" style="cursor:pointer;${i === path.length - 1 ? 'font-weight:700' : 'color:var(--accent)'}">${esc(c.name)}</span>`)).join('');
+        const crumbs = `<div class="pfcrumb"><a data-c="" class="${selCat ? '' : 'cur'}">全部</a>`
+          + path.map((c, i) => `<span class="sep"> › </span>${i === path.length - 1 ? `<span class="cur">${esc(c.name)}</span>` : `<a data-c="${c.id}">${esc(c.name)}</a>`}`).join('')
+          + `</div>`;
         const kids = selCat ? subCategoriesOf(selCat) : majorCategories();
         const cnt = id => DB.products.filter(p => p.is_active !== false && productInCategory(p, id) && productMatchKw(p, kwNow())).length;
         const rows = kids.length
           ? kids.map(c => {
             const has = subCategoriesOf(c.id).length > 0;
-            return `<div data-drill="${c.id}" style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;cursor:pointer">
-              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}${has ? ' <span class="muted">▸</span>' : ''}</span>
-              <span class="muted" style="font-size:11px">${cnt(c.id)}</span></div>`;
+            return `<div class="pfcat ${has ? 'branch' : 'leaf'}" data-drill="${c.id}">
+              <span class="pfcat-ic">${has ? '📁' : '🏷'}</span>
+              <span class="pfcat-nm">${esc(c.name)}</span>
+              ${has ? '<span class="pfcat-arw">▸</span>' : ''}
+              <span class="pfcat-ct">${cnt(c.id)}</span></div>`;
           }).join('')
-          : `<div class="muted" style="font-size:12px;padding:4px 6px">${selCat ? '（沒有更下層分類）' : '尚未建立分類'}</div>`;
-        catBox.innerHTML = `<div style="font-size:12px;margin:0 2px 6px">${crumbs}</div>
-          <div style="border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg-2)">${rows}</div>`;
-        catBox.querySelectorAll('[data-c]').forEach(x => x.onclick = () => { selCat = x.dataset.c || ''; drawCats(); drawList(); });
-        catBox.querySelectorAll('[data-drill]').forEach(x => x.onclick = () => { selCat = x.dataset.drill; drawCats(); drawList(); });
+          : (selCat ? '' : `<div class="muted" style="font-size:12px;padding:4px 6px">尚未建立分類</div>`);
+
+        let html = crumbs + rows;
+
+        // 選定分類後才出現：品牌 + 這個分類的自訂屬性（容量／適用主機…）勾選
+        if (selCat) {
+          const base = baseList();
+          const anyF = selBrands.length || Object.values(selAttrs).some(a => a && a.length);
+          if (anyF) html += `<div style="margin-top:10px"><button class="btn sm ghost" id="pcbClear" style="width:100%">清除勾選</button></div>`;
+          const bc = {}; base.forEach(p => { const b = (p.brand || '').trim(); if (b) bc[b] = (bc[b] || 0) + 1; });
+          const brands = Object.keys(bc).sort((a, b) => a.localeCompare(b));
+          if (brands.length) html += facetBox('品牌', brands.map(b => checkRow('brand', b, b, bc[b], selBrands.includes(b))).join(''));
+          categoryAttrDefs(selCat).forEach(def => {
+            const nm = def.name; const vc = {};
+            base.forEach(p => { const v = ((p.attrs || {})[nm] || '').trim(); if (v) vc[v] = (vc[v] || 0) + 1; });
+            const vals = Object.keys(vc).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            if (vals.length) html += facetBox(esc(nm), vals.map(v => checkRow('attrval', nm + '\u0001' + v, v, vc[v], (selAttrs[nm] || []).includes(v))).join(''));
+          });
+        }
+
+        catBox.innerHTML = html;
+        catBox.querySelectorAll('[data-c]').forEach(x => x.onclick = () => { selCat = x.dataset.c || ''; selAttrs = {}; drawSide(); drawList(); });
+        catBox.querySelectorAll('[data-drill]').forEach(x => x.onclick = () => { selCat = x.dataset.drill; selAttrs = {}; drawSide(); drawList(); });
+        catBox.querySelectorAll('[data-brand]').forEach(cb => cb.onchange = () => {
+          const b = cb.dataset.brand;
+          selBrands = cb.checked ? [...new Set([...selBrands, b])] : selBrands.filter(x => x !== b);
+          drawSide(); drawList();
+        });
+        catBox.querySelectorAll('[data-attrval]').forEach(cb => cb.onchange = () => {
+          const [nm, v] = cb.dataset.attrval.split('\u0001');
+          const cur = selAttrs[nm] || [];
+          selAttrs[nm] = cb.checked ? [...new Set([...cur, v])] : cur.filter(x => x !== v);
+          if (!selAttrs[nm].length) delete selAttrs[nm];
+          drawSide(); drawList();
+        });
+        const clr = catBox.querySelector('#pcbClear');
+        if (clr) clr.onclick = () => { selBrands = []; selAttrs = {}; drawSide(); drawList(); };
       };
 
       const drawList = () => {
         const kw = kwNow();
-        const list = DB.products.filter(p => p.is_active !== false && productInCategory(p, selCat) && productMatchKw(p, kw))
+        const attrPairs = Object.entries(selAttrs).filter(([, a]) => a && a.length);
+        const list = DB.products.filter(p => p.is_active !== false && productInCategory(p, selCat) && productMatchKw(p, kw)
+            && (!selBrands.length || selBrands.includes((p.brand || '').trim()))
+            && attrPairs.every(([nm, arr]) => arr.includes(((p.attrs || {})[nm] || '').trim())))
           .sort((a, b) => (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0));
         if (!list.length) { listBox.innerHTML = `<div class="empty" style="padding:24px"><p>這個分類沒有符合的商品</p></div>`; return; }
         listBox.innerHTML = list.slice(0, 300).map(p => {
           const cat = p.category_id ? categoryPathName(p.category_id) : (p.category || '');
+          const attrChips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => {
+            const v = ((p.attrs || {})[d.name] || '').trim();
+            return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;vertical-align:middle;margin-right:4px">${esc(d.name)} ${esc(v)}</span>` : '';
+          }).filter(Boolean).join('');
           return `<div data-pick="${p.id}" style="display:flex;gap:10px;align-items:center;padding:8px;border-bottom:1px solid var(--line);cursor:pointer">
             <div style="flex:1;min-width:0">
               <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.is_favorite ? '<span class="star">★</span> ' : ''}${esc(p.brand ? p.brand + ' ' : '')}${esc(p.name)}${p.has_bom ? ' <span class="bdg blue plain" style="height:15px;font-size:9px">BOM</span>' : ''}</div>
-              <div class="muted" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${partNoSourceBadge(p)} ${esc(primaryPartNo(p) || '—')}${cat ? '　' + esc(cat) : ''}${p.spec ? '　' + esc(p.spec) : ''}</div>
+              <div class="muted" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${partNoSourceBadge(p)} ${esc(primaryPartNo(p) || '—')}${cat ? '　' + esc(cat) : ''}${attrChips ? '　' + attrChips : ''}${p.spec ? '　' + esc(p.spec) : ''}</div>
             </div>
             <div class="money" style="flex:0 0 auto;font-size:12.5px">${p.list_price ? money(p.list_price) : ''}</div>
           </div>`;
@@ -7708,9 +7762,9 @@ function pickByCategory(itemId) {
         });
       };
 
-      search.addEventListener('input', () => { drawCats(); drawList(); });
+      search.addEventListener('input', () => { drawSide(); drawList(); });
       el.querySelector('[data-no]').onclick = () => close();
-      drawCats(); drawList();
+      drawSide(); drawList();
       setTimeout(() => search.focus(), 30);
     }
   });
