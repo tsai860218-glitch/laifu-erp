@@ -8396,56 +8396,25 @@ function saveFreeToMaster(id) {
 
 function openSaveFreeToMasterModal(id) {
   const it = byId(QE.items, id);
-  openModal({
-    title: '存入商品主檔',
-    body: `
-      <div class="banner info" style="margin-bottom:14px"><span class="bi">ℹ</span><div>
-        存入後下次報價打品名或料號就能搜到。<br>
-        <b>只會新增主檔，不會改動這張報價的金額。</b></div></div>
-      <div class="grid g2">
-        <div class="field"><label>料號</label><input class="inp" data-f="part_no" value="${esc(it.part_no || '')}"></div>
-        <div class="field"><label>品牌</label><input class="inp" data-f="brand" value="${esc(it.brand || '')}"></div>
-      </div>
-      <div class="field"><label class="req">品名</label><input class="inp" data-f="name" value="${esc(it.name)}"></div>
-      <div class="field"><label>規格</label><textarea class="inp" data-f="spec" rows="2" placeholder="可換行，每行一項">${esc(it.spec || '')}</textarea></div>
-      <div class="grid g3">
-        <div class="field"><label>單位</label><input class="inp" data-f="unit" value="${esc(it.unit || '台')}"></div>
-        <div class="field"><label>牌價（未稅）</label><input class="inp num" type="number" data-f="list_price" value="${it.unit_price}"></div>
-        <div class="field"><label>預設成本</label><input class="inp num" type="number" data-f="default_cost" value="${it.default_cost || 0}"></div>
-      </div>
-      <div class="grid g2">
-        <div class="field"><label>分類</label>
-          <input class="inp" data-f="category" list="catListToMaster" placeholder="例：桌上型電腦">
-          <datalist id="catListToMaster">${(DB.categories || []).map(c => `<option>${esc(c.name)}</option>`).join('')}</datalist></div>
-        <div class="field"><label>進貨廠商</label>
-          <input class="inp" data-f="default_supplier" list="supList" value="${esc(it.supplier_name || '')}" placeholder="可留空"></div>
-      </div>
-      <label class="chip" style="cursor:pointer"><input type="checkbox" data-f="is_favorite" style="display:none">★ 設為常用（置頂）</label>
-      ${supDatalist()}`,
-    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>存入主檔</button>`,
-    onMount(el, close) {
-      el.querySelector('.chip input').onchange = e => e.target.closest('.chip').classList.toggle('on', e.target.checked);
-      el.querySelector('[data-no]').onclick = close;
-      el.querySelector('[data-ok]').onclick = () => {
-        const o = { id: uid('p'), has_bom: false, is_active: true, components: [],
-          price_ref_date: '', price_ref_source: '', note: '',
-          part_no_source: 'company', agent_stocks: [], attrs: {}, category_id: null };
-        el.querySelectorAll('[data-f]').forEach(i =>
-          o[i.dataset.f] = i.type === 'checkbox' ? i.checked
-            : (i.type === 'number' ? +i.value || 0 : i.value.trim()));
-        if (!o.name) return toast('請填品名', 'err');
-        o.is_favorite = !!o.is_favorite;
-        if (o.category) {
-          let c = DB.categories.find(c => c.name === o.category);
-          if (!c) { c = { id: uid('cat'), name: o.category, parent_id: null, attr_defs: [] }; DB.categories.push(c); }
-          o.category_id = c.id;
-        }
-        DB.products.push(o);
-        it.product_id = o.id;
-        save(); close(); drawItems();
-        toast(`已存入主檔：${o.name}`, 'ok');
-      };
-    }
+  if (!it) return;
+  // 用這一列的內容當預設值，開「跟商品管理一模一樣」的新增商品表單
+  const seed = {
+    id: null,
+    part_no: it.part_no || '', brand: it.brand || '', name: it.name || '', spec: it.spec || '',
+    unit: it.unit || '台',
+    list_price: it.unit_price || 0, default_cost: it.default_cost || 0, net_price: 0, net_cost: 0,
+    category: '', category_id: null, attrs: {},
+    default_supplier: it.supplier_name || '',
+    part_no_source: 'company', agent_stocks: [],
+    price_ref_date: '', price_ref_source: '', note: '',
+    has_bom: false, is_active: true, is_favorite: false, components: [],
+    stock_mode: 'company'
+  };
+  editProduct(null, seed, (newP) => {
+    // 存好後把這一列連到新商品（金額不動，維持報價當下數字）
+    it.product_id = newP.id;
+    save(); drawItems();
+    toast(`已存入主檔並連結：${newP.name}`, 'ok');
   });
 }
 
@@ -11756,7 +11725,7 @@ function prodSafety(pid) {
   });
 }
 
-function editProduct(id, seed) {
+function editProduct(id, seed, onSaved) {
   const p = id ? JSON.parse(JSON.stringify(byId(DB.products, id))) : (seed || {
     id: null, part_no: '', brand: '', name: '', spec: '', unit: '台',
     list_price: 0, default_cost: 0, net_price: 0, net_cost: 0, category: '', default_supplier: '',
@@ -12092,7 +12061,9 @@ function editProduct(id, seed) {
                 ref_type: 'opening', reason: '期初庫存（新增商品）' });
             }
           }
-          saveNow(); render(); toast('已儲存', 'ok');
+          saveNow();
+          if (onSaved) onSaved(p); else render();
+          toast('已儲存', 'ok');
         };
         if (id) { doSave(); close(); return; }
         close();
