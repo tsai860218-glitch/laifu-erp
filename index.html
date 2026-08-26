@@ -11202,7 +11202,11 @@ function viewProducts(v) {
           <td onclick="openProductDrawer('${p.id}')"><b>${esc(p.name)}</b>
             ${p.spec ? `<div class="muted">${esc(p.spec)}</div>` : ''}</td>
           <td onclick="openProductDrawer('${p.id}')">${esc(p.brand || '—')}</td>
-          <td onclick="openProductDrawer('${p.id}')">${p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '—'}</td>
+          <td onclick="openProductDrawer('${p.id}')">${(() => {
+            const catLine = p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '<span class="muted">—</span>';
+            const chips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => { const v = ((p.attrs || {})[d.name] || '').trim(); return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;margin:2px 4px 0 0">${esc(d.name)} ${esc(v)}</span>` : ''; }).filter(Boolean).join('');
+            return catLine + (chips ? `<div style="margin-top:2px;line-height:1.5">${chips}</div>` : '');
+          })()}</td>
           <td onclick="openProductDrawer('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
           <td onclick="openProductDrawer('${p.id}')" class="r money cost-col" style="color:${dCol}">${p.has_bom && !net ? '<span class="muted">組合</span>' : (net && !prodCostFor(p, net) ? '<span class="muted">—</span>' : money(prodCostFor(p, net)))}</td>
           <td onclick="openProductDrawer('${p.id}')" class="r money" style="color:${dCol};font-weight:600">${net && !prodPriceFor(p, net) ? '<span class="muted">—</span>' : money(prodPriceFor(p, net))}</td>
