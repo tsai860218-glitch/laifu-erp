@@ -7746,7 +7746,7 @@ function pickByCategory(itemId) {
           const cat = p.category_id ? categoryPathName(p.category_id) : (p.category || '');
           const attrChips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => {
             const v = ((p.attrs || {})[d.name] || '').trim();
-            return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;vertical-align:middle;margin-right:4px">${esc(d.name)} ${esc(v)}</span>` : '';
+            return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;vertical-align:middle;margin-right:4px">${esc(v)}</span>` : '';
           }).filter(Boolean).join('');
           return `<div data-pick="${p.id}" style="display:flex;gap:10px;align-items:center;padding:8px;border-bottom:1px solid var(--line);cursor:pointer">
             <div style="flex:1;min-width:0">
@@ -7941,7 +7941,7 @@ function drawItems() {
               // 自訂屬性小標籤（容量／適用主機…）：依分類定義顯示有填值的屬性
               const attrChips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => {
                 const v = ((p.attrs || {})[d.name] || '').trim();
-                return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;vertical-align:middle;margin-right:4px">${esc(d.name)} ${esc(v)}</span>` : '';
+                return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;vertical-align:middle;margin-right:4px">${esc(v)}</span>` : '';
               }).filter(Boolean).join('');
               const pn = primaryPartNo(p);
               return {
@@ -11204,7 +11204,7 @@ function viewProducts(v) {
           <td onclick="openProductDrawer('${p.id}')">${esc(p.brand || '—')}</td>
           <td onclick="openProductDrawer('${p.id}')">${(() => {
             const catLine = p.category ? `<span class="co-badge" style="background:${categoryColor(p.category)}22;color:${categoryColor(p.category)}">${esc(p.category)}</span>` : '<span class="muted">—</span>';
-            const chips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => { const v = ((p.attrs || {})[d.name] || '').trim(); return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;margin:2px 4px 0 0">${esc(d.name)} ${esc(v)}</span>` : ''; }).filter(Boolean).join('');
+            const chips = (p.category_id ? categoryAttrDefs(p.category_id) : []).map(d => { const v = ((p.attrs || {})[d.name] || '').trim(); return v ? `<span style="display:inline-block;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;color:#0F766E;background:#F0FDFA;border:1px solid #99F6E4;margin:2px 4px 0 0">${esc(v)}</span>` : ''; }).filter(Boolean).join('');
             return catLine + (chips ? `<div style="margin-top:2px;line-height:1.5">${chips}</div>` : '');
           })()}</td>
           <td onclick="openProductDrawer('${p.id}')" class="muted">${esc(p.default_supplier || '—')}</td>
