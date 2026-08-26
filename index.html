@@ -8125,11 +8125,16 @@ function warnOverStock(it) {
 // 內部資訊：來源 / 成本 / 代理商（自由輸入 + 常用帶入）
 function itemMeta(it, editable) {
   const D = editable ? '' : 'disabled';
+  // 代理商叫貨：報價輸入時用紅字提醒，出貨當下要再跟代理商確認貨況與成本
+  const prod = it.product_id ? byId(DB.products, it.product_id) : null;
+  const agentNote = (prod && prod.stock_mode === 'agent')
+    ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin-top:5px;display:flex;align-items:center;gap:5px">⚠ 代理商叫貨，請確認貨況及成本</div>`
+    : '';
   if (it.components && it.components.length) {
     return `<div class="fi-meta"><div class="fi-r" style="flex:1">
       <span class="fi-tag">${costOn ? '👁 內部' : '🔒'}</span>
       <span class="fi-lock">組合商品：成本與代理商在「內部組成」裡逐項設定</span>
-    </div></div>`;
+    </div></div>${agentNote}`;
   }
   return `<div class="fi-meta">
     <div class="fi-r" style="flex:1">
@@ -8150,7 +8155,7 @@ function itemMeta(it, editable) {
         : `<span class="fi-lock">成本與廠商已隱藏</span>`}
     </div>
     <span class="fi-master" id="fimaster-${it.id}">${itemMasterWidget(it, editable)}</span>
-  </div>`;
+  </div>${agentNote}`;
 }
 
 function addSupFromItem(id) {
