@@ -6623,6 +6623,84 @@ function openColumnsMenu(wrapId) {
   });
 }
 
+// ── 凍結（鎖定）左側欄位：往右捲動時，鎖定的欄固定在左邊，方便對照金額／發票 ──
+function freezeStoreKey(id) { return 'erp_cols_frozen_' + id; }
+function getFrozenCols(id) {
+  try { return new Set(JSON.parse(localStorage.getItem(freezeStoreKey(id)) || '[]')); }
+  catch (e) { return new Set(); }
+}
+function setFrozenCols(id, set) {
+  try { localStorage.setItem(freezeStoreKey(id), JSON.stringify([...set])); } catch (e) {}
+}
+function applyColFreeze(wrapId) {
+  const cols = getColDefs(wrapId);
+  const styleId = 'colfreeze-style-' + wrapId;
+  let style = document.getElementById(styleId);
+  const wrap = document.getElementById(wrapId);
+  const table = wrap && wrap.querySelector('table');
+  if (!table) { if (style) style.textContent = ''; return; }
+  const frozen = getFrozenCols(wrapId);
+  const hidden = getHiddenCols(wrapId);
+  const heads = Array.from(table.querySelectorAll('thead th'));
+  const thCount = heads.length;
+  const offset = Math.max(0, thCount - cols.length); // 前置欄（勾選框）造成的位移
+  // 凍結界線 = 被選欄中最右邊那個（跳過隱藏欄）
+  let maxColIdx = -1;
+  cols.forEach(([k], i) => { if (frozen.has(k) && !hidden.has(k)) maxColIdx = Math.max(maxColIdx, i); });
+  if (maxColIdx < 0) { if (style) style.textContent = ''; return; }
+  // 要凍結的 th 索引（0 起算）：前置欄 + 第 0..maxColIdx 欄（隱藏欄 display:none、寬度 0，直接略過）
+  const frozenThIdx = [];
+  for (let p = 0; p < offset; p++) frozenThIdx.push(p);
+  cols.forEach(([k], i) => { if (i <= maxColIdx && !hidden.has(k)) frozenThIdx.push(i + offset); });
+  const rules = [`#${wrapId} table thead th{z-index:5}`]; // 讓表頭永遠蓋在凍結欄的內容上方
+  let left = 0;
+  frozenThIdx.forEach((thIdx, order) => {
+    const n = thIdx + 1; // nth-child 從 1 起算
+    const w = heads[thIdx] ? heads[thIdx].getBoundingClientRect().width : 0;
+    const isLast = order === frozenThIdx.length - 1;
+    const edge = isLast ? 'box-shadow:2px 0 0 -1px var(--line),6px 0 8px -6px rgba(15,23,42,.18);' : '';
+    rules.push(`#${wrapId} table thead th:nth-child(${n}){position:sticky;left:${left}px;z-index:7;background:var(--bg);${edge}}`);
+    rules.push(`#${wrapId} table tbody td:nth-child(${n}){position:sticky;left:${left}px;z-index:1;background:var(--card);${edge}}`);
+    left += w;
+  });
+  if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
+  style.textContent = rules.join('');
+}
+function columnsFreezeButton(wrapId) {
+  const n = getFrozenCols(wrapId).size;
+  return `<button class="btn" onclick="openFreezeMenu('${wrapId}')" title="鎖定左側欄位，往右捲動時仍看得到">📌 凍結欄位${n ? '（已設定）' : ''}</button>`;
+}
+function openFreezeMenu(wrapId) {
+  const cols = getColDefs(wrapId);
+  const frozen = getFrozenCols(wrapId);
+  let curMax = -1; cols.forEach(([k], i) => { if (frozen.has(k)) curMax = Math.max(curMax, i); });
+  openModal({
+    title: '凍結欄位（鎖定左側）',
+    body: `<div class="muted" style="margin-bottom:10px;font-size:12px">
+        選一欄當「凍結界線」：從最左邊到這一欄都會鎖定，往右捲看金額／發票時仍固定在左邊。只影響你這台裝置。</div>
+      <div style="display:flex;flex-direction:column;gap:2px;max-height:52vh;overflow:auto">
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:6px;cursor:pointer">
+          <input type="radio" name="freezepick" value="__none" ${curMax < 0 ? 'checked' : ''}> <b>不凍結</b></label>
+        ${cols.map(([k, label], i) => `<label style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:6px;cursor:pointer">
+          <input type="radio" name="freezepick" value="${k}" ${i === curMax ? 'checked' : ''}>
+          凍結到「${esc(label)}」為止${i === 0 ? '' : `　<span class="muted" style="font-size:11px">（含左側共 ${i + 1} 欄）</span>`}</label>`).join('')}
+      </div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>套用</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-ok]').onclick = () => {
+        const pick = (el.querySelector('input[name=freezepick]:checked') || {}).value;
+        const set = new Set();
+        if (pick && pick !== '__none') {
+          const idx = cols.findIndex(([k]) => k === pick);
+          cols.forEach(([k], i) => { if (i <= idx) set.add(k); });
+        }
+        setFrozenCols(wrapId, set); close(); render();
+      };
+    }
+  });
+}
+
 let qSelected = new Set();
 let qFilteredList = [];
 
@@ -8766,6 +8844,7 @@ function viewDeliveries(v) {
       </select>
       <button class="btn" onclick="clearListFilter('deliveries')">清除</button>
       ${columnsButton('dlist')}
+      ${columnsFreezeButton('dlist')}
       <button class="btn" onclick="exportDeliveriesExcel()">⬇ 匯出 Excel</button>
       <button class="btn" onclick="document.getElementById('dImpFile').click()">⬆ 匯入 Excel</button>
       <a href="javascript:void(0)" onclick="downloadDeliveryImportTemplate()" style="font-size:12px;color:var(--text-3);white-space:nowrap">下載範本</a>
@@ -8852,6 +8931,11 @@ function viewDeliveries(v) {
     bindTableSort('dlist', dSortState, run);
     makeColumnsResizable('dlist', 'deliveries');
     applyColVis('dlist');
+    applyColFreeze('dlist');
+    if (!window.__dFreezeResizeBound) {
+      window.__dFreezeResizeBound = true;
+      window.addEventListener('resize', () => { if (document.getElementById('dlist')) applyColFreeze('dlist'); });
+    }
     updateBulkBar('d');
     drawDSumBar(list); // 統計列用完整篩選結果，不是只算當前頁
   };
@@ -10072,17 +10156,28 @@ function dpStockCell(obj) {
     ${costOn ? `<div class="cst">${money(obj.cost || 0)}${COST_TAX[obj.cost_tax || 'ex']}</div>` : ''}`;
 }
 
+// 二聯式發票（invoice_copies===2）或此單設定只顯示含稅價時，出貨單的單價／小計改印含稅
+let _dpTax = { on: false, incl: {} };
+
 // 一個項目（主列 + BOM 零件列）的完整列印列，rg 是量測時用來分組的標記
 function dpItemRowsHtml(i, rowNo, rg) {
   const hasBom = i.components && i.components.length;
   const hasAsm = i.assembly_items && i.assembly_items.length;
+  const rate = DB.settings.tax_rate || 0.05;
+  // 含稅模式：小計用含稅（與總計對齊、尾差補在最後一項），單價由含稅小計回推
+  const lineAmt = _dpTax.on
+    ? (_dpTax.incl[i.id] != null ? _dpTax.incl[i.id] : round0((+i.qty || 0) * (+i.unit_price || 0) * (1 + rate)))
+    : lineAmount(i.qty, i.unit_price);
+  const unitDisp = _dpTax.on
+    ? (i.qty ? round0(lineAmt / i.qty * 100) / 100 : round0((+i.unit_price || 0) * (1 + rate) * 100) / 100)
+    : i.unit_price;
   const main = `<tr data-rg="${rg}">
     <td class="c">${rowNo}</td>
     <td class="item-brand">${esc(i.brand || '—')}</td>
     <td><b>${esc(i.name)}</b>${i.spec ? `<div class="sp">${esc(i.spec)}</div>` : ''}${i.part_no ? `<div class="sp">料號：${esc(i.part_no)}</div>` : ''}</td>
-    <td class="r">${moneyD(i.unit_price)}</td>
+    <td class="r">${moneyD(unitDisp)}</td>
     <td class="r">${moneyD(i.qty)}</td>
-    <td class="r">${money(lineAmount(i.qty, i.unit_price))}</td>
+    <td class="r">${money(lineAmt)}</td>
     <td class="stockcol">${hasBom ? '<span class="mut">見下方零件</span>' : dpStockCell(i)}</td>
   </tr>`;
   const bom = hasBom ? i.components.map(x => `<tr class="cmp" data-rg="${rg}">
@@ -10117,6 +10212,7 @@ function dpBlankRowHtml(padPx) {
 // 產生一整頁（表頭資訊 + 表格 + 是否含總計/簽名區）
 // 總計/簽名區固定貼在紙張底部（不管表格內容多少都不會跟著表格漂移）
 function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSummary, zoomClass) {
+  const incTax = (d.invoice_copies === 2) || (d.price_display === 'tax_included');
   return `<div class="paper a5">
     <div class="dp-head">
       <div class="dp-co-wrap">
@@ -10146,9 +10242,9 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
         <th style="width:7mm">項次</th>
         <th style="width:20mm">品牌</th>
         <th>項目</th>
-        <th style="width:16mm">單價</th>
+        <th style="width:16mm">單價${incTax ? '(含稅)' : ''}</th>
         <th style="width:11mm">數量</th>
-        <th style="width:18mm">小計</th>
+        <th style="width:18mm">小計${incTax ? '(含稅)' : ''}</th>
         <th style="width:24mm">是否有庫(V)</th>
       </tr></thead>
       <tbody>${rowsHtml}</tbody>
@@ -10174,10 +10270,13 @@ function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSum
           ${d.note ? `<div class="dp-kv"><span>備註</span><b class="${d.note_red ? 'dp-note-hl' : ''}">${esc(d.note).replace(/\n/g, '<br>')}</b></div>` : ''}
         </div>
         <div class="dp-sum-r">
-          <div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
-          <div class="dp-sl"><span>稅額 ${(DB.settings.tax_rate * 100).toFixed(0)}%</span><b>${money(t.tax)}</b></div>
-          <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票　${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
-          <div class="dp-sl total"><span>總計</span><b>${money(t.total)}</b></div>
+          ${incTax
+            ? `<div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票　${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
+               <div class="dp-sl total"><span>總計(含稅)</span><b>${money(t.total)}</b></div>`
+            : `<div class="dp-sl"><span>未稅金額</span><b>${money(t.subtotal)}</b></div>
+               <div class="dp-sl"><span>稅額 ${(DB.settings.tax_rate * 100).toFixed(0)}%</span><b>${money(t.tax)}</b></div>
+               <div class="dp-sl"><span>${d.no_invoice ? '●' : '○'} 不開發票　${d.no_invoice ? '○' : '●'} 發票＿${d.invoice_copies || 3}＿聯</span><span></span></div>
+               <div class="dp-sl total"><span>總計</span><b>${money(t.total)}</b></div>`}
         </div>
       </div>
 
@@ -10310,6 +10409,14 @@ function deliveryPaper(d) {
   const co = byId(DB.companies, d.company_id) || {};
   const c = d.customer_snapshot || {};
   const t = quoteTotals(d);
+  // 二聯式（或此單設定只顯示含稅）：先算好每一列的含稅小計（尾差補到最後一項），供列印用
+  const taxInc = (d.invoice_copies === 2) || (d.price_display === 'tax_included');
+  _dpTax = { on: taxInc, incl: {} };
+  if (taxInc) {
+    const real = (d.items || []).filter(i => (i.name || '').trim() || +i.qty || +i.unit_price);
+    const arr = taxInclusiveAmounts(real, DB.settings.tax_rate || 0.05, t.total);
+    real.forEach((it, idx) => { _dpTax.incl[it.id] = arr[idx]; });
+  }
   const ship = d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : d.shipping_method;
   const result = paginateDeliveryItemsMeasured(d, co, c, t, ship);
   const pages = result.pages;
