@@ -1080,6 +1080,15 @@ body.mobile.has-sticky .sticky-total{display:flex}
 .pfcrumb a{cursor:pointer;color:var(--primary-600)}
 .pfcrumb .cur{font-weight:700;color:var(--text-1)}
 .pfcrumb .sep{color:var(--text-3)}
+/* 管理分類：拖放搬移 */
+.cat-handle{flex:0 0 auto;cursor:grab;color:var(--text-3);font-size:15px;line-height:1;user-select:none;padding:0 2px}
+.cat-handle:active{cursor:grabbing}
+.cat-drop{height:8px;margin:-3px 0;border-radius:4px;transition:background .1s}
+.cat-drop.over{background:var(--primary-050);outline:2px dashed var(--primary-600);outline-offset:-2px}
+.site-row-h.into-over{outline:2px solid var(--primary-600);outline-offset:-2px;border-radius:8px;background:var(--primary-050)}
+.cat-dragging{opacity:.45}
+.cat-toplevel-drop{margin-top:10px;padding:12px;border:2px dashed var(--line-2);border-radius:8px;text-align:center;color:var(--text-2);font-size:12.5px}
+.cat-toplevel-drop.over{border-color:var(--primary-600);background:var(--primary-050);color:var(--primary-600)}
 </style>
 </head>
 <body>
@@ -11232,6 +11241,7 @@ function manageCategories() {
       <div id="catTree"></div>`,
     footer: `<button class="btn primary" data-no>完成</button>`,
     onMount(el, close) {
+      let dragId = null;
       const prodCountExact = cid =>
         DB.products.filter(p => p.category_id === cid || (!p.category_id && p.category === (byId(DB.categories, cid) || {}).name)).length;
 
@@ -11239,8 +11249,10 @@ function manageCategories() {
         const kids = subCategoriesOf(cat.id);
         const defs = cat.attr_defs || [];
         const inherited = categoryAttrDefs(cat.id).filter(d => !defs.some(x => x.name === d.name));
-        let h = `<div class="site-row" style="padding:7px 8px;margin-bottom:4px;${depth === 0 ? 'background:var(--bg-2);' : ''}">
-          <div class="site-row-h" style="margin-bottom:0;padding-left:${depth * 18}px">
+        let h = `<div class="cat-drop" data-before="${cat.id}" data-parent="${cat.parent_id || ''}"></div>
+          <div class="site-row" style="padding:7px 8px;margin-bottom:4px;${depth === 0 ? 'background:var(--bg-2);' : ''}">
+          <div class="site-row-h" data-into="${cat.id}" style="margin-bottom:0;padding-left:${depth * 18}px">
+            <span class="cat-handle" draggable="true" data-drag="${cat.id}" title="拖曳搬移：可換上層或重新排序">⠿</span>
             ${depth ? '<span class="muted" style="flex:0 0 auto">└</span>' : ''}
             <input class="inp" data-cid="${cat.id}" value="${esc(cat.name)}" style="${depth === 0 ? 'font-weight:700' : ''}">
             <span class="muted" style="font-size:11px;flex:0 0 auto">${prodCountExact(cat.id)} 項</span>
@@ -11266,13 +11278,79 @@ function manageCategories() {
 
       const draw = () => {
         const tops = majorCategories();
-        el.querySelector('#catTree').innerHTML = tops.length
-          ? tops.map(c => rowHtml(c, 0)).join('')
-          : `<div class="empty" style="padding:20px"><p>還沒有分類</p></div>`;
+        el.querySelector('#catTree').innerHTML = (tops.length
+          ? tops.map(c => rowHtml(c, 0)).join('') + `<div class="cat-drop" data-before="" data-parent=""></div>`
+          : `<div class="empty" style="padding:20px"><p>還沒有分類</p></div>`)
+          + `<div class="cat-toplevel-drop" data-toplevel="1">拖到這裡 → 移到最上層（放在最後）</div>`;
         bind();
       };
 
+      const moveCategory = (dragId, newParentId, beforeId) => {
+        newParentId = newParentId || null;
+        const cat = byId(DB.categories, dragId);
+        if (!cat || beforeId === dragId) return;
+        const sub = new Set(categoryDescendantIds(dragId)); // 含自己
+        if (newParentId && sub.has(newParentId)) return toast('不能移到自己或自己的子分類底下', 'err');
+        const sibs = DB.categories.filter(c => c.id !== dragId && (c.parent_id || null) === newParentId);
+        if (sibs.some(s => s.name === cat.name)) return toast('這一層已有同名分類，請先改名再搬移', 'err');
+        cat.parent_id = newParentId;
+        const arr = DB.categories;
+        arr.splice(arr.indexOf(cat), 1);
+        let idx;
+        if (beforeId) {
+          idx = arr.findIndex(c => c.id === beforeId);
+          if (idx < 0) idx = arr.length;
+        } else {
+          let last = -1;
+          arr.forEach((c, i) => { if ((c.parent_id || null) === newParentId) last = i; });
+          if (last >= 0) idx = last + 1;
+          else if (newParentId) { const pi = arr.findIndex(c => c.id === newParentId); idx = pi >= 0 ? pi + 1 : arr.length; }
+          else idx = arr.length;
+        }
+        arr.splice(idx, 0, cat);
+        saveNow(); draw(); toast('已搬移分類', 'ok');
+      };
+
       const bind = () => {
+        // 拖曳握把：開始／結束
+        el.querySelectorAll('.cat-handle[data-drag]').forEach(hd => {
+          hd.addEventListener('dragstart', e => {
+            dragId = hd.dataset.drag;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', dragId);
+            const row = hd.closest('.site-row'); if (row) row.classList.add('cat-dragging');
+          });
+          hd.addEventListener('dragend', () => {
+            dragId = null;
+            el.querySelectorAll('.cat-dragging').forEach(x => x.classList.remove('cat-dragging'));
+            el.querySelectorAll('.over,.into-over').forEach(x => x.classList.remove('over', 'into-over'));
+          });
+        });
+        // 列與列之間：重新排序（插到這一列前面，同一層）
+        el.querySelectorAll('.cat-drop').forEach(dz => {
+          dz.addEventListener('dragover', e => { if (dragId) { e.preventDefault(); dz.classList.add('over'); } });
+          dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+          dz.addEventListener('drop', e => {
+            e.preventDefault(); dz.classList.remove('over');
+            if (dragId) moveCategory(dragId, dz.dataset.parent || null, dz.dataset.before || null);
+          });
+        });
+        // 拖到某一列上：變成它的子分類（放到最後）
+        el.querySelectorAll('.site-row-h[data-into]').forEach(rh => {
+          rh.addEventListener('dragover', e => { if (dragId && dragId !== rh.dataset.into) { e.preventDefault(); rh.classList.add('into-over'); } });
+          rh.addEventListener('dragleave', () => rh.classList.remove('into-over'));
+          rh.addEventListener('drop', e => {
+            e.preventDefault(); rh.classList.remove('into-over');
+            if (dragId) moveCategory(dragId, rh.dataset.into, null);
+          });
+        });
+        // 底部區塊：移到最上層
+        const tl = el.querySelector('[data-toplevel]');
+        if (tl) {
+          tl.addEventListener('dragover', e => { if (dragId) { e.preventDefault(); tl.classList.add('over'); } });
+          tl.addEventListener('dragleave', () => tl.classList.remove('over'));
+          tl.addEventListener('drop', e => { e.preventDefault(); tl.classList.remove('over'); if (dragId) moveCategory(dragId, null, null); });
+        }
         el.querySelectorAll('[data-cid]').forEach(inp => inp.onchange = () => {
           const cat = byId(DB.categories, inp.dataset.cid);
           const oldName = cat.name, newName = inp.value.trim();
