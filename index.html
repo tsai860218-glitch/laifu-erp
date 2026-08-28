@@ -1652,7 +1652,7 @@ if (IS_DEV) {
 
 // 有填雲端設定、金鑰不是預設模板，且不在開發模式時，才啟用雲端。
 const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY') && !IS_DEV;
-const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals', 'tenders'];
+const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals', 'tenders', 'agencies'];
 // 這幾個進銷存集合「不上雲端」：它們是後來新增的，多數 Firestore 安全性規則尚未開放，
 // 一旦放進上面的同步清單，寫入雲端是「整批一次送」的，只要其中一個集合被規則擋住，
 // 整批就會被拒、連帶讓整個雲端同步卡住（表現就是「連不到雲端」）。因此改為只存本機。
@@ -3238,6 +3238,7 @@ function migrate(db) {
 
   db.warehouses = db.warehouses || [{ id: 'wh_main', name: '主倉', is_default: true, note: '' }];
   db.tenders = db.tenders || [];   // 標案管理
+  db.agencies = db.agencies || []; // 機關通訊錄（標案重複帶入）
   db.movements  = db.movements  || [];
   db.stock_locks= db.stock_locks|| [];
   db.rentals = db.rentals || [];
@@ -4475,7 +4476,7 @@ function emptyDB() {
     companies: s.companies,
     users: [], suppliers: [], customers: [], products: [], categories: [],
     quotes: [], deliveries: [], counters: {}, accounts: [], rentals: [],
-    stock: [], tenders: [],
+    stock: [], tenders: [], agencies: [],
     settings: Object.assign({}, DEFAULT_SETTINGS),
     _deletions: {},
     _created: new Date().toISOString()
@@ -6143,6 +6144,7 @@ function newTender() {
     bid_deadline_date: '', bid_deadline_time: '08:30',
     open_date: '', open_time: '10:00', open_place: '',
     e_bidding: '', bid_bond: '', bid_bond_amount: 0,
+    bid_bond_paid_date: '', bid_bond_returned_date: '', winner_name: '',
     status: 'bidding', abandon_reason: '',
     note: '',
     created_by_op: currentOperator(), last_modified_by: currentOperator(),
@@ -6161,6 +6163,49 @@ function delTender(id) {
       saveNow(); go('tenders');
       toast('已刪除標案', 'ok');
     }, true);
+}
+
+// 機關通訊錄：把目前標案的機關資料存成常用；或從常用挑一個帶入
+function saveAgencyFromTender(tid) {
+  const t = byId(DB.tenders, tid); if (!t || !canEdit()) return;
+  const name = (t.agency_name || '').trim();
+  if (!name) return toast('請先填機關名稱', 'err');
+  DB.agencies = DB.agencies || [];
+  const data = { name, address: t.agency_address || '', contact: t.agency_contact || '', phone: t.agency_phone || '', fax: t.agency_fax || '', email: t.agency_email || '' };
+  const a = DB.agencies.find(x => x.name === name);
+  if (a) Object.assign(a, data); else DB.agencies.push(Object.assign({ id: uid('ag') }, data));
+  saveNow(); toast('已存為常用機關', 'ok');
+}
+function pickAgency(tid) {
+  const t = byId(DB.tenders, tid); if (!t || !canEdit()) return;
+  const list = (DB.agencies || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  openModal({
+    title: '選擇機關（帶入資料）',
+    body: `<input class="inp" id="agkw" placeholder="搜尋機關名稱…" autocomplete="off" style="margin-bottom:10px">
+      <div id="aglist" style="max-height:52vh;overflow:auto"></div>`,
+    footer: `<button class="btn" data-no>取消</button>`,
+    onMount(el, close) {
+      const box = el.querySelector('#aglist');
+      const draw = () => {
+        const kw = (el.querySelector('#agkw').value || '').trim().toLowerCase();
+        const rows = list.filter(a => !kw || (a.name || '').toLowerCase().includes(kw));
+        box.innerHTML = rows.length
+          ? rows.map(a => `<div data-ag="${a.id}" style="padding:8px;border-bottom:1px solid var(--line);cursor:pointer">
+              <b>${esc(a.name)}</b>${a.contact ? `　<span class="muted">${esc(a.contact)}</span>` : ''}${a.phone ? `　<span class="muted">${esc(a.phone)}</span>` : ''}
+              ${a.address ? `<div class="muted" style="font-size:12px">${esc(a.address)}</div>` : ''}</div>`).join('')
+          : `<div class="muted" style="padding:16px">${(DB.agencies || []).length ? '查無符合' : '還沒有常用機關。先填好機關資料，按「存為常用機關」就會收進來。'}</div>`;
+        box.querySelectorAll('[data-ag]').forEach(x => x.onclick = () => {
+          const a = byId(DB.agencies, x.dataset.ag); if (!a) return;
+          t.agency_name = a.name || ''; t.agency_address = a.address || ''; t.agency_contact = a.contact || '';
+          t.agency_phone = a.phone || ''; t.agency_fax = a.fax || ''; t.agency_email = a.email || '';
+          save(); close(); render(); toast('已帶入機關資料', 'ok');
+        });
+      };
+      el.querySelector('#agkw').addEventListener('input', draw);
+      el.querySelector('[data-no]').onclick = close;
+      draw();
+    }
+  });
 }
 
 let tSortState = { key: 'bid_deadline', dir: 'asc' };
@@ -6196,6 +6241,34 @@ function tenderSortValue(t, key) {
   }
 }
 
+// 截止投標倒數：只對「投標中」有意義，回傳顯示字串與顏色
+function tenderDeadlineInfo(t) {
+  if (!t.bid_deadline_date) return null;
+  const dl = new Date(t.bid_deadline_date + 'T' + (t.bid_deadline_time || '23:59'));
+  if (isNaN(dl)) return null;
+  const ms = dl - new Date();
+  const days = Math.ceil(ms / 86400000);
+  if (ms < 0) return { days, text: '已截止', color: 'var(--text-3)', overdue: true, urgent: false };
+  if (days <= 1) return { days, text: '今明截止', color: 'var(--red)', overdue: false, urgent: true };
+  if (days <= 3) return { days, text: `剩 ${days} 天`, color: 'var(--red)', overdue: false, urgent: true };
+  if (days <= 7) return { days, text: `剩 ${days} 天`, color: 'var(--orange)', overdue: false, urgent: false };
+  return { days, text: `剩 ${days} 天`, color: 'var(--text-2)', overdue: false, urgent: false };
+}
+// 從連結報價單概估未稅成本（BOM 用零件成本、一般用預設成本；另加組裝配件成本）
+function quoteCostTotal(q) {
+  let c = 0;
+  (q.items || []).forEach(it => {
+    if (it.components && it.components.length) it.components.forEach(x => { c += (+x.qty || 0) * (+x.cost || 0); });
+    else c += (+it.qty || 0) * (+it.default_cost || 0);
+    (it.assembly_items || []).forEach(a => { c += (+a.qty || 0) * (+a.cost || 0); });
+  });
+  return c;
+}
+function tenderYear(t) {
+  const d = t.open_date || t.bid_deadline_date || t.announce_date || (t.created_at || '').slice(0, 10);
+  return (d || '').slice(0, 4);
+}
+
 function viewTenders(v) {
   const f = listFilterState('tenders');
   v.innerHTML = `
@@ -6212,6 +6285,7 @@ function viewTenders(v) {
       <button class="btn" onclick="clearListFilter('tenders')">清除</button>
       ${canEdit() ? `<button class="btn primary" onclick="newTender()">＋ 新增標案</button>` : ''}
     </div>
+    <div id="tStats" style="margin-bottom:12px"></div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="tlist"></div><div id="tPageBar"></div></div></div>`;
 
   const run = (resetPage) => {
@@ -6223,6 +6297,29 @@ function viewTenders(v) {
     if (kw) list = list.filter(t => (`${t.tender_no || ''} ${t.tender_name || ''} ${t.agency_name || ''}`).toLowerCase().includes(kw));
     if (st) list = list.filter(t => (t.status || 'bidding') === st);
     list = sortRows(list, tSortState, tenderSortValue);
+
+    // 統計列（得標率、今年得標金額、近期截止）— 用全部標案計算，不受篩選影響
+    const all = DB.tenders;
+    const nBidding = all.filter(t => (t.status || 'bidding') === 'bidding').length;
+    const won = all.filter(t => t.status === 'won').length;
+    const lost = all.filter(t => t.status === 'lost').length;
+    const winRate = (won + lost) ? Math.round(won / (won + lost) * 100) : null;
+    const yr = String(new Date().getFullYear());
+    const wonAmt = all.filter(t => t.status === 'won' && tenderYear(t) === yr).reduce((s, t) => s + (+t.award_amount || 0), 0);
+    const urgent = all.filter(t => (t.status || 'bidding') === 'bidding' && (tenderDeadlineInfo(t) || {}).urgent).length;
+    const overdueBidding = all.filter(t => (t.status || 'bidding') === 'bidding' && (tenderDeadlineInfo(t) || {}).overdue).length;
+    const statCard = (label, val, color, extra) => `<div style="flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+      <div style="font-size:11px;color:var(--text-2);letter-spacing:.03em">${label}</div>
+      <div style="font-size:19px;font-weight:800;color:${color || 'var(--text-1)'};line-height:1.3">${val}</div>
+      ${extra ? `<div style="font-size:10.5px;color:var(--text-3)">${extra}</div>` : ''}</div>`;
+    const statsEl = document.getElementById('tStats');
+    if (statsEl) statsEl.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">
+      ${statCard('投標中', nBidding + ' 件', 'var(--primary-600)')}
+      ${statCard('得標率', winRate == null ? '—' : winRate + '%', 'var(--green)', `已得標 ${won} · 未得標 ${lost}`)}
+      ${statCard(yr + ' 年得標金額', money(wonAmt), 'var(--green)')}
+      ${statCard('近 3 天截止', (urgent + overdueBidding) + ' 件', (urgent + overdueBidding) ? 'var(--red)' : 'var(--text-1)', overdueBidding ? `其中 ${overdueBidding} 件已過期未結案` : '投標中且即將截止')}
+    </div>`;
+
     const info = paginateList('tenders', list, resetPage);
     const page = info.pageItems;
     keepScroll('tlist');
@@ -6232,19 +6329,24 @@ function viewTenders(v) {
       : `<table class="tbl"><thead><tr>
           ${T_COLS.map(([k, label, cls]) => `<th class="sortable ${cls || ''}" data-sortkey="${k}">${label}${sortArrow(tSortState, k)}</th>`).join('')}
           </tr></thead><tbody>
-        ${page.map(t => `<tr onclick="go('tender/${t.id}')">
+        ${page.map(t => {
+          const isBid = (t.status || 'bidding') === 'bidding';
+          const dinfo = isBid ? tenderDeadlineInfo(t) : null;
+          const rowHl = dinfo && dinfo.urgent ? 'box-shadow:inset 3px 0 0 var(--red)' : (dinfo && dinfo.overdue ? 'box-shadow:inset 3px 0 0 var(--text-3)' : '');
+          return `<tr onclick="go('tender/${t.id}')" style="${rowHl}">
             <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
             <td>${esc(t.agency_name || '—')}</td>
             <td>${esc(t.tender_name || '—')}</td>
             <td class="nowrap">${t.announce_seq ? '第 ' + esc(String(t.announce_seq)) + ' 次' : '—'}</td>
-            <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' <b class="ttime">' + esc(t.bid_deadline_time) + '</b>' : '') : '—'}</td>
+            <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' <b class="ttime">' + esc(t.bid_deadline_time) + '</b>' : '') : '—'}${dinfo ? `<div style="font-size:11px;font-weight:700;color:${dinfo.color}">${dinfo.text}</div>` : ''}</td>
             <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' <b class="ttime">' + esc(t.open_time) + '</b>' : '') : '—'}</td>
             <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}</td>
             <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
             <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
             <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
             <td class="muted">${esc(t.note || '')}</td>
-          </tr>`).join('')}</tbody></table>`;
+          </tr>`;
+        }).join('')}</tbody></table>`;
     document.getElementById('tPageBar').innerHTML = list.length ? pageBarHtml('tenders', info) : '';
     bindTableSort('tlist', tSortState, run);
     makeColumnsResizable('tlist', 'tenders');
@@ -6330,6 +6432,55 @@ function viewTender(v) {
     qlink = ed ? `<button class="btn" onclick="pickTenderQuote('${t.id}')">＋ 選擇報價單</button>` : `<span class="muted">—</span>`;
   }
 
+  // 分析：標價率、預估未稅營收、概估成本與毛利（成本用連結報價單概估）；履約：連結報價單開出的出貨單
+  const lq = t.quote_id ? byId(DB.quotes, t.quote_id) : null;
+  const _rate = DB.settings.tax_rate || 0.05;
+  const bidRatio = (t.budget_amount && t.bid_amount) ? (t.bid_amount / t.budget_amount * 100) : null;
+  const revInclBase = t.status === 'won' ? (t.award_amount || t.bid_amount) : t.bid_amount;
+  const revEx = revInclBase ? round0(revInclBase / (1 + _rate)) : 0;
+  const cost = lq ? quoteCostTotal(lq) : 0;
+  const margin = revEx - cost;
+  const marginRate = revEx ? (margin / revEx * 100) : null;
+  const dvs = t.quote_id ? DB.deliveries.filter(d => d.quote_id === t.quote_id) : [];
+  const analysisCard = `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-h" style="min-height:auto;padding:8px 14px"><b>分析與履約</b></div>
+      <div class="card-b">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div style="flex:1;min-width:130px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+            <div style="font-size:11px;color:var(--text-2)">標價率（投標 ÷ 預算）</div>
+            <div style="font-size:18px;font-weight:800">${bidRatio == null ? '—' : bidRatio.toFixed(1) + '%'}</div>
+            <div style="font-size:10.5px;color:var(--text-3)">${t.bid_amount ? money(t.bid_amount) : '—'} / ${t.budget_amount ? money(t.budget_amount) : '—'}</div>
+          </div>
+          ${costOn ? `
+          <div style="flex:1;min-width:130px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+            <div style="font-size:11px;color:var(--text-2)">預估未稅營收</div>
+            <div style="font-size:18px;font-weight:800">${revEx ? money(revEx) : '—'}</div>
+            <div style="font-size:10.5px;color:var(--text-3)">${t.status === 'won' ? '依得標金額' : '依投標金額'}回推</div>
+          </div>
+          <div style="flex:1;min-width:130px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+            <div style="font-size:11px;color:var(--text-2)">預估毛利</div>
+            <div style="font-size:18px;font-weight:800;color:${lq ? (margin >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text-3)'}">${lq ? money(margin) : '—'}</div>
+            <div style="font-size:10.5px;color:var(--text-3)">${lq ? `成本概估 ${money(cost)}${marginRate != null ? '　毛利率 ' + marginRate.toFixed(1) + '%' : ''}` : '連結報價單後自動概估'}</div>
+          </div>` : `<div style="flex:2;min-width:180px;display:flex;align-items:center;color:var(--text-3);font-size:12px">成本與毛利已隱藏（點上方🔒成本開關可顯示）</div>`}
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:6px">履約出貨（來自連結的報價單）</div>
+          ${!t.quote_id
+            ? `<div class="muted" style="font-size:12px">尚未連結報價單。得標後先連結報價單、再從報價單開立出貨單，這裡就會顯示履約進度。</div>`
+            : (dvs.length
+              ? `<table class="tbl" style="font-size:12.5px"><thead><tr><th>出貨單號</th><th>出貨日</th><th class="r">金額(含稅)</th><th>發票</th></tr></thead><tbody>
+                  ${dvs.map(d => `<tr onclick="go('delivery/${d.id}')" style="cursor:pointer">
+                    <td><b>${esc(d.delivery_no || '（草稿）')}</b></td>
+                    <td class="nowrap">${d.delivery_date ? fmtDateShort(d.delivery_date) : '—'}</td>
+                    <td class="r money nowrap">${money(quoteTotals(d).total)}</td>
+                    <td class="nowrap">${d.invoiced ? `<span class="bdg green plain">已開 ${esc(d.invoice_no || '')}</span>` : '<span class="muted">未開</span>'}</td>
+                  </tr>`).join('')}</tbody></table>`
+              : `<div class="muted" style="font-size:12px">連結的報價單（${esc((lq && lq.quote_no) || '—')}）還沒有出貨單。</div>`)}
+        </div>
+      </div>
+    </div>`;
+
   v.innerHTML = `
     <div class="toolbar">
       <button class="btn" onclick="go('tenders')">← 返回標案總表</button>
@@ -6339,7 +6490,11 @@ function viewTender(v) {
     </div>
 
     <div class="card tsec-agency" style="margin-bottom:14px">
-      <div class="card-h" style="min-height:auto;padding:8px 14px"><b>機關資料</b></div>
+      <div class="card-h" style="min-height:auto;padding:8px 14px;display:flex;align-items:center"><b>機關資料</b>
+        ${ed ? `<div style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn sm" onclick="pickAgency('${t.id}')" title="從常用機關帶入">🏛 選擇機關</button>
+          <button class="btn sm ghost" onclick="saveAgencyFromTender('${t.id}')" title="把目前機關資料存成常用，下次直接挑">存為常用機關</button>
+        </div>` : ''}</div>
       <div class="card-b">
         <div class="grid g2">
           <div class="field"><label>機關名稱</label><input class="inp" data-t="agency_name" value="${esc(t.agency_name || '')}" ${dis}></div>
@@ -6374,6 +6529,7 @@ function viewTender(v) {
           <div class="field"><label>投標金額</label><input class="inp num" type="number" data-t="bid_amount" value="${t.bid_amount || ''}" ${dis}></div>
           <div class="field"><label>連結報價單</label>${qlink}</div>
         </div>
+        <div class="field"><label>得標廠商（未得標時填實際得標者，供日後定價參考）</label><input class="inp" data-t="winner_name" value="${esc(t.winner_name || '')}" placeholder="例：○○資訊有限公司" ${dis}></div>
         <div class="grid g3">
           <div class="field"><label>招標公告　第 O 次</label><input class="inp num" type="number" min="1" data-t="announce_seq" value="${t.announce_seq || ''}" ${dis}></div>
           <div class="field"><label>公告日</label><input class="inp" type="date" data-t="announce_date" value="${esc(t.announce_date || '')}" ${dis}></div>
@@ -6404,17 +6560,25 @@ function viewTender(v) {
               <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
             </select></div>
         </div>
+        ${(t.bid_bond === '是' || t.bid_bond_amount) ? `<div class="grid g3">
+          <div class="field"><label>押標金繳納日</label><input class="inp" type="date" data-t="bid_bond_paid_date" value="${esc(t.bid_bond_paid_date || '')}" ${dis}></div>
+          <div class="field"><label>押標金退還日</label><input class="inp" type="date" data-t="bid_bond_returned_date" value="${esc(t.bid_bond_returned_date || '')}" ${dis}></div>
+          <div class="field"><label>&nbsp;</label>${(t.bid_bond_paid_date && !t.bid_bond_returned_date && (t.status || 'bidding') !== 'bidding')
+            ? `<div style="color:var(--red);font-weight:700;font-size:12px;padding-top:8px">⚠ 押標金已繳未退，記得辦理退還</div>`
+            : (t.bid_bond_paid_date && t.bid_bond_returned_date ? `<div style="color:var(--green);font-weight:600;font-size:12px;padding-top:8px">✓ 押標金已退還</div>` : '')}</div>
+        </div>` : ''}
         ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
           <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
         <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
       </div>
-    </div>`;
+    </div>
+    ${analysisCard}`;
 
   v.querySelectorAll('[data-t]').forEach(el => el.addEventListener('change', () => {
     const k = el.dataset.t;
     t[k] = el.type === 'number' ? (+el.value || 0) : el.value;
     save();
-    if (k === 'status') render();  // 切到「棄標」時顯示原因欄，切走則收起
+    if (k === 'status' || k === 'bid_bond' || k === 'bid_bond_amount') render();  // 切棄標顯示原因、切換押標金顯示繳退日
   }));
 }
 
