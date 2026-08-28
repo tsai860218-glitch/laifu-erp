@@ -5140,7 +5140,7 @@ function applyStageColor() {
 
 function renderNav() {
   markExpired();
-  const pend = DB.deliveries.filter(d => d.status === 'pending_delivery').length;
+  const pend = DB.deliveries.filter(d => d.status === 'pending_delivery' && !d.deleted_at).length;
   const nav = document.getElementById('nav');
   let html = '', lastGroup = null;
   ROUTES.filter(r => (!r.adminOnly || isAdmin()) && (!r.flag || DB.settings[r.flag])).forEach(r => {
@@ -5203,10 +5203,10 @@ function viewDash(v) {
   const td = today(), ym = td.slice(0, 7);
   // 分部門檢視：依「負責業務所屬部門」篩選報價／出貨；整份總覽的統計都以這兩份清單為準
   const DQ = dashDept ? DB.quotes.filter(q => userDeptId(q.sales_user_id) === dashDept) : DB.quotes;
-  const DD = dashDept ? DB.deliveries.filter(d => userDeptId(d.sales_user_id) === dashDept) : DB.deliveries;
+  const DD = (dashDept ? DB.deliveries.filter(d => userDeptId(d.sales_user_id) === dashDept) : DB.deliveries).filter(d => !d.deleted_at);
   const todayQuotes = DQ.filter(q => q.quote_date === td && !isDraftNo(q.quote_no)).length;
   const toShip = DQ.filter(q => q.status === 'signed'
-    && !DD.some(d => d.quote_id === q.id && d.status !== 'cancelled')).length;
+    && !DD.some(d => d.quote_id === q.id && d.status !== 'cancelled' && !d.deleted_at)).length;
   const shippedToday = DD.filter(d => d.shipped_at && d.shipped_at.slice(0, 10) === td).length;
   const pendingDeliver = DD.filter(d => d.status === 'pending_delivery').length;
   // 印表機租賃：本月應收月租（生效中合約的月租合計）與 3 個月內即將到期數
@@ -6441,7 +6441,7 @@ function viewTender(v) {
   const cost = lq ? quoteCostTotal(lq) : 0;
   const margin = revEx - cost;
   const marginRate = revEx ? (margin / revEx * 100) : null;
-  const dvs = t.quote_id ? DB.deliveries.filter(d => d.quote_id === t.quote_id) : [];
+  const dvs = t.quote_id ? DB.deliveries.filter(d => d.quote_id === t.quote_id && !d.deleted_at) : [];
   const analysisCard = `
     <div class="card" style="margin-bottom:14px">
       <div class="card-h" style="min-height:auto;padding:8px 14px"><b>分析與履約</b></div>
@@ -7409,7 +7409,7 @@ function qBanner(q) {
 }
 
 function qActions(q) {
-  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled');
+  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled' && !d.deleted_at);
   let b = '<div class="btn-row" style="margin-top:4px">';
   if (q.status === 'draft')
     b += `<button class="btn primary" style="flex:1" onclick="sendQuote('${q.id}')">送出報價（取號）</button>`;
@@ -7532,7 +7532,7 @@ function snapCompany(co) {
 // 已經開出貨單就不給取消（避免出貨單失去來源依據），且一定要二次確認才會真的動作。
 function undoMarkOrdered(id) {
   const q = byId(DB.quotes, id);
-  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled');
+  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled' && !d.deleted_at);
   if (dvs.length) return toast('已經開立出貨單，不能取消客戶回簽。請先處理出貨單。', 'err');
   confirmBox('取消客戶回簽',
     `確定要取消「${esc(q.quote_no)}」的客戶回簽紀錄嗎？<br>會回到「已送出，等待客戶下單」的狀態，回簽方式／日期／備註都會被清空。`, () => {
@@ -7592,7 +7592,7 @@ function markOrdered(id) {
 // 議價：解鎖編輯（單號不變、版次 +1）
 function unlockQuote(id) {
   const q = byId(DB.quotes, id);
-  const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled');
+  const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled' && !d.deleted_at);
   if (dv.length) return toast('已開立出貨單，不可再改報價。請先作廢出貨單。', 'err');
   confirmBox('編輯報價單', `單號 <b>${esc(q.quote_no)}</b> 會保留，版次由 ${q.revision} 變成 ${q.revision + 1}。<br><br>
     <b>提醒：</b>客戶手上已有舊版 PDF，改完記得重新發一份給客戶。<br>確定要編輯？`, () => {
@@ -7609,7 +7609,7 @@ function lockQuote(id) {
 
 function deleteQuote(id) {
   const q = byId(DB.quotes, id);
-  const dv = DB.deliveries.filter(d => d.quote_id === id);
+  const dv = DB.deliveries.filter(d => d.quote_id === id && !d.deleted_at);
   if (dv.length) return toast(`這張報價有 ${dv.length} 張出貨單，不可刪除。請先刪除出貨單。`, 'err');
   confirmBox('刪除報價單',
     `將<b>永久刪除</b> ${esc(q.quote_no)}（${esc(q.customer_snapshot?.name || '')}），不可復原。<br>
@@ -7632,7 +7632,7 @@ function renewQuote(id) {
 // 取消報價：退回草稿，不是永久作廢——單號、內容都保留，可以直接繼續編輯、修改後重新送出
 function cancelQuote(id) {
   const q = byId(DB.quotes, id);
-  const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled');
+  const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled' && !d.deleted_at);
   if (dv.length) return toast(`還有 ${dv.length} 張出貨單未作廢，無法取消報價`, 'err');
   confirmBox('取消報價', '取消後會退回「草稿」狀態，內容都會保留，可以直接繼續編輯、之後重新送出。<br><br>確定要取消嗎？', () => {
     q.status = 'draft'; q.unlocked = false;
@@ -8774,7 +8774,7 @@ function makeDelivery(q, co, o) {
 
 function syncQuoteStatus(q) {
   if (q.status === 'cancelled') return;
-  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled');
+  const dvs = DB.deliveries.filter(d => d.quote_id === q.id && d.status !== 'cancelled' && !d.deleted_at);
   if (!dvs.length) { if (q.status !== 'draft' && q.status !== 'sent') q.status = 'signed'; return; }
   q.status = dvs.every(d => d.status === 'closed') ? 'completed' : 'signed';
 }
@@ -8939,6 +8939,7 @@ function viewDeliveries(v) {
       </select>
       <button class="btn" onclick="clearListFilter('deliveries')">清除</button>
       ${columnsButton('dlist')}
+      <button class="btn" onclick="openDeliveryTrash()" title="撈回誤刪的出貨單">🗑 垃圾桶${deliveryTrashCount() ? '（' + deliveryTrashCount() + '）' : ''}</button>
       <button class="btn" onclick="exportDeliveriesExcel()">⬇ 匯出 Excel</button>
       <button class="btn" onclick="document.getElementById('dImpFile').click()">⬆ 匯入 Excel</button>
       <a href="javascript:void(0)" onclick="downloadDeliveryImportTemplate()" style="font-size:12px;color:var(--text-3);white-space:nowrap">下載範本</a>
@@ -9000,7 +9001,7 @@ function viewDeliveries(v) {
     // 把篩選條件寫回 route.q，避免雲端同步觸發整頁重繪時，工具列在幾秒後跳回預設值
     // （日期區間由上方「每月/每年/自訂」分頁決定，不寫進 f）
     f.kw = kwRaw; f.status = st; f.dept = dept; f.sales = sa;
-    let list = DB.deliveries.slice();
+    let list = DB.deliveries.filter(d => !d.deleted_at);
     // 多關鍵字：以空白分隔，每個關鍵字都要命中（可跨欄位），例如「客戶名 商品名」
     const terms = kw.split(/\s+/).filter(Boolean);
     if (terms.length) list = list.filter(d => {
@@ -9201,14 +9202,24 @@ function bulkDeleteDeliveries() {
   const ids = [...dSelected];
   if (!ids.length) return;
   confirmBox('批次刪除出貨單',
-    `將<b>永久刪除</b>選取的 ${ids.length} 張出貨單，不可復原。<br>來源報價會回到「已下單」，可重新開立。<br><br>確定要刪除嗎？`, () => {
-      const qids = new Set(ids.map(id => byId(DB.deliveries, id)?.quote_id).filter(Boolean));
-      DB.deliveries = DB.deliveries.filter(d => !ids.includes(d.id));
+    `將選取的 ${ids.length} 張出貨單<b>移到垃圾桶</b>（可再撈回）。<br>來源報價會回到「已下單」。<br><br>確定要刪除嗎？`, () => {
+      const qids = new Set();
+      ids.forEach(id => {
+        const d = byId(DB.deliveries, id); if (!d) return;
+        if (invEnabled() && d._stock_deducted) {
+          stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨刪除回補 ' + (d.delivery_no || '') });
+          agentRestore({ ref_id: d.id, reason: '出貨刪除回補代理商額度 ' + (d.delivery_no || '') });
+          d._stock_deducted = false;
+        }
+        d.deleted_at = Date.now();
+        d.deleted_by = currentOperator() || '';
+        if (d.quote_id) qids.add(d.quote_id);
+      });
       qids.forEach(qid => { const q = byId(DB.quotes, qid); if (q) syncQuoteStatus(q); });
       dSelected.clear();
       saveNow(); render();
-      toast(`已刪除 ${ids.length} 張出貨單`, 'ok');
-    }, true);
+      toast(`已移到垃圾桶 ${ids.length} 張`, 'ok');
+    });
 }
 
 /* ===========================================================
@@ -9738,21 +9749,76 @@ function cancelDelivery(id) {
   }, true);
 }
 
+// ── 出貨單垃圾桶：軟刪除（標記 deleted_at）可撈回；永久刪除才真的移除 ──
+function deliveryTrashCount() { return DB.deliveries.filter(d => d.deleted_at).length; }
+function restoreDelivery(id) {
+  const d = byId(DB.deliveries, id); if (!d) return;
+  delete d.deleted_at; delete d.deleted_by;
+  const q = byId(DB.quotes, d.quote_id); if (q) syncQuoteStatus(q);
+  saveNow(); toast('已撈回：' + (d.delivery_no || ''), 'ok');
+  openDeliveryTrash();
+}
+function purgeDelivery(id) {
+  const d = byId(DB.deliveries, id); if (!d || !canEdit()) return;
+  confirmBox('永久刪除', `將<b>永久刪除</b> ${esc(d.delivery_no || '')}，之後就撈不回來了。<br><br>確定嗎？`, () => {
+    DB.deliveries = DB.deliveries.filter(x => x.id !== id);
+    saveNow(); toast('已永久刪除', 'ok'); openDeliveryTrash();
+  }, true);
+}
+function emptyDeliveryTrash() {
+  const trashed = DB.deliveries.filter(d => d.deleted_at);
+  if (!trashed.length || !canEdit()) return;
+  confirmBox('清空垃圾桶', `將<b>永久刪除</b>垃圾桶內全部 ${trashed.length} 張出貨單，無法撈回。<br><br>確定嗎？`, () => {
+    DB.deliveries = DB.deliveries.filter(d => !d.deleted_at);
+    saveNow(); toast('垃圾桶已清空', 'ok'); render();
+  }, true);
+}
+function openDeliveryTrash() {
+  const trashed = DB.deliveries.filter(d => d.deleted_at).sort((a, b) => (b.deleted_at || 0) - (a.deleted_at || 0));
+  openModal({
+    title: '垃圾桶（已刪除的出貨單）',
+    size: 'wide',
+    body: trashed.length
+      ? `<div class="muted" style="font-size:12px;margin-bottom:8px">撈回會把出貨單放回總表；<b>庫存不會自動重扣</b>，如需扣庫請撈回後重新確認出貨。</div>
+         <div style="max-height:58vh;overflow:auto">
+         <table class="tbl" style="font-size:12.5px"><thead><tr><th>出貨單號</th><th>客戶</th><th>刪除時間</th><th>刪除人</th><th class="r">金額</th><th></th></tr></thead><tbody>
+         ${trashed.map(d => `<tr>
+           <td><b>${esc(d.delivery_no || '（草稿）')}</b></td>
+           <td>${esc((d.customer_snapshot || {}).name || '')}</td>
+           <td class="nowrap">${d.deleted_at ? fmtDateTime(new Date(d.deleted_at).toISOString()) : '—'}</td>
+           <td>${esc(d.deleted_by || '')}</td>
+           <td class="r money nowrap">${money(quoteTotals(d).total)}</td>
+           <td class="nowrap" style="text-align:right">
+             <button class="btn sm" onclick="restoreDelivery('${d.id}')">↩ 撈回</button>
+             ${canEdit() ? `<button class="btn sm danger ghost" onclick="purgeDelivery('${d.id}')">永久刪除</button>` : ''}
+           </td>
+         </tr>`).join('')}</tbody></table></div>`
+      : `<div class="empty" style="padding:30px"><p>垃圾桶是空的</p></div>`,
+    footer: `${trashed.length && canEdit() ? `<button class="btn danger ghost" data-empty>清空垃圾桶</button>` : ''}<button class="btn" data-no>關閉</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      const em = el.querySelector('[data-empty]');
+      if (em) em.onclick = () => { close(); emptyDeliveryTrash(); };
+    }
+  });
+}
+
 function deleteDelivery(id) {
   const d = byId(DB.deliveries, id);
-  confirmBox('刪除出貨單', `將<b>永久刪除</b> ${esc(d.delivery_no)}，不可復原。<br>
-    來源報價會回到「已下單」，可重新開立。<br><br>確定刪除？`, () => {
-    const qid = d.quote_id;
-    // 已扣過庫存 → 刪除前先回補，避免庫存憑空少掉
+  confirmBox('刪除出貨單', `將 ${esc(d.delivery_no)} <b>移到垃圾桶</b>（可再撈回）。<br>
+    來源報價會回到「已下單」。<br><br>確定刪除？`, () => {
+    // 已扣過庫存 → 移入垃圾桶前先回補，避免庫存憑空少掉（撈回時會回到未扣狀態）
     if (invEnabled() && d._stock_deducted) {
       stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨刪除回補 ' + (d.delivery_no || '') });
       agentRestore({ ref_id: d.id, reason: '出貨刪除回補代理商額度 ' + (d.delivery_no || '') });
+      d._stock_deducted = false;
     }
-    DB.deliveries = DB.deliveries.filter(x => x.id !== id);
-    const q = byId(DB.quotes, qid);
+    d.deleted_at = Date.now();
+    d.deleted_by = currentOperator() || '';
+    const q = byId(DB.quotes, d.quote_id);
     if (q) syncQuoteStatus(q);
-    save(); go('deliveries'); toast('已刪除出貨單');
-  }, true);
+    save(); go('deliveries'); toast('已移到垃圾桶');
+  });
 }
 
 
