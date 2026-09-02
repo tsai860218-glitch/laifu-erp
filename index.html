@@ -1088,6 +1088,28 @@ body.mobile.has-sticky .sticky-total{display:flex}
 .pfcrumb a{cursor:pointer;color:var(--primary-600)}
 .pfcrumb .cur{font-weight:700;color:var(--text-1)}
 .pfcrumb .sep{color:var(--text-3)}
+/* 商品管理左側：可展開樹狀分類（視覺整理版：大分類分區、子分類縮排＋導引線） */
+.ptree{display:flex;flex-direction:column}
+.ptree-all{display:flex;align-items:center;gap:7px;padding:8px;border-radius:7px;cursor:pointer;margin-bottom:2px}
+.ptree-all:hover{background:var(--primary-050)}
+.ptree-all.sel{background:var(--primary-050);box-shadow:inset 4px 0 0 var(--primary-600)}
+.ptree-all.sel .ptree-nm{color:var(--primary-600)}
+.ptree-grp{border-top:1px solid var(--line)}
+.ptree-grp:first-of-type{border-top:none}
+.ptree-row{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:7px;cursor:pointer;position:relative}
+.ptree-row:hover{background:var(--primary-050)}
+.ptree-row.sel{background:var(--primary-050);box-shadow:inset 4px 0 0 var(--primary-600)}
+.ptree-row.sel .ptree-nm{color:var(--primary-600)}
+.ptree-tw{flex:0 0 auto;width:14px;text-align:center;color:var(--text-3);font-size:10px;line-height:1}
+.ptree-tw[data-tog]{cursor:pointer}
+.ptree-tw[data-tog]:hover{color:var(--primary-600)}
+.ptree-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:800;color:var(--text-1)}
+.ptree-row.lv0 .ptree-nm{font-size:14.5px;font-weight:800;color:var(--text-1)}
+/* 子分類：字級小、淡色、縮排；左側細導引線代替小圓點 */
+.ptree-row.lvn .ptree-nm{font-size:13px;font-weight:500;color:var(--text-2)}
+.ptree-row.lvn::before{content:'';position:absolute;left:19px;top:0;bottom:0;width:1px;background:var(--line)}
+.ptree-ct{flex:0 0 auto;font-size:10.5px;font-weight:700;color:var(--text-3);background:var(--bg-2);border-radius:999px;padding:1px 7px;min-width:22px;text-align:center}
+.pfsec-div{margin:16px 2px 8px;padding-top:10px;border-top:1px dashed var(--line-2);font-size:11px;font-weight:700;color:var(--text-2);letter-spacing:.03em}
 /* 管理分類：拖放搬移 */
 .cat-handle{flex:0 0 auto;cursor:grab;color:var(--text-3);font-size:15px;line-height:1;user-select:none;padding:0 2px}
 .cat-handle:active{cursor:grabbing}
@@ -10947,6 +10969,7 @@ function productSortValue(p, key) {
 }
 
 let pFilterState = { kw: '', catId: '', brands: [], attrs: {}, sups: [] };
+let pTreeExpanded = new Set(); // 商品管理左側分類樹：目前展開的分類 id
 
 /* ===========================================================
    §產品分析 —— 依出貨單統計各產品在不同客戶的出貨量與金額
@@ -11339,7 +11362,8 @@ function viewProducts(v) {
     const base = DB.products.filter(p => productInCategory(p, fs.catId) && productMatchKw(p, kw));
     const catCount = catId => DB.products.filter(p => productInCategory(p, catId) && productMatchKw(p, kw)).length;
 
-    // 分類導覽：最上層只列主分類；點主分類 → 列它的次分類；再往下可無限層
+    // 可展開樹狀分類：大分類 📁 → 子分類（箭頭展開/收合，點名稱選取）。整棵樹一直看得到，不再需要往下鑽。
+    // 逐層鑽入：麵包屑(可回上層) + 目前這層的子分類卡片(點卡片鑽進去)
     const path = fs.catId ? categoryPath(fs.catId) : [];
     const crumbs = `<div class="pfcrumb"><a data-cat="" class="${fs.catId ? '' : 'cur'}">全部分類</a>`
       + path.map((c, i) => `<span class="sep"> › </span>${i === path.length - 1
@@ -11347,27 +11371,29 @@ function viewProducts(v) {
           : `<a data-cat="${c.id}">${esc(c.name)}</a>`}`).join('')
       + `</div>`;
     const children = fs.catId ? subCategoriesOf(fs.catId) : majorCategories();
-    const childRows = children.map(c => {
+    const childCards = children.map(c => {
       const has = subCategoriesOf(c.id).length > 0;
-      return `<div class="pfcat ${has ? 'branch' : 'leaf'}" data-drill="${c.id}">
-        <span class="pfcat-ic">${has ? '📁' : '🏷'}</span>
+      const icon = c.parent_id ? '🔖' : '📁';   // 大分類=📁、子分類=🔖
+      return `<div class="pfcat ${has ? 'branch' : 'leaf'}" data-cat="${c.id}">
+        <span class="pfcat-ic">${icon}</span>
         <span class="pfcat-nm">${esc(c.name)}</span>
         ${has ? '<span class="pfcat-arw">▸</span>' : ''}
         <span class="pfcat-ct">${catCount(c.id)}</span></div>`;
     }).join('');
-    // 葉節點（沒有更下層）就不再顯示空的子分類框，只留麵包屑
     const childBox = children.length
-      ? `<div>${childRows}</div>`
-      : (fs.catId ? '' : `<div class="muted" style="font-size:12px;padding:2px 4px">尚未建立分類（可到上方「管理分類」新增）</div>`);
-    const catInner = `${crumbs}${childBox}`;
+      ? `<div>${childCards}</div>`
+      : (fs.catId ? `<div class="muted" style="font-size:12px;padding:2px 4px">（此分類底下沒有子分類）</div>`
+                  : `<div class="muted" style="font-size:12px;padding:2px 4px">尚未建立分類（可用上方「管理分類」新增）</div>`);
+    const treeHtml = crumbs + childBox;
 
     let html = '';
     const anyFilter = fs.catId || fs.brands.length || fs.sups.length || Object.values(fs.attrs).some(a => a && a.length);
     if (anyFilter) html += `<div style="margin-bottom:10px"><button class="btn sm ghost" id="pClearFilters" style="width:100%">清除全部篩選</button></div>`;
-    html += facetBox('分類', catInner);
+    html += facetBox('商品分類', treeHtml);
 
-    // 選定分類後，下方才出現篩選條件：品牌 + 這個分類的自訂屬性（容量／適用主機…）+ 進貨廠商
+    // —— 分類 與 「品牌／規格／標籤篩選」明確分區 ——
     if (fs.catId) {
+      html += `<div class="pfsec-div">篩選（品牌 / 規格 / 標籤）</div>`;
       const brandCount = {};
       base.forEach(p => { const b = (p.brand || '').trim(); if (b) brandCount[b] = (brandCount[b] || 0) + 1; });
       const brands = Object.keys(brandCount).sort((a, b) => a.localeCompare(b));
@@ -11385,7 +11411,7 @@ function viewProducts(v) {
           ? vals.map(val => checkRow('attrval', nm + '\u0001' + val, val, valCount[val], sel.includes(val))).join('')
           : `<div class="muted" style="font-size:12px;padding:2px 4px">尚無資料（在商品編輯裡填入「${esc(nm)}」就會出現）</div>`);
       });
-      html += `<div style="margin:-6px 2px 14px"><button class="btn sm ghost" id="pAddAttr" style="width:100%;font-size:11px" title="例如：容量、適用主機。加了之後，商品編輯會出現對應欄位，這裡也能勾選篩選">＋ 新增可篩選屬性</button></div>`;
+      html += `<div style="margin:-6px 2px 14px"><button class="btn sm ghost" id="pAddAttr" style="width:100%;font-size:11px" title="例如：容量、顏色。加了之後，商品編輯會出現對應欄位，這裡也能勾選篩選">＋ 新增可篩選屬性</button></div>`;
 
       const supCount = {};
       base.forEach(p => { const s = (p.default_supplier || '').trim(); if (s) supCount[s] = (supCount[s] || 0) + 1; });
@@ -11394,16 +11420,15 @@ function viewProducts(v) {
         ? sups.map(s => checkRow('sup', s, s, supCount[s], fs.sups.includes(s))).join('')
         : `<div class="muted" style="font-size:12px;padding:2px 4px">無</div>`);
     } else {
-      html += `<div class="muted" style="font-size:12px;padding:2px 4px;margin-top:-8px">選一個分類後，這裡會出現品牌、容量等篩選條件</div>`;
+      html += `<div class="muted" style="font-size:12px;padding:6px 4px 2px">選一個分類後，這裡會出現品牌、容量等規格／標籤篩選。</div>`;
     }
 
     box.innerHTML = html;
 
+    // 點麵包屑或子分類卡片：切換到該分類（＝逐層鑽入／回上層），並帶入該分類的篩選
     box.querySelectorAll('[data-cat]').forEach(el2 => el2.onclick = () => {
-      fs.catId = el2.dataset.cat || ''; fs.attrs = {}; renderFacets(); run(true);
-    });
-    box.querySelectorAll('[data-drill]').forEach(el2 => el2.onclick = () => {
-      fs.catId = el2.dataset.drill; fs.attrs = {}; renderFacets(); run(true);
+      fs.catId = el2.dataset.cat || ''; fs.attrs = {};
+      renderFacets(); run(true);
     });
     box.querySelectorAll('[data-brand]').forEach(cb => cb.onchange = () => {
       const b = cb.dataset.brand;
@@ -12109,15 +12134,19 @@ function editProduct(id, seed, onSaved) {
   });
 
   // 分類下拉：每個「主分類」用 optgroup 當群組標題（粗體灰、不可選），
-  // 主分類本身列為「（不分次分類）」，次分類以下用「└」＋縮排，主/次一眼分得清楚
+  // 有子分類的大分類＝資料夾（僅當群組標題，不列可選項）；沒有子分類的大分類仍可直接選；
+  // 次分類以下用「└」＋縮排。若商品目前就設在某個「資料夾大分類」上，仍保留一個選項以免存檔被清掉。
   const catOptions = () => {
     return majorCategories().map(major => {
       const opts = [];
       const walk = (cat, depth) => {
-        const label = depth === 0
-          ? `${esc(cat.name)}（不分次分類）`
-          : `${'　'.repeat(depth - 1)}└ ${esc(cat.name)}`;
-        opts.push(`<option value="${cat.id}" ${cat.id === p.category_id ? 'selected' : ''}>${label}</option>`);
+        const hasKids = subCategoriesOf(cat.id).length > 0;
+        if (depth === 0 && hasKids) {
+          if (cat.id === p.category_id) opts.push(`<option value="${cat.id}" selected>📁 ${esc(cat.name)}（此分類本身）</option>`);
+        } else {
+          const label = depth === 0 ? `📁 ${esc(cat.name)}` : `${'　'.repeat(depth - 1)}🔖 ${esc(cat.name)}`;
+          opts.push(`<option value="${cat.id}" ${cat.id === p.category_id ? 'selected' : ''}>${label}</option>`);
+        }
         subCategoriesOf(cat.id).forEach(ch => walk(ch, depth + 1));
       };
       walk(major, 0);
