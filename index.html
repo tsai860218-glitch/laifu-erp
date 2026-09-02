@@ -9922,22 +9922,7 @@ async function renderPDF(html, size, filename, folderKey) {
       document.getElementById('pdfMsg').textContent = `處理中… ${i + 1} / ${papers.length}`;
       const canvas = await window.html2canvas(papers[i], {
         scale: 3, backgroundColor: '#FFFFFF', useCORS: true, logging: false,
-        windowWidth: papers[i].scrollWidth, windowHeight: papers[i].scrollHeight,
-        onclone: (doc) => {
-          // html2canvas 不支援 CSS zoom：會把縮小的表格用 100% 畫出、再被壓進 A4，導致文字重疊。
-          // 這裡在「複製出來要截圖的 DOM」上把 zoom 換成等效的 transform: scale（html2canvas 有支援），
-          // 讓下載的 PDF 與畫面預覽一致。不影響實際頁面與分頁量測。
-          doc.querySelectorAll('.pp-tbl, .dp-tbl').forEach(el => {
-            const m = (el.className || '').match(/z-(\d+)/);
-            const z = m ? (+m[1] / 100) : 1;
-            if (z && z !== 1) {
-              el.style.zoom = '1';
-              el.style.transformOrigin = 'top left';
-              el.style.transform = 'scale(' + z + ')';
-              el.style.width = (100 / z) + '%';
-            }
-          });
-        }
+        windowWidth: papers[i].scrollWidth, windowHeight: papers[i].scrollHeight
       });
       const img = canvas.toDataURL('image/jpeg', 0.94);
       if (i) pdf.addPage([w, h], w > h ? 'landscape' : 'portrait');
@@ -10191,10 +10176,7 @@ function qpLayout(ctx) {
   const SAFETY = 6;
   const fillBlanks = (leftover, brh) => {
     const nb = Math.max(0, Math.floor(leftover / brh));
-    // 只剩 1 行空白時，那行（會寫「以下空白」）看起來多餘 → 拿掉它；
-    // 改用隱形墊高把總價／發票章頂到頁底，版面不會往上跑。2 行以上照舊顯示空白列。
-    if (nb === 1) return { blanks: 0, padPx: 0, spacerPx: Math.round(leftover) };
-    return { blanks: nb, padPx: nb ? Math.round(brh + (leftover - nb * brh)) : 0, spacerPx: 0 };
+    return { blanks: nb, padPx: nb ? Math.round(brh + (leftover - nb * brh)) : 0 };
   };
 
   // 沒有品項：單頁、最大字級撐版面（fit 樣式，補空白列）
