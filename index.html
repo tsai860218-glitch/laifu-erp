@@ -9932,7 +9932,8 @@ async function renderPDF(html, size, filename, folderKey) {
             const z = m ? (+m[1] / 100) : 1;
             if (!z || z === 1) return;
             el.style.zoom = '1';                 // 先移除 zoom
-            const h = el.offsetHeight;           // 量測「未縮放」的自然高度（讀取 offsetHeight 會強制重排）
+            el.style.width = (100 / z) + '%';    // 先加寬 1/z 倍，縮放後就會回到滿版寬度（修正表格變窄）
+            const h = el.offsetHeight;           // 在加寬後量測自然高度（讀取 offsetHeight 會強制重排）
             el.style.transformOrigin = 'top left';
             el.style.transform = 'scale(' + z + ')';
             el.style.marginBottom = (-(h * (1 - z))) + 'px';  // 縮小(z<1)→負邊距把下方內容往上拉；放大(z>1)→正邊距往下推
