@@ -8885,7 +8885,7 @@ function deliveryTable(list, opts) {
       return `<tr onclick="go('delivery/${d.id}')">
         ${sel ? `<td onclick="event.stopPropagation()"><input type="checkbox" class="d-sel" ${dSelected.has(d.id) ? 'checked' : ''} onchange="toggleDSel('${d.id}', this.checked)"></td>` : ''}
         <td class="no nowrap">${its.length ? `<a href="javascript:void(0)" class="row-exp" onclick="event.stopPropagation();toggleRowDetail('dd_${d.id}',this)">▸</a> ` : ''}${esc(d.delivery_no)}${d._legacy ? ' <span class="bdg gray plain" style="height:16px;font-size:9px">舊格式</span>' : ''}</td>
-        <td class="nowrap">${esc(d.customer_snapshot?.name || '—')}</td>
+        <td class="nowrap">${esc(d.customer_snapshot?.name || '—')}<div class="muted">${esc((d.customer_snapshot?.site_label ? '(' + d.customer_snapshot.site_label + ') ' : '') + (d.customer_snapshot?.contact_person || ''))}</div></td>
         <td class="prod-col" title="${esc(names.join('、'))}">${prodTxt}</td>
         <td class="muted nowrap" style="font-family:var(--mono);font-size:11px">${esc(d.quote_no || '—')}</td>
         <td class="nowrap">${esc(userName(d.sales_user_id) || '—')}</td>
