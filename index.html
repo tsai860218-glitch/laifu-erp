@@ -9922,7 +9922,22 @@ async function renderPDF(html, size, filename, folderKey) {
       document.getElementById('pdfMsg').textContent = `處理中… ${i + 1} / ${papers.length}`;
       const canvas = await window.html2canvas(papers[i], {
         scale: 3, backgroundColor: '#FFFFFF', useCORS: true, logging: false,
-        windowWidth: papers[i].scrollWidth, windowHeight: papers[i].scrollHeight
+        windowWidth: papers[i].scrollWidth, windowHeight: papers[i].scrollHeight,
+        onclone: (doc) => {
+          // html2canvas 不支援 CSS zoom：會把縮小的表格用 100% 畫出，導致文字重疊。
+          // 解法：在「複製出來要截圖的 DOM」上，把 zoom 換成等效的 transform: scale（h2c 支援、會整體等比縮放，不會疊字），
+          // 並用「負的下邊距」補回縮小後少掉的高度，讓表格下方的合計／簽章／頁尾維持正確位置（不會被往下推）。
+          doc.querySelectorAll('.pp-tbl, .dp-tbl').forEach(el => {
+            const m = (el.className || '').match(/z-(\d+)/);
+            const z = m ? (+m[1] / 100) : 1;
+            if (!z || z === 1) return;
+            el.style.zoom = '1';                 // 先移除 zoom
+            const h = el.offsetHeight;           // 量測「未縮放」的自然高度（讀取 offsetHeight 會強制重排）
+            el.style.transformOrigin = 'top left';
+            el.style.transform = 'scale(' + z + ')';
+            el.style.marginBottom = (-(h * (1 - z))) + 'px';  // 縮小(z<1)→負邊距把下方內容往上拉；放大(z>1)→正邊距往下推
+          });
+        }
       });
       const img = canvas.toDataURL('image/jpeg', 0.94);
       if (i) pdf.addPage([w, h], w > h ? 'landscape' : 'portrait');
