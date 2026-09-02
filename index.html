@@ -1638,7 +1638,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = '2026-08-17f 修正縮小字級首次列印版面算錯(圖片預載後再量測)';
+const APP_BUILD = '2026-08-28 欄位隱藏改為先套用再調欄寬(修隱藏失效)＋出貨單垃圾桶';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -6344,7 +6344,7 @@ function viewTenders(v) {
             <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
             <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
             <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
-            <td class="muted">${esc(t.note || '')}</td>
+            <td class="muted" style="white-space:pre-line;min-width:160px">${esc(t.note || '')}</td>
           </tr>`;
         }).join('')}</tbody></table>`;
     document.getElementById('tPageBar').innerHTML = list.length ? pageBarHtml('tenders', info) : '';
@@ -7011,8 +7011,8 @@ function viewQuotes(v) {
     document.getElementById('qlist').innerHTML = quoteTable(info.pageItems, { selectable: true, preSorted: true });
     document.getElementById('qPageBar').innerHTML = list.length ? pageBarHtml('quotes', info) : '';
     bindTableSort('qlist', qSortState, run);
-    makeColumnsResizable('qlist', 'quotes');
     applyColVis('qlist');
+    try { makeColumnsResizable('qlist', 'quotes'); } catch (e) { console.warn('欄寬調整初始化失敗（不影響其他功能）', e); }
     updateBulkBar('q');
   };
   registerPageRunner('quotes', run);
@@ -9024,8 +9024,8 @@ function viewDeliveries(v) {
     document.getElementById('dlist').innerHTML = deliveryTable(info.pageItems, { selectable: true, preSorted: true });
     document.getElementById('dPageBar').innerHTML = list.length ? pageBarHtml('deliveries', info) : '';
     bindTableSort('dlist', dSortState, run);
-    makeColumnsResizable('dlist', 'deliveries');
     applyColVis('dlist');
+    try { makeColumnsResizable('dlist', 'deliveries'); } catch (e) { console.warn('欄寬調整初始化失敗（不影響其他功能）', e); }
     updateBulkBar('d');
     drawDSumBar(list); // 統計列用完整篩選結果，不是只算當前頁
   };
