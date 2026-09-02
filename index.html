@@ -9913,11 +9913,31 @@ async function renderPDF(html, size, filename, folderKey) {
   try {
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'mm', format: [w, h], orientation: w > h ? 'landscape' : 'portrait' });
+    // 等中文字型（Noto Sans TC）確實載入，否則 html2canvas 會改用替代字型，造成文字位移／重疊
+    if (document.fonts) {
+      try { await Promise.all(['400', '500', '700'].map(wt => document.fonts.load(wt + ' 12pt "Noto Sans TC"'))); } catch (e) {}
+      try { await document.fonts.ready; } catch (e) {}
+    }
     for (let i = 0; i < papers.length; i++) {
       document.getElementById('pdfMsg').textContent = `處理中… ${i + 1} / ${papers.length}`;
       const canvas = await window.html2canvas(papers[i], {
         scale: 3, backgroundColor: '#FFFFFF', useCORS: true, logging: false,
-        windowWidth: papers[i].scrollWidth, windowHeight: papers[i].scrollHeight
+        windowWidth: papers[i].scrollWidth, windowHeight: papers[i].scrollHeight,
+        onclone: (doc) => {
+          // html2canvas 不支援 CSS zoom：會把縮小的表格用 100% 畫出、再被壓進 A4，導致文字重疊。
+          // 這裡在「複製出來要截圖的 DOM」上把 zoom 換成等效的 transform: scale（html2canvas 有支援），
+          // 讓下載的 PDF 與畫面預覽一致。不影響實際頁面與分頁量測。
+          doc.querySelectorAll('.pp-tbl, .dp-tbl').forEach(el => {
+            const m = (el.className || '').match(/z-(\d+)/);
+            const z = m ? (+m[1] / 100) : 1;
+            if (z && z !== 1) {
+              el.style.zoom = '1';
+              el.style.transformOrigin = 'top left';
+              el.style.transform = 'scale(' + z + ')';
+              el.style.width = (100 / z) + '%';
+            }
+          });
+        }
       });
       const img = canvas.toDataURL('image/jpeg', 0.94);
       if (i) pdf.addPage([w, h], w > h ? 'landscape' : 'portrait');
@@ -10006,7 +10026,8 @@ function qpPageHtml(ctx, pg) {
   const fitMode = docSetting('a4_layout_mode') !== 'spill';
   const blankRow = (h, mark) => `<tr class="blank"><td${h ? ` style="height:${h}px"` : ''}>&nbsp;</td><td></td><td class="blank-mark">${mark || ''}</td><td></td><td></td><td></td></tr>`;
   let blankRows = '';
-  if (blanks > 0) {
+  // 只剩「1 行空白」時，那行（會寫「以下空白」）看起來多餘 → 整行拿掉；要 2 行以上才顯示空白列。
+  if (blanks > 1) {
     const arr = [];
     for (let i = 0; i < blanks; i++) {
       const h = (i === blanks - 1) ? padPx : 0;            // 最後一列吃掉墊高
