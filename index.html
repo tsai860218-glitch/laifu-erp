@@ -6144,7 +6144,7 @@ function newTender() {
     bid_deadline_date: '', bid_deadline_time: '08:30',
     open_date: '', open_time: '10:00', open_place: '',
     e_bidding: '', bid_bond: '', bid_bond_amount: 0,
-    bid_bond_paid_date: '', bid_bond_returned_date: '', winner_name: '',
+    bid_bond_paid_date: '', bid_bond_returned_date: '', winner_name: '', settle_amount: 0,
     status: 'bidding', abandon_reason: '',
     note: '',
     created_by_op: currentOperator(), last_modified_by: currentOperator(),
@@ -6221,6 +6221,8 @@ const T_COLS = [
   ['budget_amount', '預算金額', 'r'],
   ['bid_amount', '投標金額', 'r'],
   ['award_amount', '得標金額', 'r'],
+  ['settle_amount', '決標金額', 'r'],
+  ['winner_name', '得標廠商', ''],
   ['note', '備註', '']
 ];
 function tenderSortValue(t, key) {
@@ -6232,6 +6234,8 @@ function tenderSortValue(t, key) {
     case 'budget_amount': return t.budget_amount || 0;
     case 'bid_amount': return t.bid_amount || 0;
     case 'award_amount': return t.award_amount || 0;
+    case 'settle_amount': return t.settle_amount || 0;
+    case 'winner_name': return t.winner_name || '';
     // 沒填日期的排最後（升冪時）
     case 'bid_deadline': return (t.bid_deadline_date || '9999-99-99') + ' ' + (t.bid_deadline_time || '');
     case 'open': return (t.open_date || '9999-99-99') + ' ' + (t.open_time || '');
@@ -6344,6 +6348,8 @@ function viewTenders(v) {
             <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
             <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
             <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
+            <td class="r money nowrap">${t.settle_amount ? money(t.settle_amount) : '—'}</td>
+            <td>${esc(t.winner_name || '—')}</td>
             <td class="muted" style="white-space:pre-line;min-width:160px">${esc(t.note || '')}</td>
           </tr>`;
         }).join('')}</tbody></table>`;
@@ -6518,7 +6524,7 @@ function viewTender(v) {
         </div>
         <div class="grid g3">
           <div class="field"><label>預算金額</label><input class="inp num" type="number" data-t="budget_amount" value="${t.budget_amount || ''}" ${dis}></div>
-          <div class="field"><label>得標金額</label><input class="inp num" type="number" data-t="award_amount" value="${t.award_amount || ''}" ${dis}></div>
+          <div class="field"><label>得標金額（我方得標時的金額）</label><input class="inp num" type="number" data-t="award_amount" value="${t.award_amount || ''}" ${dis}></div>
           <div class="field"><label>決標方式</label>
             <select class="inp" data-t="award_method" ${dis}>
               <option value="" ${!t.award_method ? 'selected' : ''}>—</option>
@@ -6529,7 +6535,10 @@ function viewTender(v) {
           <div class="field"><label>投標金額</label><input class="inp num" type="number" data-t="bid_amount" value="${t.bid_amount || ''}" ${dis}></div>
           <div class="field"><label>連結報價單</label>${qlink}</div>
         </div>
-        <div class="field"><label>得標廠商（未得標時填實際得標者，供日後定價參考）</label><input class="inp" data-t="winner_name" value="${esc(t.winner_name || '')}" placeholder="例：○○資訊有限公司" ${dis}></div>
+        <div class="grid g2">
+          <div class="field"><label>決標金額（實際決標，可能是別家廠商）</label><input class="inp num" type="number" data-t="settle_amount" value="${t.settle_amount || ''}" ${dis}></div>
+          <div class="field"><label>得標廠商（我方未得標時填實際得標者，供日後定價參考）</label><input class="inp" data-t="winner_name" value="${esc(t.winner_name || '')}" placeholder="例：○○資訊有限公司" ${dis}></div>
+        </div>
         <div class="grid g3">
           <div class="field"><label>招標公告　第 O 次</label><input class="inp num" type="number" min="1" data-t="announce_seq" value="${t.announce_seq || ''}" ${dis}></div>
           <div class="field"><label>公告日</label><input class="inp" type="date" data-t="announce_date" value="${esc(t.announce_date || '')}" ${dis}></div>
