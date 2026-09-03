@@ -11229,7 +11229,7 @@ function viewProductAnalysis(v) {
       ? `<tr>${mergeCol ? '<th style="width:34px"></th>' : ''}<th>產品</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">客戶數</th><th class="c">出貨次數</th></tr>`
       : `<tr><th>客戶</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">產品數</th><th class="c">出貨次數</th></tr>`;
 
-    const rowHtml = (r, uncls, indent) => {
+    const rowHtml = (r, grp, indent) => {
       const open = !!paState.expanded[r.key];
       const subCount = Object.keys(r.subs).length;
       const subRowsCust = Object.values(r.subs).sort((a, b) => b.qty - a.qty).map(x =>
@@ -11245,8 +11245,9 @@ function viewProductAnalysis(v) {
         const gBadge = isGroup ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">已合併</span>` : '';
         const mBadge = r.manual ? ` <span class="bdg gray plain" style="height:16px;font-size:9px">手動品項</span>` : '';
         const dissolve = (mergeCol && isGroup) ? ` <a href="javascript:void(0)" class="pa-dissolve" data-g="${r.key.slice(2)}" onclick="event.stopPropagation()" style="font-size:11px">拆開</a>` : '';
-        const recat = uncls ? ` <a href="javascript:void(0)" class="pa-recat" data-k="${esc(r.key)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--primary-600)">歸類</a>` : '';
-        const recatChk = uncls ? `<input type="checkbox" class="pa-recatchk" data-k="${esc(r.key)}" ${paState.recatSel.has(r.key) ? 'checked' : ''} onclick="event.stopPropagation()" style="margin-right:6px;vertical-align:middle">` : '';
+        const showRecat = grp && !mergeCol;   // 分組模式(非合併模式)：每個品項都可勾選/歸類
+        const recat = showRecat ? ` <a href="javascript:void(0)" class="pa-recat" data-k="${esc(r.key)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--primary-600)">歸類</a>` : '';
+        const recatChk = showRecat ? `<input type="checkbox" class="pa-recatchk" data-k="${esc(r.key)}" ${paState.recatSel.has(r.key) ? 'checked' : ''} onclick="event.stopPropagation()" style="margin-right:6px;vertical-align:middle">` : '';
         return `<tr class="pa-main" data-pkey="${esc(r.key)}">${chk}
           <td${indent ? ` style="padding-left:${indent}px"` : ''}>${recatChk}<span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b style="font-weight:500;font-size:12.5px">${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}${recat}</td>
           <td class="r money">${paNum(r.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
@@ -11301,7 +11302,7 @@ function viewProductAnalysis(v) {
             <span style="display:inline-block;border-left:3px solid var(--line-2);padding-left:8px;font-weight:700;font-size:13.5px;color:var(--text-1)">${caret}${esc(cat.name)}</span>${meta}</td></tr>`);
         }
         if (collapsed) return;   // 收合：不顯示品項與子分類
-        (rowsByCat.get(cat.id) || []).forEach(r => chunks.push(rowHtml(r, false, 16 + (depth + 1) * 18)));   // 品項再縮排、小字
+        (rowsByCat.get(cat.id) || []).forEach(r => chunks.push(rowHtml(r, true, 16 + (depth + 1) * 18)));   // 品項再縮排、小字、可勾選歸類
         subCategoriesOf(cat.id).forEach(k => walkCat(k, depth + 1));
       };
       majorCategories().forEach(c => walkCat(c, 0));
@@ -11313,21 +11314,27 @@ function viewProductAnalysis(v) {
         chunks.push(`<tr class="pa-sechead"><td data-cattoggle="__none" colspan="${colspan}" style="cursor:pointer;background:var(--primary-050);border-left:5px solid var(--gray);border-top:2px solid var(--gray);padding:12px 10px 11px 12px">
           <span class="pa-arrow ${ncol ? '' : 'open'}" style="font-size:12px">▸</span> <span style="font-weight:800;font-size:16.5px;color:var(--text-1)">未分類</span>
           <span style="font-weight:600;font-size:11.5px;color:var(--text-2)">　${none.length} 項 · 量 ${paNum(q)} · ${money(a)}</span>
-          <span style="font-size:11.5px;color:var(--primary-600)">　←點每列的「歸類」自行指定分類</span></td></tr>`);
-        if (!ncol) {
-          chunks.push(`<tr class="pa-recatbar"><td colspan="${colspan}" style="background:var(--primary-050);padding:4px 10px 10px 34px">
-            <button class="btn sm" data-recatall>全選未分類</button>
-            <button class="btn sm primary" data-recatgo>批次歸類（<span class="pa-recatn">${paState.recatSel.size}</span>）</button>
-            <button class="btn sm" data-recatclr>清除勾選</button></td></tr>`);
-          none.forEach(r => chunks.push(rowHtml(r, true, 34)));
-        }
+          <span style="font-size:11.5px;color:var(--primary-600)">　←勾選後可批次歸類</span></td></tr>`);
+        if (!ncol) none.forEach(r => chunks.push(rowHtml(r, true, 34)));
       }
+      // 頂端一排：全選 / 全不選（分組且非合併模式時，用來配合下方浮動的「批次歸類」）
+      if (!mergeCol) chunks.unshift(`<tr class="pa-recatbar"><td colspan="${colspan}" style="background:var(--card);border-bottom:1px solid var(--line);padding:6px 10px">
+        <button class="btn sm" data-recatall>全選目前顯示</button>
+        <button class="btn sm" data-recatclr>全不選</button>
+        <span class="muted" style="font-size:11.5px">　勾選任意品項 → 下方會出現「批次歸類」；也可直接點單列的「歸類」</span></td></tr>`);
       body = chunks.join('');
     } else {
       body = rows.map(rowHtml).join('');
     }
 
-    results.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    const recatFloat = (isProd && paState.groupBy && !mergeCol && paState.recatSel.size)
+      ? `<div style="position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--card);border:1px solid var(--primary-600);border-radius:10px;box-shadow:var(--sh-lg);font-size:12.5px">
+          <span>已選 <b>${paState.recatSel.size}</b> 項</span>
+          <button class="btn sm primary" data-recatgo>批次歸類到…</button>
+          <button class="btn sm" data-recatclr>清除</button></div>`
+      : '';
+    results.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div>${recatFloat}`;
+    results.style.paddingBottom = recatFloat ? '80px' : '';
 
     results.querySelectorAll('tr.pa-main').forEach(tr => tr.addEventListener('click', () => {
       const k = tr.dataset.pkey; paState.expanded[k] = !paState.expanded[k]; drawResults();
@@ -11345,7 +11352,7 @@ function viewProductAnalysis(v) {
     }));
     results.querySelectorAll('.pa-recatchk').forEach(c => c.addEventListener('change', () => {
       if (c.checked) paState.recatSel.add(c.dataset.k); else paState.recatSel.delete(c.dataset.k);
-      results.querySelectorAll('.pa-recatn').forEach(s => s.textContent = paState.recatSel.size);
+      drawResults();   // 重繪以更新底部浮動的「批次歸類」列
     }));
     { const b = results.querySelector('[data-recatall]'); if (b) b.addEventListener('click', () => { results.querySelectorAll('.pa-recatchk').forEach(c => paState.recatSel.add(c.dataset.k)); drawResults(); }); }
     { const b = results.querySelector('[data-recatclr]'); if (b) b.addEventListener('click', () => { paState.recatSel.clear(); drawResults(); }); }
