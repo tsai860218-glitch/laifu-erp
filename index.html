@@ -11228,7 +11228,7 @@ function viewProductAnalysis(v) {
       ? `<tr>${mergeCol ? '<th style="width:34px"></th>' : ''}<th>產品</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">客戶數</th><th class="c">出貨次數</th></tr>`
       : `<tr><th>客戶</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">產品數</th><th class="c">出貨次數</th></tr>`;
 
-    const rowHtml = (r, uncls) => {
+    const rowHtml = (r, uncls, indent) => {
       const open = !!paState.expanded[r.key];
       const subCount = Object.keys(r.subs).length;
       const subRowsCust = Object.values(r.subs).sort((a, b) => b.qty - a.qty).map(x =>
@@ -11246,7 +11246,7 @@ function viewProductAnalysis(v) {
         const dissolve = (mergeCol && isGroup) ? ` <a href="javascript:void(0)" class="pa-dissolve" data-g="${r.key.slice(2)}" onclick="event.stopPropagation()" style="font-size:11px">拆開</a>` : '';
         const recat = uncls ? ` <a href="javascript:void(0)" class="pa-recat" data-k="${esc(r.key)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--primary-600)">歸類</a>` : '';
         return `<tr class="pa-main" data-pkey="${esc(r.key)}">${chk}
-          <td><span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b>${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}${recat}</td>
+          <td${indent ? ` style="padding-left:${indent}px"` : ''}><span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b style="font-weight:500;font-size:12.5px">${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}${recat}</td>
           <td class="r money">${paNum(r.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
           <td class="r money">${money(r.amount)}</td>
           <td class="c">${subCount}</td>
@@ -11286,24 +11286,29 @@ function viewProductAnalysis(v) {
         if (!ids.some(id => (rowsByCat.get(id) || []).length)) return; // 這棵子樹沒有品項 → 不顯示
         let q = 0, a = 0, n = 0;
         ids.forEach(id => (rowsByCat.get(id) || []).forEach(r => { q += r.qty; a += r.amount; n++; }));
-        const fs = depth === 0 ? 17 : depth === 1 ? 14.5 : 13;   // 大分類最大、子分類次之、更深再小
-        const pad = 10 + depth * 18;
-        chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:${depth === 0 ? 'var(--bg-2)' : 'var(--card)'};border-top:${depth === 0 ? '2px' : '1px'} solid var(--line);padding:${depth === 0 ? '11px' : '7px'} 10px 6px ${pad}px">
-          <span style="font-weight:800;font-size:${fs}px">${esc(cat.name)}</span>
-          <span class="muted" style="font-weight:600;font-size:11.5px">　${n} 項 · 量 ${paNum(q)} · ${money(a)}</span></td></tr>`);
-        (rowsByCat.get(cat.id) || []).forEach(r => chunks.push(rowHtml(r)));   // 直接掛在這一層的品項
-        subCategoriesOf(cat.id).forEach(k => walkCat(k, depth + 1));           // 再往下鑽子分類
+        const meta = `<span style="font-weight:600;font-size:11.5px;color:var(--text-2)">　${n} 項 · 量 ${paNum(q)} · ${money(a)}</span>`;
+        if (depth === 0) {
+          // 大分類：主色底色帶 ＋ 左側粗色條，字最大
+          chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--primary-050);border-left:5px solid var(--primary-600);border-top:2px solid var(--primary-600);padding:12px 10px 11px 12px">
+            <span style="font-weight:800;font-size:16.5px;color:var(--primary)">${esc(cat.name)}</span>${meta}</td></tr>`);
+        } else {
+          // 子分類（含更深層）：縮排 ＋ 細左條，中等字、深色
+          chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--card);padding:8px 10px 6px ${12 + depth * 20}px;border-left:5px solid var(--primary-050)">
+            <span style="display:inline-block;border-left:3px solid var(--line-2);padding-left:8px;font-weight:700;font-size:13.5px;color:var(--text-1)">${esc(cat.name)}</span>${meta}</td></tr>`);
+        }
+        (rowsByCat.get(cat.id) || []).forEach(r => chunks.push(rowHtml(r, false, 16 + (depth + 1) * 18)));   // 品項再縮排、小字
+        subCategoriesOf(cat.id).forEach(k => walkCat(k, depth + 1));
       };
       majorCategories().forEach(c => walkCat(c, 0));
 
       const none = rowsByCat.get('') || [];
       if (none.length) {
         let q = 0, a = 0; none.forEach(r => { q += r.qty; a += r.amount; });
-        chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--bg-2);border-top:2px solid var(--line);padding:11px 10px 6px">
-          <span style="font-weight:800;font-size:17px">未分類</span>
-          <span class="muted" style="font-weight:600;font-size:11.5px">　${none.length} 項 · 量 ${paNum(q)} · ${money(a)}</span>
+        chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--primary-050);border-left:5px solid var(--gray);border-top:2px solid var(--gray);padding:12px 10px 11px 12px">
+          <span style="font-weight:800;font-size:16.5px;color:var(--text-1)">未分類</span>
+          <span style="font-weight:600;font-size:11.5px;color:var(--text-2)">　${none.length} 項 · 量 ${paNum(q)} · ${money(a)}</span>
           <span style="font-size:11.5px;color:var(--primary-600)">　←點每列的「歸類」自行指定分類</span></td></tr>`);
-        none.forEach(r => chunks.push(rowHtml(r, true)));
+        none.forEach(r => chunks.push(rowHtml(r, true, 34)));
       }
       body = chunks.join('');
     } else {
