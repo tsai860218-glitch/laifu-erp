@@ -7231,7 +7231,7 @@ function exportQuotesExcel() {
 function bulkDeleteQuotes() {
   const ids = [...qSelected];
   if (!ids.length) return;
-  const blocked = ids.filter(id => DB.deliveries.some(d => d.quote_id === id));
+  const blocked = ids.filter(id => DB.deliveries.some(d => d.quote_id === id && !d.deleted_at));
   const deletable = ids.filter(id => !blocked.includes(id));
   if (!deletable.length) return toast('選取的報價都已經有出貨單，不能刪除，請先刪除出貨單', 'err');
   const msg = blocked.length
@@ -8655,7 +8655,7 @@ function startDelivery(qid) {
       onMount(el, close) { el.querySelector('[data-no]').onclick = close; }
     });
   }
-  const exist = DB.deliveries.find(d => d.quote_id === qid && d.status !== 'cancelled');
+  const exist = DB.deliveries.find(d => d.quote_id === qid && d.status !== 'cancelled' && !d.deleted_at);
   if (exist) { toast('這張報價已經有出貨單了', 'err'); return go('delivery/' + exist.id); }
   if (q.unlocked) return toast('報價還在編輯中，請先按「完成編輯」', 'err');
 
