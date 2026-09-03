@@ -11252,15 +11252,26 @@ function viewProductAnalysis(v) {
 
     let body;
     if (isProd && paState.groupBy) {
-      // 依商品分類分組：每個分類一個區塊、含小計；無分類/手動/已合併歸到「未分類」
+      // 依商品管理的分類分組。分類判斷順序：
+      // 1) 連到主檔 → 用主檔的分類；2) 用料號比對主檔；3) 用品名比對主檔；都對不到才算未分類。
+      const nameToCatId = nm => { nm = (nm || '').trim(); if (!nm) return ''; const c = DB.categories.find(x => x.name === nm); return c ? c.id : ''; };
+      const prodCatId = pr => pr ? (pr.category_id || nameToCatId(pr.category)) : '';
+      const resolveCat = r => {
+        if (r.key.slice(0, 2) === 'p:') { const pr = byId(DB.products, r.key.slice(2)); if (pr) return prodCatId(pr); }
+        const pn = (r.part_no || '').trim().toUpperCase();
+        const nm = (r.name || '').trim().toLowerCase();
+        let pr = null;
+        if (pn) pr = DB.products.find(p => (primaryPartNo(p) || '').trim().toUpperCase() === pn || (p.part_no || '').trim().toUpperCase() === pn);
+        if (!pr && nm) pr = DB.products.find(p => (p.name || '').trim().toLowerCase() === nm);
+        return prodCatId(pr);
+      };
       const colspan = mergeCol ? 6 : 5;
       const secMap = new Map();
       rows.forEach(r => {
-        let catId = '';
-        if (r.key.slice(0, 2) === 'p:') { const pr = byId(DB.products, r.key.slice(2)); catId = (pr && pr.category_id) || ''; }
+        const catId = resolveCat(r);
         const kk = catId || '__none';
         let sec = secMap.get(kk);
-        if (!sec) sec = secMap.set(kk, { label: catId ? categoryPathName(catId) : '（未分類 / 手動 / 已合併）', rows: [], qty: 0, amount: 0 }).get(kk);
+        if (!sec) sec = secMap.set(kk, { label: catId ? categoryPathName(catId) : '（未分類）', rows: [], qty: 0, amount: 0 }).get(kk);
         sec.rows.push(r); sec.qty += r.qty; sec.amount += r.amount;
       });
       const secs = [...secMap.values()].sort((a, b) => b.amount - a.amount);
