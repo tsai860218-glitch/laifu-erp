@@ -7866,7 +7866,7 @@ function pickByCategory(itemId) {
     size: 'wide',
     body: `
       <div style="display:flex;gap:12px;align-items:flex-start;height:60vh;min-height:340px">
-        <aside id="pcbCats" style="width:210px;flex:0 0 auto;overflow:auto;max-height:100%;font-size:13px"></aside>
+        <aside id="pcbCats" style="width:210px;flex:0 0 auto;overflow:auto;max-height:100%;font-size:12px"></aside>
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;max-height:100%">
           <input class="inp" id="pcbSearch" placeholder="在此分類內再搜尋 品名／料號／品牌…" autocomplete="off" style="margin-bottom:8px">
           <div id="pcbList" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:8px"></div>
@@ -7903,8 +7903,7 @@ function pickByCategory(itemId) {
           ? kids.map(c => {
             const has = subCategoriesOf(c.id).length > 0;
             return `<div class="pfcat ${has ? 'branch' : 'leaf'}" data-drill="${c.id}">
-              <span class="pfcat-ic">${has ? '📁' : '🏷'}</span>
-              <span class="pfcat-nm">${esc(c.name)}</span>
+              <span class="pfcat-nm" style="font-size:12.5px">${esc(c.name)}</span>
               ${has ? '<span class="pfcat-arw">▸</span>' : ''}
               <span class="pfcat-ct">${cnt(c.id)}</span></div>`;
           }).join('')
