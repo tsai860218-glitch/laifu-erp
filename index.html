@@ -10979,7 +10979,7 @@ let pTreeExpanded = new Set(); // 商品管理左側分類樹：目前展開的�
    DB.settings.pa_merge_groups，會跟著雲端同步、也存本機）。全部前端即時計算，
    除了「合併設定」外不寫入任何資料。
    =========================================================== */
-let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, groupBy: false, sel: null };
+let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, groupBy: true, sel: null };
 
 function paMergeGroups() {
   const g = DB.settings && DB.settings.pa_merge_groups;
@@ -10993,6 +10993,15 @@ function paMergeMap() {
 function paSaveGroups(list) {
   if (!DB.settings) DB.settings = {};
   DB.settings.pa_merge_groups = list;
+  saveNow();
+}
+// 分析用「自己歸類」：把某個分析列(key)指定到某分類(僅補未分類的空缺，不改商品主檔資料)
+function paCatOverrides() { return (DB.settings && DB.settings.pa_cat_overrides) || {}; }
+function paSetCatOverride(key, catId) {
+  if (!DB.settings) DB.settings = {};
+  const m = Object.assign({}, DB.settings.pa_cat_overrides || {});
+  if (catId) m[key] = catId; else delete m[key];
+  DB.settings.pa_cat_overrides = m;
   saveNow();
 }
 function paNum(v) {
@@ -11219,7 +11228,7 @@ function viewProductAnalysis(v) {
       ? `<tr>${mergeCol ? '<th style="width:34px"></th>' : ''}<th>產品</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">客戶數</th><th class="c">出貨次數</th></tr>`
       : `<tr><th>客戶</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">產品數</th><th class="c">出貨次數</th></tr>`;
 
-    const rowHtml = r => {
+    const rowHtml = (r, uncls) => {
       const open = !!paState.expanded[r.key];
       const subCount = Object.keys(r.subs).length;
       const subRowsCust = Object.values(r.subs).sort((a, b) => b.qty - a.qty).map(x =>
@@ -11235,8 +11244,9 @@ function viewProductAnalysis(v) {
         const gBadge = isGroup ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">已合併</span>` : '';
         const mBadge = r.manual ? ` <span class="bdg gray plain" style="height:16px;font-size:9px">手動品項</span>` : '';
         const dissolve = (mergeCol && isGroup) ? ` <a href="javascript:void(0)" class="pa-dissolve" data-g="${r.key.slice(2)}" onclick="event.stopPropagation()" style="font-size:11px">拆開</a>` : '';
+        const recat = uncls ? ` <a href="javascript:void(0)" class="pa-recat" data-k="${esc(r.key)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--primary-600)">歸類</a>` : '';
         return `<tr class="pa-main" data-pkey="${esc(r.key)}">${chk}
-          <td><span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b>${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}</td>
+          <td><span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b>${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}${recat}</td>
           <td class="r money">${paNum(r.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
           <td class="r money">${money(r.amount)}</td>
           <td class="c">${subCount}</td>
@@ -11252,12 +11262,13 @@ function viewProductAnalysis(v) {
 
     let body;
     if (isProd && paState.groupBy) {
-      // 依商品管理的分類分組。分類判斷順序：
-      // 1) 連到主檔 → 用主檔的分類；2) 用料號比對主檔；3) 用品名比對主檔；都對不到才算未分類。
+      // 依商品管理分類「巢狀」分組：大分類 → 子分類 → 品項，大分類與其子分類同一區。
+      const ovr = paCatOverrides();
       const nameToCatId = nm => { nm = (nm || '').trim(); if (!nm) return ''; const c = DB.categories.find(x => x.name === nm); return c ? c.id : ''; };
       const prodCatId = pr => pr ? (pr.category_id || nameToCatId(pr.category)) : '';
       const resolveCat = r => {
-        if (r.key.slice(0, 2) === 'p:') { const pr = byId(DB.products, r.key.slice(2)); if (pr) return prodCatId(pr); }
+        if (ovr[r.key]) return ovr[r.key];                       // 使用者自己歸類的優先
+        if (r.key.slice(0, 2) === 'p:') { const pr = byId(DB.products, r.key.slice(2)); const c = prodCatId(pr); if (c) return c; }
         const pn = (r.part_no || '').trim().toUpperCase();
         const nm = (r.name || '').trim().toLowerCase();
         let pr = null;
@@ -11266,18 +11277,35 @@ function viewProductAnalysis(v) {
         return prodCatId(pr);
       };
       const colspan = mergeCol ? 6 : 5;
-      const secMap = new Map();
-      rows.forEach(r => {
-        const catId = resolveCat(r);
-        const kk = catId || '__none';
-        let sec = secMap.get(kk);
-        if (!sec) sec = secMap.set(kk, { label: catId ? categoryPathName(catId) : '（未分類）', rows: [], qty: 0, amount: 0 }).get(kk);
-        sec.rows.push(r); sec.qty += r.qty; sec.amount += r.amount;
-      });
-      const secs = [...secMap.values()].sort((a, b) => b.amount - a.amount);
-      body = secs.map(sec =>
-        `<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--bg-2);font-weight:800;padding:9px 10px;border-top:2px solid var(--line)">📂 ${esc(sec.label)}　<span class="muted" style="font-weight:600;font-size:12px">（${sec.rows.length} 項 · 出貨量 ${paNum(sec.qty)} · 金額 ${money(sec.amount)}）</span></td></tr>`
-        + sec.rows.map(rowHtml).join('')).join('');
+      const rowsByCat = new Map();
+      rows.forEach(r => { const c = resolveCat(r) || ''; if (!rowsByCat.has(c)) rowsByCat.set(c, []); rowsByCat.get(c).push(r); });
+
+      const chunks = [];
+      const walkCat = (cat, depth) => {
+        const ids = categoryDescendantIds(cat.id);   // 含自己
+        if (!ids.some(id => (rowsByCat.get(id) || []).length)) return; // 這棵子樹沒有品項 → 不顯示
+        let q = 0, a = 0, n = 0;
+        ids.forEach(id => (rowsByCat.get(id) || []).forEach(r => { q += r.qty; a += r.amount; n++; }));
+        const fs = depth === 0 ? 17 : depth === 1 ? 14.5 : 13;   // 大分類最大、子分類次之、更深再小
+        const pad = 10 + depth * 18;
+        chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:${depth === 0 ? 'var(--bg-2)' : 'var(--card)'};border-top:${depth === 0 ? '2px' : '1px'} solid var(--line);padding:${depth === 0 ? '11px' : '7px'} 10px 6px ${pad}px">
+          <span style="font-weight:800;font-size:${fs}px">${esc(cat.name)}</span>
+          <span class="muted" style="font-weight:600;font-size:11.5px">　${n} 項 · 量 ${paNum(q)} · ${money(a)}</span></td></tr>`);
+        (rowsByCat.get(cat.id) || []).forEach(r => chunks.push(rowHtml(r)));   // 直接掛在這一層的品項
+        subCategoriesOf(cat.id).forEach(k => walkCat(k, depth + 1));           // 再往下鑽子分類
+      };
+      majorCategories().forEach(c => walkCat(c, 0));
+
+      const none = rowsByCat.get('') || [];
+      if (none.length) {
+        let q = 0, a = 0; none.forEach(r => { q += r.qty; a += r.amount; });
+        chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--bg-2);border-top:2px solid var(--line);padding:11px 10px 6px">
+          <span style="font-weight:800;font-size:17px">未分類</span>
+          <span class="muted" style="font-weight:600;font-size:11.5px">　${none.length} 項 · 量 ${paNum(q)} · ${money(a)}</span>
+          <span style="font-size:11.5px;color:var(--primary-600)">　←點每列的「歸類」自行指定分類</span></td></tr>`);
+        none.forEach(r => chunks.push(rowHtml(r, true)));
+      }
+      body = chunks.join('');
     } else {
       body = rows.map(rowHtml).join('');
     }
@@ -11292,6 +11320,7 @@ function viewProductAnalysis(v) {
       const n = el('paSelCount'); if (n) n.textContent = paState.sel.size;
     }));
     results.querySelectorAll('.pa-dissolve').forEach(a => a.addEventListener('click', () => paDissolve(a.dataset.g)));
+    results.querySelectorAll('.pa-recat').forEach(a => a.addEventListener('click', () => paPickCat(a.dataset.k)));
   }
 
   function paDateRows(r, mergeCol) {
@@ -11332,6 +11361,27 @@ function viewProductAnalysis(v) {
     if (!flat.length) return toast('沒有可匯出的資料', 'err');
     const nm = paState.mode === 'product' ? '產品分析' : '客戶分析';
     exportExcelRows(flat, nm, `${nm}_${today()}.xlsx`);
+  }
+
+  function paPickCat(key) {
+    const opts = (() => {
+      const out = ['<option value="">未分類（清除歸類）</option>'];
+      const walk = (cat, depth) => { out.push(`<option value="${cat.id}">${'　'.repeat(depth)}${esc(cat.name)}</option>`); subCategoriesOf(cat.id).forEach(c => walk(c, depth + 1)); };
+      majorCategories().forEach(c => walk(c, 0));
+      return out.join('');
+    })();
+    const cur = paCatOverrides()[key] || '';
+    openModal({
+      title: '歸類到分類',
+      body: `<div class="muted" style="font-size:12px;margin-bottom:8px">把這個品項在「產品分析」裡歸到指定分類（只影響分析分組，不會改到商品主檔資料）。</div>
+        <select class="inp" id="paRecatSel">${opts}</select>`,
+      footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>套用</button>`,
+      onMount(elm, close) {
+        const sel = elm.querySelector('#paRecatSel'); sel.value = cur;
+        elm.querySelector('[data-no]').onclick = close;
+        elm.querySelector('[data-ok]').onclick = () => { paSetCatOverride(key, sel.value); close(); drawResults(); toast('已歸類', 'ok'); };
+      }
+    });
   }
 
   function paAutoSuggest() {
