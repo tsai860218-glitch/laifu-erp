@@ -11100,8 +11100,8 @@ function viewProductAnalysis(v) {
         <button class="btn sm" data-range="all">全部</button>
         <input class="inp" id="paKw" placeholder="搜尋名稱／料號" style="flex:1;min-width:160px;height:34px">
       </div>
-      <div id="paMergeBar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding:8px 10px;background:var(--primary-050);border-radius:8px;font-size:12.5px">
-        <span>勾選 2 項以上要合併的產品，再按右邊「合併所選」。合併後統計會當成同一個產品，可隨時「拆開」。</span>
+      <div id="paMergeBar" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;background:var(--card);border:1px solid var(--primary-600);border-radius:10px;box-shadow:var(--sh-lg);font-size:12.5px;max-width:calc(100% - 32px)">
+        <span>勾選 2 項以上要合併的產品，再按「合併所選」。合併後統計會當成同一個產品，可隨時「拆開」。</span>
         <span style="flex:1"></span>
         <button class="btn sm primary" id="paMergeDo">合併所選（<span id="paSelCount">0</span>）</button>
         <button class="btn sm" id="paSelClear">清除選取</button>
@@ -11127,6 +11127,8 @@ function viewProductAnalysis(v) {
   const setMergeUI = () => {
     const on = paState.mode === 'product' && paState.mergeMode;
     el('paMergeBar').style.display = on ? 'flex' : 'none';
+    const pr = document.getElementById('paResults');
+    if (pr) pr.style.paddingBottom = on ? '96px' : '';   // 留空間給浮動的合併列，避免蓋住最後幾筆
     const t = el('paMergeToggle');
     t.classList.toggle('active', paState.mergeMode);
     t.style.display = paState.mode === 'product' ? '' : 'none';
