@@ -10979,7 +10979,7 @@ let pTreeExpanded = new Set(); // 商品管理左側分類樹：目前展開的�
    DB.settings.pa_merge_groups，會跟著雲端同步、也存本機）。全部前端即時計算，
    除了「合併設定」外不寫入任何資料。
    =========================================================== */
-let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, groupBy: true, sel: null };
+let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, catCollapsed: {}, mergeMode: false, groupBy: true, sel: null };
 
 function paMergeGroups() {
   const g = DB.settings && DB.settings.pa_merge_groups;
@@ -11072,6 +11072,7 @@ function paByCustomer(recs) {
 function viewProductAnalysis(v) {
   document.getElementById('pageTitle').textContent = '產品分析';
   if (!paState.sel) paState.sel = new Set();
+  if (!paState.recatSel) paState.recatSel = new Set();
 
   const coOpts = ['<option value="">全部公司</option>']
     .concat((DB.companies || []).map(c => `<option value="${c.id}">${esc(c.short_name || c.name)}</option>`)).join('');
@@ -11245,8 +11246,9 @@ function viewProductAnalysis(v) {
         const mBadge = r.manual ? ` <span class="bdg gray plain" style="height:16px;font-size:9px">手動品項</span>` : '';
         const dissolve = (mergeCol && isGroup) ? ` <a href="javascript:void(0)" class="pa-dissolve" data-g="${r.key.slice(2)}" onclick="event.stopPropagation()" style="font-size:11px">拆開</a>` : '';
         const recat = uncls ? ` <a href="javascript:void(0)" class="pa-recat" data-k="${esc(r.key)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--primary-600)">歸類</a>` : '';
+        const recatChk = uncls ? `<input type="checkbox" class="pa-recatchk" data-k="${esc(r.key)}" ${paState.recatSel.has(r.key) ? 'checked' : ''} onclick="event.stopPropagation()" style="margin-right:6px;vertical-align:middle">` : '';
         return `<tr class="pa-main" data-pkey="${esc(r.key)}">${chk}
-          <td${indent ? ` style="padding-left:${indent}px"` : ''}><span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b style="font-weight:500;font-size:12.5px">${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}${recat}</td>
+          <td${indent ? ` style="padding-left:${indent}px"` : ''}>${recatChk}<span class="pa-arrow ${open ? 'open' : ''}">▸</span> <b style="font-weight:500;font-size:12.5px">${esc(r.name)}</b>${r.part_no ? ` <span class="muted" style="font-family:var(--mono);font-size:11px">${esc(r.part_no)}</span>` : ''}${gBadge}${mBadge}${dissolve}${recat}</td>
           <td class="r money">${paNum(r.qty)}${r.unit ? ' <span class="muted">' + esc(r.unit) + '</span>' : ''}</td>
           <td class="r money">${money(r.amount)}</td>
           <td class="c">${subCount}</td>
@@ -11287,15 +11289,18 @@ function viewProductAnalysis(v) {
         let q = 0, a = 0, n = 0;
         ids.forEach(id => (rowsByCat.get(id) || []).forEach(r => { q += r.qty; a += r.amount; n++; }));
         const meta = `<span style="font-weight:600;font-size:11.5px;color:var(--text-2)">　${n} 項 · 量 ${paNum(q)} · ${money(a)}</span>`;
+        const collapsed = !!paState.catCollapsed[cat.id];
+        const caret = `<span class="pa-arrow ${collapsed ? '' : 'open'}" style="font-size:12px">▸</span> `;
         if (depth === 0) {
           // 大分類：主色底色帶 ＋ 左側粗色條，字最大
-          chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--primary-050);border-left:5px solid var(--primary-600);border-top:2px solid var(--primary-600);padding:12px 10px 11px 12px">
-            <span style="font-weight:800;font-size:16.5px;color:var(--primary)">${esc(cat.name)}</span>${meta}</td></tr>`);
+          chunks.push(`<tr class="pa-sechead"><td data-cattoggle="${cat.id}" colspan="${colspan}" style="cursor:pointer;background:var(--primary-050);border-left:5px solid var(--primary-600);border-top:2px solid var(--primary-600);padding:12px 10px 11px 12px">
+            ${caret}<span style="font-weight:800;font-size:16.5px;color:var(--primary)">${esc(cat.name)}</span>${meta}</td></tr>`);
         } else {
           // 子分類（含更深層）：縮排 ＋ 細左條，中等字、深色
-          chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--card);padding:8px 10px 6px ${12 + depth * 20}px;border-left:5px solid var(--primary-050)">
-            <span style="display:inline-block;border-left:3px solid var(--line-2);padding-left:8px;font-weight:700;font-size:13.5px;color:var(--text-1)">${esc(cat.name)}</span>${meta}</td></tr>`);
+          chunks.push(`<tr class="pa-sechead"><td data-cattoggle="${cat.id}" colspan="${colspan}" style="cursor:pointer;background:var(--card);padding:8px 10px 6px ${12 + depth * 20}px;border-left:5px solid var(--primary-050)">
+            <span style="display:inline-block;border-left:3px solid var(--line-2);padding-left:8px;font-weight:700;font-size:13.5px;color:var(--text-1)">${caret}${esc(cat.name)}</span>${meta}</td></tr>`);
         }
+        if (collapsed) return;   // 收合：不顯示品項與子分類
         (rowsByCat.get(cat.id) || []).forEach(r => chunks.push(rowHtml(r, false, 16 + (depth + 1) * 18)));   // 品項再縮排、小字
         subCategoriesOf(cat.id).forEach(k => walkCat(k, depth + 1));
       };
@@ -11304,11 +11309,18 @@ function viewProductAnalysis(v) {
       const none = rowsByCat.get('') || [];
       if (none.length) {
         let q = 0, a = 0; none.forEach(r => { q += r.qty; a += r.amount; });
-        chunks.push(`<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--primary-050);border-left:5px solid var(--gray);border-top:2px solid var(--gray);padding:12px 10px 11px 12px">
-          <span style="font-weight:800;font-size:16.5px;color:var(--text-1)">未分類</span>
+        const ncol = !!paState.catCollapsed['__none'];
+        chunks.push(`<tr class="pa-sechead"><td data-cattoggle="__none" colspan="${colspan}" style="cursor:pointer;background:var(--primary-050);border-left:5px solid var(--gray);border-top:2px solid var(--gray);padding:12px 10px 11px 12px">
+          <span class="pa-arrow ${ncol ? '' : 'open'}" style="font-size:12px">▸</span> <span style="font-weight:800;font-size:16.5px;color:var(--text-1)">未分類</span>
           <span style="font-weight:600;font-size:11.5px;color:var(--text-2)">　${none.length} 項 · 量 ${paNum(q)} · ${money(a)}</span>
           <span style="font-size:11.5px;color:var(--primary-600)">　←點每列的「歸類」自行指定分類</span></td></tr>`);
-        none.forEach(r => chunks.push(rowHtml(r, true, 34)));
+        if (!ncol) {
+          chunks.push(`<tr class="pa-recatbar"><td colspan="${colspan}" style="background:var(--primary-050);padding:4px 10px 10px 34px">
+            <button class="btn sm" data-recatall>全選未分類</button>
+            <button class="btn sm primary" data-recatgo>批次歸類（<span class="pa-recatn">${paState.recatSel.size}</span>）</button>
+            <button class="btn sm" data-recatclr>清除勾選</button></td></tr>`);
+          none.forEach(r => chunks.push(rowHtml(r, true, 34)));
+        }
       }
       body = chunks.join('');
     } else {
@@ -11326,6 +11338,18 @@ function viewProductAnalysis(v) {
     }));
     results.querySelectorAll('.pa-dissolve').forEach(a => a.addEventListener('click', () => paDissolve(a.dataset.g)));
     results.querySelectorAll('.pa-recat').forEach(a => a.addEventListener('click', () => paPickCat(a.dataset.k)));
+    results.querySelectorAll('[data-cattoggle]').forEach(td => td.addEventListener('click', () => {
+      const id = td.dataset.cattoggle;
+      if (paState.catCollapsed[id]) delete paState.catCollapsed[id]; else paState.catCollapsed[id] = true;
+      drawResults();
+    }));
+    results.querySelectorAll('.pa-recatchk').forEach(c => c.addEventListener('change', () => {
+      if (c.checked) paState.recatSel.add(c.dataset.k); else paState.recatSel.delete(c.dataset.k);
+      results.querySelectorAll('.pa-recatn').forEach(s => s.textContent = paState.recatSel.size);
+    }));
+    { const b = results.querySelector('[data-recatall]'); if (b) b.addEventListener('click', () => { results.querySelectorAll('.pa-recatchk').forEach(c => paState.recatSel.add(c.dataset.k)); drawResults(); }); }
+    { const b = results.querySelector('[data-recatclr]'); if (b) b.addEventListener('click', () => { paState.recatSel.clear(); drawResults(); }); }
+    { const b = results.querySelector('[data-recatgo]'); if (b) b.addEventListener('click', () => paBatchRecat()); }
   }
 
   function paDateRows(r, mergeCol) {
@@ -11366,6 +11390,33 @@ function viewProductAnalysis(v) {
     if (!flat.length) return toast('沒有可匯出的資料', 'err');
     const nm = paState.mode === 'product' ? '產品分析' : '客戶分析';
     exportExcelRows(flat, nm, `${nm}_${today()}.xlsx`);
+  }
+
+  function paBatchRecat() {
+    const keys = [...paState.recatSel];
+    if (!keys.length) return toast('請先勾選要歸類的未分類品項', 'err');
+    const opts = (() => {
+      const out = ['<option value="">未分類（清除歸類）</option>'];
+      const walk = (cat, depth) => { out.push(`<option value="${cat.id}">${'　'.repeat(depth)}${esc(cat.name)}</option>`); subCategoriesOf(cat.id).forEach(c => walk(c, depth + 1)); };
+      majorCategories().forEach(c => walk(c, 0));
+      return out.join('');
+    })();
+    openModal({
+      title: `批次歸類（${keys.length} 項）`,
+      body: `<div class="muted" style="font-size:12px;margin-bottom:8px">把勾選的 <b>${keys.length}</b> 個品項一次歸到指定分類（只影響產品分析分組，不會改到商品主檔）。</div>
+        <select class="inp" id="paBRecatSel">${opts}</select>`,
+      footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>套用</button>`,
+      onMount(elm, close) {
+        elm.querySelector('[data-no]').onclick = close;
+        elm.querySelector('[data-ok]').onclick = () => {
+          const cid = elm.querySelector('#paBRecatSel').value;
+          keys.forEach(k => paSetCatOverride(k, cid));
+          paState.recatSel.clear();
+          close(); drawResults();
+          toast(`已歸類 ${keys.length} 項`, 'ok');
+        };
+      }
+    });
   }
 
   function paPickCat(key) {
