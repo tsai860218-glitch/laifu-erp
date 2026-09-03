@@ -11373,9 +11373,9 @@ function viewProducts(v) {
     const children = fs.catId ? subCategoriesOf(fs.catId) : majorCategories();
     const childCards = children.map(c => {
       const has = subCategoriesOf(c.id).length > 0;
-      const icon = c.parent_id ? '🔖' : '📁';   // 大分類=📁、子分類=🔖
+      const icon = c.parent_id ? '<span class="pfcat-ic">🔖</span>' : '';   // 子分類=🔖；大分類不放圖示
       return `<div class="pfcat ${has ? 'branch' : 'leaf'}" data-cat="${c.id}">
-        <span class="pfcat-ic">${icon}</span>
+        ${icon}
         <span class="pfcat-nm">${esc(c.name)}</span>
         ${has ? '<span class="pfcat-arw">▸</span>' : ''}
         <span class="pfcat-ct">${catCount(c.id)}</span></div>`;
