@@ -10979,7 +10979,7 @@ let pTreeExpanded = new Set(); // 商品管理左側分類樹：目前展開的�
    DB.settings.pa_merge_groups，會跟著雲端同步、也存本機）。全部前端即時計算，
    除了「合併設定」外不寫入任何資料。
    =========================================================== */
-let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, catCollapsed: {}, mergeMode: false, groupBy: true, sel: null };
+let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, catCollapsed: {}, mergeMode: false, recatMode: false, groupBy: true, sel: null };
 
 function paMergeGroups() {
   const g = DB.settings && DB.settings.pa_merge_groups;
@@ -11100,6 +11100,7 @@ function viewProductAnalysis(v) {
           <button class="seg-btn" data-detail="dates">展開看叫貨紀錄</button>
         </div>
         <button class="btn sm" id="paMergeToggle">合併同產品</button>
+        <button class="btn sm" id="paRecatMode">批次歸類</button>
         <button class="btn sm" id="paGroupCat">依分類分組</button>
         <button class="btn sm" id="paAutoMerge">🔎 自動找相同</button>
         <button class="btn" id="paExport">⬇ 匯出 Excel</button>
@@ -11160,6 +11161,8 @@ function viewProductAnalysis(v) {
     if (am) am.style.display = paState.mode === 'product' ? '' : 'none';
     const gb = el('paGroupCat');
     if (gb) { gb.style.display = paState.mode === 'product' ? '' : 'none'; gb.classList.toggle('active', paState.groupBy); }
+    const rm = el('paRecatMode');
+    if (rm) { rm.style.display = (paState.mode === 'product' && paState.groupBy) ? '' : 'none'; rm.classList.toggle('active', paState.recatMode); }
   };
 
   v.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
@@ -11168,7 +11171,8 @@ function viewProductAnalysis(v) {
   v.querySelectorAll('[data-detail]').forEach(b => b.addEventListener('click', () => {
     paState.detail = b.dataset.detail; setDetailUI(); drawResults();
   }));
-  el('paMergeToggle').addEventListener('click', () => { paState.mergeMode = !paState.mergeMode; paState.sel.clear(); setMergeUI(); drawResults(); });
+  el('paMergeToggle').addEventListener('click', () => { paState.mergeMode = !paState.mergeMode; if (paState.mergeMode) paState.recatMode = false; paState.sel.clear(); setMergeUI(); drawResults(); });
+  el('paRecatMode').addEventListener('click', () => { paState.recatMode = !paState.recatMode; if (paState.recatMode) paState.mergeMode = false; if (!paState.recatMode) paState.recatSel.clear(); setMergeUI(); drawResults(); });
   el('paAutoMerge').addEventListener('click', () => paAutoSuggest());
   el('paGroupCat').addEventListener('click', () => { paState.groupBy = !paState.groupBy; setMergeUI(); drawResults(); });
   el('paFrom').addEventListener('change', e => { paState.from = e.target.value; drawResults(); });
@@ -11245,7 +11249,7 @@ function viewProductAnalysis(v) {
         const gBadge = isGroup ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">已合併</span>` : '';
         const mBadge = r.manual ? ` <span class="bdg gray plain" style="height:16px;font-size:9px">手動品項</span>` : '';
         const dissolve = (mergeCol && isGroup) ? ` <a href="javascript:void(0)" class="pa-dissolve" data-g="${r.key.slice(2)}" onclick="event.stopPropagation()" style="font-size:11px">拆開</a>` : '';
-        const showRecat = grp && !mergeCol;   // 分組模式(非合併模式)：每個品項都可勾選/歸類
+        const showRecat = grp && paState.recatMode && !mergeCol;   // 需先按「批次歸類」進入歸類模式，勾選框才出現（避免誤觸）
         const recat = showRecat ? ` <a href="javascript:void(0)" class="pa-recat" data-k="${esc(r.key)}" onclick="event.stopPropagation()" style="font-size:11px;color:var(--primary-600)">歸類</a>` : '';
         const recatChk = showRecat ? `<input type="checkbox" class="pa-recatchk" data-k="${esc(r.key)}" ${paState.recatSel.has(r.key) ? 'checked' : ''} onclick="event.stopPropagation()" style="margin-right:6px;vertical-align:middle">` : '';
         return `<tr class="pa-main" data-pkey="${esc(r.key)}">${chk}
@@ -11317,17 +11321,17 @@ function viewProductAnalysis(v) {
           <span style="font-size:11.5px;color:var(--primary-600)">　←勾選後可批次歸類</span></td></tr>`);
         if (!ncol) none.forEach(r => chunks.push(rowHtml(r, true, 34)));
       }
-      // 頂端一排：全選 / 全不選（分組且非合併模式時，用來配合下方浮動的「批次歸類」）
-      if (!mergeCol) chunks.unshift(`<tr class="pa-recatbar"><td colspan="${colspan}" style="background:var(--card);border-bottom:1px solid var(--line);padding:6px 10px">
+      // 頂端一排：全選 / 全不選（只有進入「批次歸類」模式才顯示）
+      if (paState.recatMode && !mergeCol) chunks.unshift(`<tr class="pa-recatbar"><td colspan="${colspan}" style="background:var(--card);border-bottom:1px solid var(--line);padding:6px 10px">
         <button class="btn sm" data-recatall>全選目前顯示</button>
         <button class="btn sm" data-recatclr>全不選</button>
-        <span class="muted" style="font-size:11.5px">　勾選任意品項 → 下方會出現「批次歸類」；也可直接點單列的「歸類」</span></td></tr>`);
+        <span class="muted" style="font-size:11.5px">　勾選任意品項 → 下方會出現「批次歸類」；也可點單列的「歸類」改單筆</span></td></tr>`);
       body = chunks.join('');
     } else {
       body = rows.map(rowHtml).join('');
     }
 
-    const recatFloat = (isProd && paState.groupBy && !mergeCol && paState.recatSel.size)
+    const recatFloat = (isProd && paState.groupBy && paState.recatMode && !mergeCol && paState.recatSel.size)
       ? `<div style="position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:60;display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--card);border:1px solid var(--primary-600);border-radius:10px;box-shadow:var(--sh-lg);font-size:12.5px">
           <span>已選 <b>${paState.recatSel.size}</b> 項</span>
           <button class="btn sm primary" data-recatgo>批次歸類到…</button>
