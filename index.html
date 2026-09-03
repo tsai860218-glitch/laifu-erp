@@ -11322,6 +11322,110 @@ function productMatchKw(p, kw) {
     (p.components || []).some(c => ((c.part_no || '') + (c.spec || '')).toLowerCase().includes(kw));
 }
 
+// ── 商品匯出／匯入 Excel ──
+// 匯出：每個商品一列；含系統 id 欄（請勿更動），方便匯回時精準比對更新。
+function exportProductsExcel() {
+  const rows = (DB.products || []).map(p => {
+    const attrs = p.attrs || {};
+    const attrStr = Object.keys(attrs).filter(k => (attrs[k] || '').toString().trim())
+      .map(k => `${k}=${attrs[k]}`).join(' | ');
+    return {
+      id: p.id,
+      料號: primaryPartNo(p) || (p.part_no || ''),
+      品名: p.name || '',
+      品牌: p.brand || '',
+      規格: p.spec || '',
+      單位: p.unit || '',
+      分類: p.category_id ? categoryPathName(p.category_id) : (p.category || ''),
+      牌價: +p.list_price || 0,
+      成本: +p.default_cost || 0,
+      進貨廠商: p.default_supplier || '',
+      料號來源: p.part_no_source === 'agent' ? '代理' : '公司',
+      規格屬性: attrStr,
+      常用: p.is_favorite ? '是' : '',
+      啟用: p.is_active === false ? '否' : '是',
+      備註: p.note || ''
+    };
+  });
+  if (!rows.length) return toast('目前沒有商品可匯出', 'err');
+  exportProductsBackupHint();
+  exportExcelRows(rows, '商品主檔', `商品主檔_${today()}.xlsx`);
+}
+function exportProductsBackupHint() { /* 佔位：匯出前不需額外動作 */ }
+
+// 匯入：以 id 優先比對，其次料號、再其次品名+品牌；找到就更新、找不到就新增。
+// 不會刪除任何未列在檔案裡的商品。分類用「最後一層名稱」比對，找不到就建立為頂層分類。
+async function importProductsExcel(file) {
+  let rows;
+  try { rows = await parseExcelFile(file); }
+  catch (e) { return toast('讀取失敗：' + e.message, 'err'); }
+  if (!rows || !rows.length) return toast('檔案沒有資料', 'err');
+
+  const norm = s => (s == null ? '' : String(s)).trim();
+  // 先試算：會新增幾筆、更新幾筆
+  const plan = [];
+  rows.forEach(r => {
+    const id = norm(r.id || r.ID);
+    const partNo = norm(r.料號);
+    const name = norm(r.品名);
+    if (!id && !partNo && !name) return; // 空列略過
+    let target = id ? byId(DB.products, id) : null;
+    if (!target && partNo) target = DB.products.find(p => norm(primaryPartNo(p)) === partNo || norm(p.part_no) === partNo);
+    if (!target && name) target = DB.products.find(p => norm(p.name) === name && norm(p.brand) === norm(r.品牌));
+    plan.push({ r, target });
+  });
+  if (!plan.length) return toast('沒有可匯入的資料列', 'err');
+  const nUpd = plan.filter(x => x.target).length;
+  const nNew = plan.length - nUpd;
+
+  confirmBox('匯入商品 Excel',
+    `即將匯入 <b>${plan.length}</b> 筆：更新 <b>${nUpd}</b> 筆、新增 <b>${nNew}</b> 筆。<br>
+     只會新增或更新，<b>不會刪除</b>沒列在檔案裡的商品。<br><br>
+     <b>強烈建議先到「設定」匯出一份 JSON 備份再匯入。</b><br>確定要匯入嗎？`, () => {
+    let created = 0, updated = 0;
+    const resolveCat = nameOrPath => {
+      const leaf = norm(nameOrPath).split(/[›>/]/).pop().trim();
+      if (!leaf) return null;
+      let c = DB.categories.find(x => x.name === leaf);
+      if (!c) { c = { id: uid('cat'), name: leaf, parent_id: null, attr_defs: [] }; DB.categories.push(c); }
+      return c;
+    };
+    const parseAttrs = s => {
+      const out = {};
+      norm(s).split('|').forEach(pair => {
+        const i = pair.indexOf('=');
+        if (i > 0) { const k = pair.slice(0, i).trim(); const v = pair.slice(i + 1).trim(); if (k) out[k] = v; }
+      });
+      return out;
+    };
+    plan.forEach(({ r, target }) => {
+      const p = target || {
+        id: uid('p'), is_active: true, is_favorite: false, has_bom: false, components: [],
+        part_no_source: 'company', agent_stocks: [], attrs: {}, category_id: null,
+        price_ref_date: '', price_ref_source: '', note: ''
+      };
+      const has = k => Object.prototype.hasOwnProperty.call(r, k);
+      if (has('品名') && norm(r.品名)) p.name = norm(r.品名);
+      if (has('品牌')) p.brand = norm(r.品牌);
+      if (has('規格')) p.spec = norm(r.規格);
+      if (has('單位')) p.unit = norm(r.單位);
+      if (has('料號')) p.part_no = norm(r.料號);
+      if (has('牌價')) p.list_price = +r.牌價 || 0;
+      if (has('成本')) p.default_cost = +r.成本 || 0;
+      if (has('進貨廠商')) p.default_supplier = norm(r.進貨廠商);
+      if (has('料號來源')) p.part_no_source = norm(r.料號來源) === '代理' ? 'agent' : 'company';
+      if (has('常用')) p.is_favorite = ['是', 'Y', 'yes', 'true', '1'].includes(norm(r.常用));
+      if (has('啟用')) p.is_active = !['否', 'N', 'no', 'false', '0'].includes(norm(r.啟用));
+      if (has('備註')) p.note = norm(r.備註);
+      if (has('規格屬性') && norm(r.規格屬性)) p.attrs = Object.assign({}, p.attrs, parseAttrs(r.規格屬性));
+      if (has('分類') && norm(r.分類)) { const c = resolveCat(r.分類); if (c) { p.category_id = c.id; p.category = c.name; } }
+      if (target) { updated++; } else { DB.products.push(p); created++; }
+    });
+    saveNow(); render();
+    toast(`匯入完成：新增 ${created} 筆、更新 ${updated} 筆`, 'ok');
+  }, true);
+}
+
 function viewProducts(v) {
   pSelected.clear();
   const fs = pFilterState;
@@ -11331,6 +11435,9 @@ function viewProducts(v) {
       <div class="grow"><input class="inp" id="ps" placeholder="搜尋品名 / 料號（含代理商料號）/ 品牌 / 規格…" value="${esc(fs.kw)}"></div>
       <button class="btn ghost" onclick="manageCategories()">管理分類</button>
       ${columnsButton('plist')}
+      <button class="btn" onclick="exportProductsExcel()">⬇ 匯出 Excel</button>
+      <button class="btn" onclick="document.getElementById('pImpFile').click()">⬆ 匯入 Excel</button>
+      <input type="file" id="pImpFile" accept=".xlsx,.xls" class="hide">
       <button class="btn primary" onclick="editProduct(null)">＋ 新增商品</button>
     </div>
     <div class="bulk-bar" id="pBulkBar" style="display:none">
@@ -11521,6 +11628,8 @@ function viewProducts(v) {
     updateBulkBar('p');
   };
   document.getElementById('ps').addEventListener('input', () => { renderFacets(); run(true); });
+  const pImp = document.getElementById('pImpFile');
+  if (pImp) pImp.onchange = e => { if (e.target.files[0]) importProductsExcel(e.target.files[0]); e.target.value = ''; };
   registerPageRunner('products', run);
   renderFacets();
   run();
