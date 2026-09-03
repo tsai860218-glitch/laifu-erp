@@ -10979,7 +10979,7 @@ let pTreeExpanded = new Set(); // 商品管理左側分類樹：目前展開的�
    DB.settings.pa_merge_groups，會跟著雲端同步、也存本機）。全部前端即時計算，
    除了「合併設定」外不寫入任何資料。
    =========================================================== */
-let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, sel: null };
+let paState = { mode: 'product', detail: 'customer', from: '', to: '', company: '', dept: '', cat: '', kw: '', sort: 'qty', expanded: {}, mergeMode: false, groupBy: false, sel: null };
 
 function paMergeGroups() {
   const g = DB.settings && DB.settings.pa_merge_groups;
@@ -11016,6 +11016,7 @@ function paRecords() {
       const nm = (it.name || '').trim();
       if (!nm && !it.product_id) return;
       const prod = it.product_id ? byId(DB.products, it.product_id) : null;
+      if (paState.cat && !(prod && productInCategory(prod, paState.cat))) return; // 分類篩選：只留該分類（含子分類）的商品
       let key = it.product_id ? ('p:' + it.product_id) : ('n:' + nm);
       let name = nm || (prod && prod.name) || '（未命名）';
       let manual = !it.product_id;
@@ -11065,6 +11066,15 @@ function viewProductAnalysis(v) {
 
   const coOpts = ['<option value="">全部公司</option>']
     .concat((DB.companies || []).map(c => `<option value="${c.id}">${esc(c.short_name || c.name)}</option>`)).join('');
+  const paCatOpts = (() => {
+    const out = ['<option value="">全部分類</option>'];
+    const walk = (cat, depth) => {
+      out.push(`<option value="${cat.id}">${'　'.repeat(depth)}${esc(cat.name)}</option>`);
+      subCategoriesOf(cat.id).forEach(c => walk(c, depth + 1));
+    };
+    majorCategories().forEach(c => walk(c, 0));
+    return out.join('');
+  })();
 
   // 工具列只建立一次，之後只重繪 #paResults → 搜尋框不會被重建，可以連續打字
   v.innerHTML = `
@@ -11080,6 +11090,8 @@ function viewProductAnalysis(v) {
           <button class="seg-btn" data-detail="dates">展開看叫貨紀錄</button>
         </div>
         <button class="btn sm" id="paMergeToggle">合併同產品</button>
+        <button class="btn sm" id="paGroupCat">依分類分組</button>
+        <button class="btn sm" id="paAutoMerge">🔎 自動找相同</button>
         <button class="btn" id="paExport">⬇ 匯出 Excel</button>
       </div>
       <div class="grid g5" style="gap:10px">
@@ -11095,6 +11107,7 @@ function viewProductAnalysis(v) {
         </select></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+        <select class="inp" id="paCat" style="flex:0 1 200px;height:34px">${paCatOpts}</select>
         <button class="btn sm" data-range="month">本月</button>
         <button class="btn sm" data-range="year">今年</button>
         <button class="btn sm" data-range="all">全部</button>
@@ -11114,6 +11127,7 @@ function viewProductAnalysis(v) {
   el('paFrom').value = paState.from;
   el('paTo').value = paState.to;
   el('paCompany').value = paState.company;
+  { const pc = el('paCat'); if (pc) pc.value = paState.cat; }
   el('paDept').value = paState.dept;
   el('paSort').value = paState.sort;
   el('paKw').value = paState.kw;
@@ -11132,6 +11146,10 @@ function viewProductAnalysis(v) {
     const t = el('paMergeToggle');
     t.classList.toggle('active', paState.mergeMode);
     t.style.display = paState.mode === 'product' ? '' : 'none';
+    const am = el('paAutoMerge');
+    if (am) am.style.display = paState.mode === 'product' ? '' : 'none';
+    const gb = el('paGroupCat');
+    if (gb) { gb.style.display = paState.mode === 'product' ? '' : 'none'; gb.classList.toggle('active', paState.groupBy); }
   };
 
   v.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
@@ -11141,9 +11159,12 @@ function viewProductAnalysis(v) {
     paState.detail = b.dataset.detail; setDetailUI(); drawResults();
   }));
   el('paMergeToggle').addEventListener('click', () => { paState.mergeMode = !paState.mergeMode; paState.sel.clear(); setMergeUI(); drawResults(); });
+  el('paAutoMerge').addEventListener('click', () => paAutoSuggest());
+  el('paGroupCat').addEventListener('click', () => { paState.groupBy = !paState.groupBy; setMergeUI(); drawResults(); });
   el('paFrom').addEventListener('change', e => { paState.from = e.target.value; drawResults(); });
   el('paTo').addEventListener('change', e => { paState.to = e.target.value; drawResults(); });
   el('paCompany').addEventListener('change', e => { paState.company = e.target.value; drawResults(); });
+  { const pc = el('paCat'); if (pc) pc.addEventListener('change', e => { paState.cat = e.target.value; drawResults(); }); }
   el('paDept').addEventListener('change', e => { paState.dept = e.target.value; drawResults(); });
   el('paSort').addEventListener('change', e => { paState.sort = e.target.value; drawResults(); });
   el('paKw').addEventListener('input', e => { paState.kw = e.target.value; drawResults(); });  // 只重繪結果 → 可連續打字
@@ -11198,7 +11219,7 @@ function viewProductAnalysis(v) {
       ? `<tr>${mergeCol ? '<th style="width:34px"></th>' : ''}<th>產品</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">客戶數</th><th class="c">出貨次數</th></tr>`
       : `<tr><th>客戶</th><th class="r">出貨量</th><th class="r">出貨金額</th><th class="c">產品數</th><th class="c">出貨次數</th></tr>`;
 
-    const body = rows.map(r => {
+    const rowHtml = r => {
       const open = !!paState.expanded[r.key];
       const subCount = Object.keys(r.subs).length;
       const subRowsCust = Object.values(r.subs).sort((a, b) => b.qty - a.qty).map(x =>
@@ -11227,7 +11248,28 @@ function viewProductAnalysis(v) {
           <td class="r money">${money(r.amount)}</td>
           <td class="c">${subCount}</td>
           <td class="c">${r.ships.size}</td></tr>${open ? subRows : ''}`;
-    }).join('');
+    };
+
+    let body;
+    if (isProd && paState.groupBy) {
+      // 依商品分類分組：每個分類一個區塊、含小計；無分類/手動/已合併歸到「未分類」
+      const colspan = mergeCol ? 6 : 5;
+      const secMap = new Map();
+      rows.forEach(r => {
+        let catId = '';
+        if (r.key.slice(0, 2) === 'p:') { const pr = byId(DB.products, r.key.slice(2)); catId = (pr && pr.category_id) || ''; }
+        const kk = catId || '__none';
+        let sec = secMap.get(kk);
+        if (!sec) sec = secMap.set(kk, { label: catId ? categoryPathName(catId) : '（未分類 / 手動 / 已合併）', rows: [], qty: 0, amount: 0 }).get(kk);
+        sec.rows.push(r); sec.qty += r.qty; sec.amount += r.amount;
+      });
+      const secs = [...secMap.values()].sort((a, b) => b.amount - a.amount);
+      body = secs.map(sec =>
+        `<tr class="pa-sechead"><td colspan="${colspan}" style="background:var(--bg-2);font-weight:800;padding:9px 10px;border-top:2px solid var(--line)">📂 ${esc(sec.label)}　<span class="muted" style="font-weight:600;font-size:12px">（${sec.rows.length} 項 · 出貨量 ${paNum(sec.qty)} · 金額 ${money(sec.amount)}）</span></td></tr>`
+        + sec.rows.map(rowHtml).join('')).join('');
+    } else {
+      body = rows.map(rowHtml).join('');
+    }
 
     results.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 
@@ -11279,6 +11321,68 @@ function viewProductAnalysis(v) {
     if (!flat.length) return toast('沒有可匯出的資料', 'err');
     const nm = paState.mode === 'product' ? '產品分析' : '客戶分析';
     exportExcelRows(flat, nm, `${nm}_${today()}.xlsx`);
+  }
+
+  function paAutoSuggest() {
+    // 依「料號相同」或「名稱幾乎相同」自動歸類目前分析清單裡尚未合併的品項
+    const rows = paByProduct(paRecords()).filter(r => r.key.slice(0, 2) !== 'g:');
+    const parent = {};
+    rows.forEach(r => parent[r.key] = r.key);
+    const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+    const normNm = s => (s || '').toString().toLowerCase().replace(/[\s\u3000]/g, '');
+    const normPn = s => (s || '').toString().toUpperCase().replace(/[\s\u3000]/g, '');
+    const byPn = {}, byNm = {};
+    rows.forEach(r => {
+      const pn = normPn(r.part_no); if (pn) (byPn[pn] = byPn[pn] || []).push(r.key);
+      const nm = normNm(r.name); if (nm) (byNm[nm] = byNm[nm] || []).push(r.key);
+    });
+    Object.values(byPn).forEach(ks => ks.forEach(k => union(k, ks[0])));
+    Object.values(byNm).forEach(ks => ks.forEach(k => union(k, ks[0])));
+    const groups = {};
+    rows.forEach(r => { const root = find(r.key); (groups[root] = groups[root] || []).push(r); });
+    const suggestions = Object.values(groups).filter(g => g.length >= 2);
+    if (!suggestions.length) return toast('沒有偵測到明顯相同的品項', 'ok');
+    suggestions.forEach(g => {
+      const rep = g.slice().sort((a, b) => (a.manual ? 1 : 0) - (b.manual ? 1 : 0) || (b.name || '').length - (a.name || '').length)[0];
+      g._name = rep ? rep.name : '合併產品';
+    });
+    openModal({
+      title: '自動找相同品項',
+      size: 'wide',
+      body: `<div class="muted" style="font-size:12px;margin-bottom:10px">系統依「料號相同」或「名稱幾乎相同」自動歸類。勾選要合併的組、可改合併後名稱，再按下方套用；合併後隨時可在清單上「拆開」。</div>
+        <div style="max-height:56vh;overflow:auto;display:flex;flex-direction:column;gap:10px">
+        ${suggestions.map((g, i) => `<div style="border:1px solid var(--line);border-radius:8px;padding:10px">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+            <input type="checkbox" class="pasug" data-i="${i}" checked>
+            合併為：<input class="inp pasugname" data-i="${i}" value="${esc(g._name)}" style="flex:1;height:32px">
+          </label>
+          <div class="muted" style="font-size:12px;margin-top:6px;padding-left:26px;line-height:1.7">
+            ${g.map(r => `・${esc(r.name)}${r.part_no ? `（${esc(r.part_no)}）` : ''}　<span style="color:var(--text-3)">出貨量 ${paNum(r.qty)}</span>`).join('<br>')}
+          </div></div>`).join('')}
+        </div>`,
+      footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>套用合併（<span id="paSugCount">${suggestions.length}</span>）</button>`,
+      onMount(elm, close) {
+        const upd = () => { elm.querySelector('#paSugCount').textContent = elm.querySelectorAll('.pasug:checked').length; };
+        elm.querySelectorAll('.pasug').forEach(c => c.onchange = upd);
+        elm.querySelector('[data-no]').onclick = close;
+        elm.querySelector('[data-ok]').onclick = () => {
+          const list = paMergeGroups();
+          let added = 0;
+          elm.querySelectorAll('.pasug:checked').forEach(c => {
+            const i = +c.dataset.i;
+            const nm = (elm.querySelector(`.pasugname[data-i="${i}"]`).value || '').trim() || suggestions[i]._name;
+            const members = suggestions[i].map(r => r.key);
+            list.push({ id: uid('pg'), name: nm, members: [...new Set(members)] });
+            added++;
+          });
+          if (!added) { close(); return toast('沒有勾選任何組別', 'err'); }
+          paSaveGroups(list);
+          close(); drawResults();
+          toast(`已合併 ${added} 組`, 'ok');
+        };
+      }
+    });
   }
 
   function paDoMerge() {
