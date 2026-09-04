@@ -11435,7 +11435,11 @@ function viewProductAnalysis(v) {
         elm.querySelector('[data-no]').onclick = close;
         elm.querySelector('[data-ok]').onclick = () => {
           const cid = elm.querySelector('#paBRecatSel').value;
-          keys.forEach(k => paSetCatOverride(k, cid));
+          if (!DB.settings) DB.settings = {};
+          const m = Object.assign({}, DB.settings.pa_cat_overrides || {});
+          keys.forEach(k => { if (cid) m[k] = cid; else delete m[k]; });
+          DB.settings.pa_cat_overrides = m;
+          saveNow();   // 一次存檔，不要逐筆存（避免大量寫入耗盡雲端配額）
           paState.recatSel.clear();
           close(); drawResults();
           toast(`已歸類 ${keys.length} 項`, 'ok');
