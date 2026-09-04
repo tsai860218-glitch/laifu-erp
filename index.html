@@ -1660,7 +1660,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = '2026-09-03 修刪除後重開單誤判已有單＋欄位隱藏相容展開明細＋作廢/刪除說明';
+const APP_BUILD = '2026-09-04 開啟Firestore離線快取(降低讀取)＋批次歸類單次寫入';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -1719,6 +1719,14 @@ function fbInit() {
     // 效率略低，換來每台都穩定。必須在任何讀寫之前設定，所以放在這裡。
     try { fbDb.settings({ experimentalForceLongPolling: true, merge: true }); }
     catch (e) { console.warn('設定 Firestore 長輪詢失敗（不影響一般網路使用）', e); }
+    // 開啟 Firestore 離線快取（IndexedDB）：即時監聽的「初次讀取」改從本機快取取得（不計費），
+    // 之後只跟伺服器要「有變動的文件」，大幅減少每次開啟／重新整理的讀取次數（Firebase 免費配額更省）。
+    // synchronizeTabs 讓多個分頁共用同一份快取；若瀏覽器不支援或多分頁衝突，會自動退回一般連線，不影響功能與同步。
+    // 必須在任何讀寫之前呼叫，所以放在這裡。
+    try {
+      fbDb.enablePersistence({ synchronizeTabs: true })
+        .catch(e => console.warn('Firestore 離線快取未啟用（不影響功能，只是讀取次數較多）', e && e.code));
+    } catch (e) { console.warn('Firestore 離線快取初始化失敗（不影響功能）', e); }
     // 明確要求「本機持久化」，讓登入狀態在重新整理／關掉分頁後仍保留，不用每次重新登入。
     // （這本來就是 Firebase 網頁版的預設值，這裡明寫一次當保險，失敗也不影響後續流程。）
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(e => console.warn('設定登入持久化失敗（不影響使用）', e));
