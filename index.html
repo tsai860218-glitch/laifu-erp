@@ -1712,21 +1712,23 @@ function fbInit() {
     firebase.initializeApp(FIREBASE_CONFIG);
     fbAuth = firebase.auth();
     fbDb = firebase.firestore();
-    // 有些網路環境（尤其公司防火牆／Proxy）會擋掉或干擾 Firestore 預設的 WebChannel／QUIC(HTTP3)
-    // 連線，症狀就是大量 ERR_QUIC_PROTOCOL_ERROR、'Listen' stream transport errored、同步一直失敗。
-    // 「自動偵測」抓不到 QUIC 被擋這種情況，所以這裡直接「強制長輪詢」：一律改用一般 HTTP 長輪詢
-    //（long polling），完全繞開會被擋的連線方式。一般網路（例如家裡）也照常運作，只是即時同步
-    // 效率略低，換來每台都穩定。必須在任何讀寫之前設定，所以放在這裡。
-    try { fbDb.settings({ experimentalForceLongPolling: true, merge: true }); }
-    catch (e) { console.warn('設定 Firestore 長輪詢失敗（不影響一般網路使用）', e); }
-    // 開啟 Firestore 離線快取（IndexedDB）：即時監聽的「初次讀取」改從本機快取取得（不計費），
-    // 之後只跟伺服器要「有變動的文件」，大幅減少每次開啟／重新整理的讀取次數（Firebase 免費配額更省）。
-    // synchronizeTabs 讓多個分頁共用同一份快取；若瀏覽器不支援或多分頁衝突，會自動退回一般連線，不影響功能與同步。
-    // 必須在任何讀寫之前呼叫，所以放在這裡。
+    // 強制長輪詢(繞過公司防火牆/Proxy會擋的連線) + 離線快取(降低讀取次數)。
+    // 用新版 localCache 寫法一次設定完，避免舊版 enablePersistence 的棄用警告，
+    // 也拿掉 merge:true(它會把預設的 autoDetectLongPolling 併進來，和 forceLongPolling 衝突而跳警告)。
+    // 都必須在任何讀寫之前設定，所以放在這裡；不支援新寫法時自動退回舊寫法。
     try {
-      fbDb.enablePersistence({ synchronizeTabs: true })
-        .catch(e => console.warn('Firestore 離線快取未啟用（不影響功能，只是讀取次數較多）', e && e.code));
-    } catch (e) { console.warn('Firestore 離線快取初始化失敗（不影響功能）', e); }
+      const fs = firebase.firestore;
+      if (fs.persistentLocalCache && fs.persistentMultipleTabManager) {
+        fbDb.settings({
+          experimentalForceLongPolling: true,
+          localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() })
+        });
+      } else {
+        fbDb.settings({ experimentalForceLongPolling: true });
+        fbDb.enablePersistence({ synchronizeTabs: true })
+          .catch(e => console.warn('Firestore 離線快取未啟用（不影響功能）', e && e.code));
+      }
+    } catch (e) { console.warn('Firestore 設定/離線快取套用失敗（不影響功能與同步）', e); }
     // 明確要求「本機持久化」，讓登入狀態在重新整理／關掉分頁後仍保留，不用每次重新登入。
     // （這本來就是 Firebase 網頁版的預設值，這裡明寫一次當保險，失敗也不影響後續流程。）
     fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(e => console.warn('設定登入持久化失敗（不影響使用）', e));
@@ -2773,9 +2775,9 @@ async function load() {
       }
       const remote = await firestoreLoadAll();
       if (isFirestoreEmpty(remote)) {
-        // 雲端資料庫還是空的：優先把本機既有資料搬上去，沒有的話才用種子資料
+        // 雲端資料庫還是空的：優先把本機既有資料搬上去，沒有的話就用「空白資料」(不再自動塞示範/預設資料)
         const localRaw = localStorage.getItem(KEY);
-        let seedData = localRaw ? JSON.parse(localRaw) : seed();
+        let seedData = localRaw ? JSON.parse(localRaw) : emptyDB();
         seedData._schema = seedData._schema || 1;
         migrate(seedData);
         seedData.settings = Object.assign({}, DEFAULT_SETTINGS, seedData.settings || {});
@@ -2842,8 +2844,8 @@ async function load() {
       if (before < SCHEMA_V) { save(); console.info(`資料已升級 v${before} → v${SCHEMA_V}`); }
       return;
     }
-  } catch (e) { console.error('資料損毀，載入種子資料', e); }
-  DB = seed(); save();
+  } catch (e) { console.error('資料損毀，載入空白資料', e); }
+  DB = emptyDB(); save();
 }
 
 /* ===========================================================
