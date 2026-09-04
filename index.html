@@ -1660,7 +1660,7 @@ const FIREBASE_LOGIN_EMAIL = "laifu-laifu@umail.hinet.net";
 const ENV_MODE = 'auto';
 // 版本戳記：每次改版會更新。開機時會印在 Console，也顯示在「設定」頁最底部，
 // 用來確認「瀏覽器現在跑的到底是不是最新檔」（GitHub Pages／瀏覽器常會快取舊檔）。
-const APP_BUILD = '2026-08-28 欄位隱藏改為先套用再調欄寬(修隱藏失效)＋出貨單垃圾桶';
+const APP_BUILD = '2026-09-03 修刪除後重開單誤判已有單＋欄位隱藏相容展開明細＋作廢/刪除說明';
 function isDevEnv() {
   if (ENV_MODE === 'dev') return true;
   if (ENV_MODE === 'prod') return false;
@@ -6784,18 +6784,25 @@ function applyColVis(wrapId) {
   const wrap = document.getElementById(wrapId);
   const table = wrap && wrap.querySelector('table');
   if (!table) { if (style) style.textContent = ''; return; }
-  const thCount = table.querySelectorAll('thead th').length;
+  // 只取「主表格表頭那一列」的欄數；不能用 querySelectorAll('thead th')，
+  // 因為展開明細的子表格(.mini-tbl)也有 thead th，會被一起數進去導致 offset 大錯、隱藏失效。
+  const headRow = table.tHead && table.tHead.rows[0];
+  const thCount = headRow ? headRow.cells.length : table.querySelectorAll('thead th').length;
   const offset = Math.max(0, thCount - cols.length); // 前置欄（例如勾選框）造成的位移
   const hidden = getHiddenCols(wrapId);
   const rules = [];
   cols.forEach(([k], i) => {
     if (hidden.has(k)) {
       const n = i + offset + 1; // nth-child 從 1 起算
-      rules.push(`#${wrapId} table th:nth-child(${n}),#${wrapId} table td:nth-child(${n}){display:none}`);
+      // 只作用在「主表格」：排除展開明細的子表格(.mini-tbl)與明細列(.row-detail)，否則會誤傷下拉內容
+      rules.push(`#${wrapId} table:not(.mini-tbl) > thead > tr > th:nth-child(${n}),#${wrapId} table:not(.mini-tbl) > tbody > tr:not(.row-detail) > td:nth-child(${n}){display:none}`);
     }
   });
   if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
   style.textContent = rules.join('');
+  // 展開明細用 colspan 撐滿整列；隱藏欄位後要改成「目前可見欄數」，否則版面被撐開、看起來像沒隱藏成功
+  const visible = Math.max(1, thCount - hidden.size);
+  wrap.querySelectorAll('tr.row-detail > td[colspan]').forEach(td => { td.colSpan = visible; });
 }
 function columnsButton(wrapId) {
   const n = getHiddenCols(wrapId).size;
@@ -9443,6 +9450,11 @@ function viewDelivery(v) {
         <div class="btn-row">
           <button class="btn danger" onclick="deleteDelivery('${d.id}')">🗑 刪除出貨單</button>
         </div>
+        <div class="muted" style="font-size:11.5px;line-height:1.7;margin:2px 2px 6px">
+          <b>作廢</b>：單子留在總表、標記「已取消」(灰色)，紀錄保留可查、不列入統計。<br>
+          <b>刪除</b>：單子移到「🗑 垃圾桶」、總表看不到，可撈回或永久刪除。<br>
+          兩者都會回補已扣庫存，來源報價會回到可重新開單的狀態。
+        </div>
         ${canEditThis ? `<div class="btn-row">
           ${editable
             ? `<button class="btn primary lg" style="flex:1" onclick="dvSaveEdit('${d.id}')">✓ 存檔</button>
@@ -9766,8 +9778,9 @@ function advance(id) {
 
 function cancelDelivery(id) {
   const d = byId(DB.deliveries, id);
-  confirmBox('作廢出貨單', `作廢後這張報價可以重新開立出貨單。<br>
-    單號 ${d.delivery_no} 保留不回收。確定？`, () => {
+  confirmBox('作廢出貨單', `作廢後單子<b>留在總表</b>並標記「已取消」(灰色)、紀錄保留可查，這張報價可以重新開立出貨單。<br>
+    單號 ${d.delivery_no} 保留不回收。<br>
+    <span class="muted">想讓它從總表消失請改用「刪除」(移到垃圾桶)。</span><br><br>確定？`, () => {
     d.status = 'cancelled';
     // 已扣過庫存 → 回補，並保留異動紀錄
     if (invEnabled() && d._stock_deducted) {
@@ -9837,8 +9850,9 @@ function openDeliveryTrash() {
 
 function deleteDelivery(id) {
   const d = byId(DB.deliveries, id);
-  confirmBox('刪除出貨單', `將 ${esc(d.delivery_no)} <b>移到垃圾桶</b>（可再撈回）。<br>
-    來源報價會回到「已下單」。<br><br>確定刪除？`, () => {
+  confirmBox('刪除出貨單', `將 ${esc(d.delivery_no)} <b>移到垃圾桶</b>（總表看不到，可再撈回）。<br>
+    來源報價會回到「已下單」、可重新開立出貨單。<br>
+    <span class="muted">想保留紀錄、日後查得到請改用「作廢」。</span><br><br>確定刪除？`, () => {
     // 已扣過庫存 → 移入垃圾桶前先回補，避免庫存憑空少掉（撈回時會回到未扣狀態）
     if (invEnabled() && d._stock_deducted) {
       stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨刪除回補 ' + (d.delivery_no || '') });
