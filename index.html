@@ -1674,7 +1674,7 @@ if (IS_DEV) {
 
 // 有填雲端設定、金鑰不是預設模板，且不在開發模式時，才啟用雲端。
 const FIREBASE_ENABLED = !!(FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY') && !IS_DEV;
-const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'accounts', 'rentals', 'tenders', 'agencies'];
+const FS_COLLECTIONS = ['companies', 'customers', 'products', 'categories', 'suppliers', 'users', 'quotes', 'deliveries', 'machines', 'accounts', 'rentals', 'tenders', 'agencies'];
 // 這幾個進銷存集合「不上雲端」：它們是後來新增的，多數 Firestore 安全性規則尚未開放，
 // 一旦放進上面的同步清單，寫入雲端是「整批一次送」的，只要其中一個集合被規則擋住，
 // 整批就會被拒、連帶讓整個雲端同步卡住（表現就是「連不到雲端」）。因此改為只存本機。
@@ -2333,6 +2333,7 @@ function relevantToCurrentView(col) {
   if (k === 'delivery') return ['customers', 'companies', 'users'].includes(col);
   if (k === 'quotes') return ['quotes', 'customers', 'companies', 'products', 'users'].includes(col);
   if (k === 'deliveries') return ['deliveries', 'quotes', 'customers', 'companies', 'users'].includes(col);
+  if (k === 'machines') return ['machines', 'deliveries', 'customers'].includes(col);
   if (k === 'customers') return ['customers', 'companies'].includes(col);
   if (k === 'products') return ['products', 'categories', 'suppliers'].includes(col);
   if (k === 'users') return col === 'users';
@@ -2398,7 +2399,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 20;                    // ← 每次改結構就 +1
+const SCHEMA_V = 21;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -2921,6 +2922,7 @@ function migrate(db) {
   db.users     = db.users     || [];
   db.counters  = db.counters  || {};
   db.stock     = db.stock     || [];   // 進銷存：庫存批次（每批各自的成本/貨況/儲位/入庫日）
+  db.machines  = db.machines  || [];   // 廚餘機保固追蹤（每台一列，可與出貨單連動）
 
   if (v < 2) {
     // 公司：簡稱、經銷品牌 Logo、PDF 檔名規則
@@ -4978,6 +4980,7 @@ const ROUTES = [
   { k: 'deliveries',t: '出貨管理', ico: 'delivery', tab: true  },
   { k: 'customers', t: '客戶管理', ico: 'customer', tab: true  },
   { k: 'tenders',   t: '標案管理', ico: 'accounts', tab: false },
+  { k: 'machines',  t: '廚餘機保固', ico: 'delivery', tab: false, group: '售後服務' },
   { k: 'products',  t: '商品管理', ico: 'product', tab: false, group: '商品／庫存' },
   { k: 'panalysis', t: '產品分析', ico: 'product', tab: false, group: '商品／庫存' },
   { k: 'rentals',   t: '印表機租賃', ico: 'rental', tab: false, group: '主檔' },
@@ -5113,6 +5116,7 @@ function render() {
   const fn = ({
     dash: viewDash, quotes: viewQuotes, quote: viewQuote,
     deliveries: viewDeliveries, delivery: viewDelivery,
+    machines: viewMachines,
     customers: viewCustomers, products: viewProducts,
     panalysis: viewProductAnalysis,
     rentals: viewRentals, rental: viewRentalDetail,
@@ -6621,6 +6625,233 @@ function viewTender(v) {
     save();
     if (k === 'status' || k === 'bid_bond' || k === 'bid_bond_amount') render();  // 切棄標顯示原因、切換押標金顯示繳退日
   }));
+}
+
+/* ============================================================
+   廚餘機保固追蹤（每台一列；出貨單開立含廚餘機時自動建立）
+   ============================================================ */
+let mcSort = { k: 'ship_date', dir: 'desc' };
+let mcRun = null;
+
+// 找出所有「廚餘機」分類（名稱含「廚餘」）及其所有子分類 id
+function foodWasteCatIdSet() {
+  const set = new Set();
+  (DB.categories || []).forEach(c => {
+    if ((c.name || '').includes('廚餘')) categoryDescendantIds(c.id).forEach(id => set.add(id));
+  });
+  return set;
+}
+// 出貨明細的某一品項是不是廚餘機：優先看商品分類，其次品名含「廚餘機」保險
+function isFoodWasteItem(item) {
+  const ids = foodWasteCatIdSet();
+  if (item && item.product_id && ids.size) {
+    const p = byId(DB.products, item.product_id);
+    if (p && p.category_id && ids.has(p.category_id)) return true;
+    if (p && (p.category || '').includes('廚餘')) return true;
+  }
+  return !!(item && (item.name || '').includes('廚餘機'));
+}
+// 開立出貨單時：把單裡的廚餘機一台一列建進保固追蹤（同一台不重複建立）
+function syncMachinesFromDelivery(dv) {
+  if (!dv || !Array.isArray(dv.items)) return 0;
+  DB.machines = DB.machines || [];
+  let added = 0;
+  dv.items.forEach(item => {
+    if (!isFoodWasteItem(item)) return;
+    const qty = Math.max(1, Math.round(+item.qty || 1));
+    for (let u = 0; u < qty; u++) {
+      if (DB.machines.some(m => m.delivery_id === dv.id && m.delivery_item_id === item.id && m.unit_index === u)) continue;
+      DB.machines.push({
+        id: uid('mc'), source: 'delivery',
+        delivery_id: dv.id, delivery_no: dv.delivery_no || '', delivery_item_id: item.id, unit_index: u,
+        quote_no: dv.quote_no || '',
+        customer_name: (dv.customer_snapshot && dv.customer_snapshot.name) || '',
+        customer_address: dv.ship_address || (dv.customer_snapshot && dv.customer_snapshot.address) || '',
+        ship_date: dv.delivery_date || '',
+        model: item.name || '',
+        mfg_year: '', serial: '', warranty_years: 1, note: '',
+        created_at: new Date().toISOString(), created_by_op: currentOperator()
+      });
+      added++;
+    }
+  });
+  return added;
+}
+// 保固到期日 = 出貨日 + 保固年限（年）
+function machineWarrantyEnd(m) {
+  if (!m || !m.ship_date) return '';
+  const d = new Date(m.ship_date);
+  if (isNaN(d.getTime())) return '';
+  d.setFullYear(d.getFullYear() + (+m.warranty_years || 0));
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+function machineWarrantyBadge(m) {
+  const end = machineWarrantyEnd(m);
+  if (!end) return '<span style="color:var(--text-3)">—</span>';
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+  const days = Math.round((new Date(end) - t0) / 86400000);
+  let bg = '#DCFCE7', fg = '#15803D', txt = '保固中';
+  if (days < 0) { bg = '#FEE2E2'; fg = '#B91C1C'; txt = '已過保'; }
+  else if (days <= 30) { bg = '#FFEDD5'; fg = '#C2410C'; txt = '剩 ' + days + ' 天'; }
+  return '<span style="display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;background:' + bg + ';color:' + fg + '">' + txt + '</span>';
+}
+
+function viewMachines(v) {
+  v.innerHTML = `
+    <div class="banner info"><span class="bi">ℹ</span><div>
+      這裡追蹤<b>廚餘機</b>的序號與保固期限。開立出貨單時，單裡的廚餘機會<b>自動一台一列</b>帶進來
+      （客戶、地址、出貨日、型號自動填入；<b>序號、製造年份</b>請點該列補上）。也可以手動新增補登舊機器。</div></div>
+    <div class="toolbar">
+      <div class="grow"><input class="inp" id="mcs" placeholder="搜尋客戶／型號／序號／出貨單號…"></div>
+      <button class="btn" onclick="printMachines()">🖨 列印</button>
+      <button class="btn" onclick="exportMachines()">⬇ 匯出 Excel</button>
+      <button class="btn primary" onclick="editMachine(null)">＋ 新增</button>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="mclist"></div><div id="mcPageBar"></div></div></div>`;
+  const th = (k, label, cls) => `<th class="${cls || ''}" style="cursor:pointer;white-space:nowrap" onclick="mcSetSort('${k}')">${label}${mcSort.k === k ? (mcSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`;
+  const run = (resetPage) => {
+    const kw = document.getElementById('mcs').value.trim().toLowerCase();
+    let list = (DB.machines || []).filter(m => !kw ||
+      ((m.customer_name || '') + (m.model || '') + (m.serial || '') + (m.delivery_no || '') + (m.mfg_year || '')).toLowerCase().includes(kw));
+    const dir = mcSort.dir === 'asc' ? 1 : -1;
+    list = list.slice().sort((a, b) => {
+      let x = mcSort.k === 'warranty_end' ? machineWarrantyEnd(a) : a[mcSort.k];
+      let y = mcSort.k === 'warranty_end' ? machineWarrantyEnd(b) : b[mcSort.k];
+      x = (x == null ? '' : x) + ''; y = (y == null ? '' : y) + '';
+      return x < y ? -dir : x > y ? dir : 0;
+    });
+    const info = paginateList('machines', list, resetPage);
+    const page = info.pageItems;
+    keepScroll('mclist');
+    document.getElementById('mclist').innerHTML = !list.length
+      ? `<div class="empty"><div class="e">${icon('delivery')}</div><h3>還沒有廚餘機保固紀錄</h3><p>開立含廚餘機的出貨單會自動帶進來，或點右上「＋ 新增」手動建立</p></div>`
+      : `<table class="tbl"><thead><tr>
+          ${th('customer_name', '客戶名稱')}${th('ship_date', '出貨日')}${th('model', '產品型號')}
+          ${th('serial', '序號')}${th('mfg_year', '製造年份', 'c')}${th('warranty_end', '保固到期')}
+          <th class="c">狀態</th><th>出貨單</th><th>備註</th></tr></thead><tbody>
+        ${page.map(m => {
+          const serialCell = m.serial ? esc(m.serial) : '<span style="color:var(--red);font-weight:700">待補</span>';
+          const yr = (m.mfg_year !== '' && m.mfg_year != null) ? esc(String(m.mfg_year)) : '<span style="color:var(--red)">待補</span>';
+          const dnCell = m.delivery_no ? esc(m.delivery_no) : '<span style="color:var(--text-3)">手動</span>';
+          return `<tr onclick="editMachine('${m.id}')">
+            <td><b>${esc(m.customer_name || '—')}</b></td>
+            <td style="white-space:nowrap;font-family:var(--mono)">${esc(m.ship_date || '—')}</td>
+            <td>${esc(m.model || '—')}</td>
+            <td style="font-family:var(--mono)">${serialCell}</td>
+            <td class="c">${yr}</td>
+            <td style="white-space:nowrap;font-family:var(--mono)">${esc(machineWarrantyEnd(m) || '—')}</td>
+            <td class="c">${machineWarrantyBadge(m)}</td>
+            <td class="muted" style="white-space:nowrap">${dnCell}</td>
+            <td class="muted">${esc(m.note || '')}</td></tr>`;
+        }).join('')}
+        </tbody></table>`;
+    document.getElementById('mcPageBar').innerHTML = list.length ? pageBarHtml('machines', info) : '';
+    makeColumnsResizable('mclist', 'machines');
+  };
+  mcRun = run;
+  registerPageRunner('machines', run);
+  document.getElementById('mcs').addEventListener('input', () => run(true));
+  run();
+}
+function mcSetSort(k) {
+  if (mcSort.k === k) mcSort.dir = mcSort.dir === 'asc' ? 'desc' : 'asc';
+  else { mcSort.k = k; mcSort.dir = (k === 'ship_date' || k === 'warranty_end') ? 'desc' : 'asc'; }
+  if (mcRun) mcRun(false); else render();
+}
+
+function editMachine(id) {
+  const m = id ? byId(DB.machines, id)
+    : { id: null, source: 'manual', delivery_id: '', delivery_no: '', delivery_item_id: '', quote_no: '',
+        customer_name: '', customer_address: '', ship_date: today(), model: '',
+        mfg_year: '', serial: '', warranty_years: 1, note: '' };
+  if (id && !m) return;
+  const wyVal = (m.warranty_years == null ? 1 : m.warranty_years);
+  const yrVal = (m.mfg_year == null ? '' : m.mfg_year);
+  openModal({
+    title: id ? '編輯廚餘機保固' : '新增廚餘機保固',
+    body: `
+      ${m.delivery_no ? `<div class="banner info" style="margin-bottom:10px"><span class="bi">🔗</span><div>來自出貨單 <b>${esc(m.delivery_no)}</b>${m.quote_no ? `（報價 ${esc(m.quote_no)}）` : ''}，客戶／出貨日等已由出貨單帶入，可自行修改。</div></div>` : ''}
+      <div class="field"><label class="req">客戶名稱</label><input class="inp" data-f="customer_name" value="${esc(m.customer_name)}"></div>
+      <div class="field"><label>客戶地址</label><textarea class="inp" data-f="customer_address" rows="2">${esc(m.customer_address)}</textarea></div>
+      <div class="grid g2">
+        <div class="field"><label>出貨日</label><input class="inp" type="date" data-f="ship_date" value="${esc(m.ship_date)}"></div>
+        <div class="field"><label>製造年份</label><input class="inp" type="number" inputmode="numeric" step="1" min="1900" max="2100" data-f="mfg_year" placeholder="例如 2026" value="${yrVal}"></div>
+      </div>
+      <div class="field"><label>產品型號</label><input class="inp" data-f="model" value="${esc(m.model)}"></div>
+      <div class="field"><label>序號</label><input class="inp" data-f="serial" placeholder="機器貼紙上的序號" value="${esc(m.serial)}"></div>
+      <div class="grid g2">
+        <div class="field"><label>保固年限（年）</label><input class="inp" type="number" step="1" min="0" max="30" data-f="warranty_years" value="${wyVal}"></div>
+        <div class="field"><label>保固到期（自動計算）</label><input class="inp" id="mcWe" readonly style="background:var(--bg-2)" value="${esc(machineWarrantyEnd(m) || '—')}"></div>
+      </div>
+      <div class="field"><label>備註</label><textarea class="inp" data-f="note" rows="2">${esc(m.note)}</textarea></div>`,
+    footer: `${id ? '<button class="btn danger left" data-del>刪除</button>' : ''}
+             <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
+    onMount(el, close) {
+      const recalc = () => {
+        const wy = +el.querySelector('[data-f="warranty_years"]').value || 0;
+        const sd = el.querySelector('[data-f="ship_date"]').value;
+        el.querySelector('#mcWe').value = machineWarrantyEnd({ ship_date: sd, warranty_years: wy }) || '—';
+      };
+      el.querySelector('[data-f="warranty_years"]').addEventListener('input', recalc);
+      el.querySelector('[data-f="ship_date"]').addEventListener('input', recalc);
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-ok]').onclick = () => {
+        const o = {};
+        el.querySelectorAll('[data-f]').forEach(i => {
+          o[i.dataset.f] = i.type === 'number' ? (i.value === '' ? '' : (+i.value || 0)) : i.value.trim();
+        });
+        if (!o.customer_name) return toast('請填客戶名稱', 'err');
+        if (o.warranty_years === '') o.warranty_years = 0;
+        if (id) Object.assign(m, o);
+        else DB.machines.push(Object.assign(
+          { id: uid('mc'), source: 'manual', delivery_id: '', delivery_no: '', delivery_item_id: '', quote_no: '',
+            created_at: new Date().toISOString(), created_by_op: currentOperator() }, o));
+        save(); close(); (mcRun ? mcRun(false) : render()); toast('已儲存', 'ok');
+      };
+      const d = el.querySelector('[data-del]');
+      if (d) d.onclick = () => confirmBox('刪除保固紀錄',
+        `確定刪除這筆廚餘機保固紀錄嗎？<br>客戶：${esc(m.customer_name || '')}　序號：${esc(m.serial || '（未填）')}`, () => {
+          DB.machines = DB.machines.filter(x => x.id !== id);
+          save(); close(); (mcRun ? mcRun(false) : render()); toast('已刪除');
+        }, true);
+    }
+  });
+}
+
+function exportMachines() {
+  const list = (DB.machines || []);
+  if (!list.length) return toast('沒有可匯出的資料', 'err');
+  const rows = list.slice().sort((a, b) => (b.ship_date || '').localeCompare(a.ship_date || '')).map(m => ({
+    '客戶名稱': m.customer_name || '',
+    '客戶地址': m.customer_address || '',
+    '出貨日': m.ship_date || '',
+    '產品型號': m.model || '',
+    '製造年份': m.mfg_year === '' || m.mfg_year == null ? '' : m.mfg_year,
+    '序號': m.serial || '',
+    '保固年限(年)': m.warranty_years == null ? '' : m.warranty_years,
+    '保固到期': machineWarrantyEnd(m) || '',
+    '出貨單號': m.delivery_no || '',
+    '備註': m.note || ''
+  }));
+  exportExcelRows(rows, '廚餘機保固', '廚餘機保固_' + today().replace(/-/g, '') + '.xlsx');
+}
+
+function printMachines() {
+  const list = (DB.machines || []).slice().sort((a, b) => (b.ship_date || '').localeCompare(a.ship_date || ''));
+  if (!list.length) return toast('沒有可列印的資料', 'err');
+  const cell = s => `<td style="border:.5pt solid #999;padding:3px 5px;font-size:9pt">${esc(s == null || s === '' ? '' : String(s))}</td>`;
+  const body = list.map(m => `<tr>
+    ${cell(m.customer_name)}${cell(m.ship_date)}${cell(m.model)}${cell(m.serial)}
+    ${cell(m.mfg_year)}${cell(machineWarrantyEnd(m))}${cell(m.delivery_no)}${cell(m.note)}</tr>`).join('');
+  const head = ['客戶名稱', '出貨日', '產品型號', '序號', '製造年份', '保固到期', '出貨單號', '備註']
+    .map(h => `<th style="border:.5pt solid #999;padding:3px 5px;font-size:9pt;background:#EEF2FF">${h}</th>`).join('');
+  const html = `<div class="paper A4" style="padding:12mm 10mm">
+    <div style="font-size:15pt;font-weight:700;text-align:center;margin-bottom:2mm">廚餘機保固追蹤清單</div>
+    <div style="font-size:9pt;color:#555;text-align:center;margin-bottom:4mm">列印日期：${esc(today())}　共 ${list.length} 台</div>
+    <table style="width:100%;border-collapse:collapse;table-layout:fixed;word-break:break-all">
+      <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  doPreview(html, 'A4');
 }
 
 function viewSuppliers(v) {
@@ -8815,7 +9046,9 @@ function makeDelivery(q, co, o) {
     if (aShort.length) setTimeout(() => toast('下列代理商專案額度不足，請向代理商報備追加：' + aShort.join('、'), 'err'), 800);
   }
   DB.deliveries.push(dv);
+  const _mcAdded = syncMachinesFromDelivery(dv);
   saveNow();
+  if (_mcAdded > 0) setTimeout(() => toast('已建立 ' + _mcAdded + ' 筆廚餘機保固追蹤（記得補序號／製造年份）', 'ok'), 1100);
   _quoteDirty = { id: null, at: 0 }; // 這是剛確認過的動作，不是不小心離開，不要再跳一次確認
   go('delivery/' + dv.id);
   toast(`已開立 ${dv.delivery_no}`, 'ok');
@@ -12550,7 +12783,9 @@ function editProduct(id, seed, onSaved) {
       </div>
       <div id="pAttrsWrap"></div>
       <div class="field"><label class="req">品名</label><input class="inp" data-f="name" value="${esc(p.name)}"></div>
-      <div class="field"><label>規格</label><input class="inp" data-f="spec" value="${esc(p.spec)}"></div>
+      <div class="field"><label>規格</label><textarea class="inp" data-f="spec" rows="1" placeholder="規格（可換行，每行一項）"
+        oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+        style="resize:vertical;overflow:hidden;white-space:pre-wrap;line-height:1.5;min-height:38px">${esc(p.spec)}</textarea></div>
       <div class="grid g2">
         <div class="field"><label>單位</label><input class="inp" data-f="unit" value="${esc(p.unit)}"></div>
         <div class="field"><label>進貨廠商</label>
@@ -12624,6 +12859,9 @@ function editProduct(id, seed, onSaved) {
              ${id ? '<button class="btn" data-clone>複製為新商品</button>' : ''}
              <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
     onMount(el, close) {
+      // 規格欄改為可換行的多行輸入，開啟時先撐開到內容高度
+      const specTa = el.querySelector('textarea[data-f="spec"]');
+      if (specTa) { specTa.style.height = 'auto'; specTa.style.height = specTa.scrollHeight + 'px'; }
       // 分類屬性欄位：依所選分類（含祖先）動態產生，並帶入既有值 + 既有值自動完成
       const attrValues = (nm) => {
         const set = new Set();
