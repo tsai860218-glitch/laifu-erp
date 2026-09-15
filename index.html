@@ -6843,8 +6843,8 @@ function printMachines() {
   const cell = s => `<td style="border:.5pt solid #999;padding:3px 5px;font-size:9pt">${esc(s == null || s === '' ? '' : String(s))}</td>`;
   const body = list.map(m => `<tr>
     ${cell(m.customer_name)}${cell(m.ship_date)}${cell(m.model)}${cell(m.serial)}
-    ${cell(m.mfg_year)}${cell(machineWarrantyEnd(m))}${cell(m.delivery_no)}${cell(m.note)}</tr>`).join('');
-  const head = ['客戶名稱', '出貨日', '產品型號', '序號', '製造年份', '保固到期', '出貨單號', '備註']
+    ${cell(m.mfg_year)}${cell(machineWarrantyEnd(m))}${cell(m.note)}</tr>`).join('');
+  const head = ['客戶名稱', '出貨日', '產品型號', '序號', '製造年份', '保固到期', '備註']
     .map(h => `<th style="border:.5pt solid #999;padding:3px 5px;font-size:9pt;background:#EEF2FF">${h}</th>`).join('');
   const html = `<div class="paper A4" style="padding:12mm 10mm">
     <div style="font-size:15pt;font-weight:700;text-align:center;margin-bottom:2mm">廚餘機保固追蹤清單</div>
