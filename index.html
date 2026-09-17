@@ -5097,7 +5097,11 @@ function render() {
   _lastRoute = route;
 
   // 是不是換到不同頁面（用來決定列表篩選要不要重置；同頁重繪則保留使用者的篩選）
-  _navPageChanged = !prevRoute || prevRoute.k !== route.k;
+  // 清單 ↔ 它自己的詳細頁（quotes↔quote、deliveries↔delivery…）視為同一家族，
+  // 家族內來回（點進某一筆再返回）不算換頁，才能保留剛剛的搜尋／篩選與所在分頁；
+  // 真的切到別的頁面時才重置。
+  const _famK = k => ({ quote: 'quotes', delivery: 'deliveries', rental: 'rentals', tender: 'tenders' }[k] || k);
+  _navPageChanged = !prevRoute || _famK(prevRoute.k) !== _famK(route.k);
 
   const def = ROUTES.find(r => r.k === route.k) || ROUTES[0];
   closeFloatAC();
