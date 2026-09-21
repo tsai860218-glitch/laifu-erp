@@ -243,6 +243,7 @@ table.mini-tbl tfoot td{font-weight:700;background:var(--bg-2);border-top:1px so
 .bdg.red{background:var(--red-bg);color:#B91C1C}
 .bdg.blue{background:var(--blue-bg);color:#1D4ED8}
 .bdg.gray{background:var(--gray-bg);color:var(--text-2)}
+.bdg.slate{background:var(--slate-bg,#E2E8F0);color:var(--slate-fg,#475569)}
 .bdg.plain::before{display:none}
 .rt-kvs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 22px}
 .rt-kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;border-bottom:1px dashed var(--line);padding-bottom:6px;min-width:0}
@@ -6168,7 +6169,8 @@ const TS = {
   won:       { label: '已得標', color: 'green' },
   lost:      { label: '未得標', color: 'red' },
   failed:    { label: '流標',   color: 'orange' },
-  abandoned: { label: '棄標',   color: 'gray' }
+  abandoned: { label: '棄標',   color: 'gray' },
+  voided:    { label: '廢標',   color: 'slate' }
 };
 const AWARD_METHODS = ['最低標', '最有利標', '複數決標', '其他'];
 
@@ -6325,6 +6327,7 @@ function viewTenders(v) {
         <option value="lost" ${f.status === 'lost' ? 'selected' : ''}>未得標</option>
         <option value="failed" ${f.status === 'failed' ? 'selected' : ''}>流標</option>
         <option value="abandoned" ${f.status === 'abandoned' ? 'selected' : ''}>棄標</option>
+        <option value="voided" ${f.status === 'voided' ? 'selected' : ''}>廢標</option>
       </select>
       <button class="btn" onclick="clearListFilter('tenders')">清除</button>
       ${canEdit() ? `<button class="btn primary" onclick="newTender()">＋ 新增標案</button>` : ''}
@@ -6607,6 +6610,7 @@ function viewTender(v) {
               <option value="lost" ${t.status === 'lost' ? 'selected' : ''}>未得標</option>
               <option value="failed" ${t.status === 'failed' ? 'selected' : ''}>流標</option>
               <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
+              <option value="voided" ${t.status === 'voided' ? 'selected' : ''}>廢標</option>
             </select></div>
         </div>
         ${(t.bid_bond === '是' || t.bid_bond_amount) ? `<div class="grid g3">
@@ -6618,6 +6622,21 @@ function viewTender(v) {
         </div>` : ''}
         ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
           <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
+        ${(t.status === 'won' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? `
+          <div style="border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--bg-2)">
+            <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px">保固保證金<span style="font-weight:400;color:var(--text-3);margin-left:6px">得標後視個案需要</span></div>
+            <div class="field" style="max-width:240px;margin:0 0 ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? '10px' : '0'}"><label>本案是否需繳納保固保證金</label><select class="inp" data-t="wb_required" ${dis}>${yn(t.wb_required)}</select></div>
+            ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? `
+            <div class="grid g4">
+              <div class="field"><label>是否已繳納</label><select class="inp" data-t="wb_paid" ${dis}>${yn(t.wb_paid)}</select></div>
+              <div class="field"><label>繳納金額</label><input class="inp num" type="number" data-t="wb_amount" value="${t.wb_amount || ''}" ${dis}></div>
+              <div class="field"><label>保固期限</label><input class="inp" type="date" data-t="wb_deadline" value="${esc(t.wb_deadline || '')}" ${dis}></div>
+              <div class="field"><label>是否已退還</label><select class="inp" data-t="wb_refunded" ${dis}>${yn(t.wb_refunded)}</select></div>
+            </div>
+            ${(t.wb_paid === '是' && t.wb_refunded !== '是')
+              ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin-top:6px">⚠ 保固保證金已繳未退，保固期滿記得辦理退還</div>`
+              : (t.wb_paid === '是' && t.wb_refunded === '是' ? `<div style="color:var(--green);font-weight:600;font-size:12px;margin-top:6px">✓ 保固保證金已退還</div>` : '')}` : ''}
+          </div>` : (ed ? `<div class="muted" style="font-size:12px;margin:0 0 10px">保固保證金：得標後（狀態設為「已得標」）會在此顯示；非每案都需要，可於該處選擇是否需繳納。</div>` : '')}
         <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
       </div>
     </div>
@@ -6627,7 +6646,7 @@ function viewTender(v) {
     const k = el.dataset.t;
     t[k] = el.type === 'number' ? (+el.value || 0) : el.value;
     save();
-    if (k === 'status' || k === 'bid_bond' || k === 'bid_bond_amount') render();  // 切棄標顯示原因、切換押標金顯示繳退日
+    if (['status', 'bid_bond', 'bid_bond_amount', 'wb_required', 'wb_paid', 'wb_refunded'].includes(k)) render();  // 切棄標顯示原因、切換押標金顯示繳退日
   }));
 }
 
