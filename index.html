@@ -6322,21 +6322,21 @@ function warrantyBondInfo(t) {
   } else if (t.wb_deadline) { deadline = t.wb_deadline; }
   const info = { amount: +t.wb_amount || 0, invoiceDate: t.wb_invoice_date || '', years: +t.wb_years || 0, deadline,
     required: t.wb_required === '是', paid: t.wb_paid === '是', refunded: t.wb_refunded === '是',
-    days: null, urgent: false, overdue: false, done: false, text: '', color: 'var(--text-2)' };
-  if (info.refunded) { info.done = true; info.text = '已退還'; info.color = 'var(--green)'; return info; }
-  if (info.required && !info.paid) { info.text = '未繳納'; info.color = 'var(--orange)'; info.urgent = true; return info; }
+    days: null, urgent: false, overdue: false, done: false, text: '', color: 'var(--text-2)', cls: 'gray' };
+  if (info.refunded) { info.done = true; info.text = '已退還'; info.color = 'var(--green)'; info.cls = 'gray'; return info; }
+  if (info.required && !info.paid) { info.text = '未繳納'; info.color = 'var(--orange)'; info.cls = 'orange'; info.urgent = true; return info; }
   if (deadline) {
     const dl = new Date(deadline + 'T23:59');
     if (!isNaN(dl)) {
       const days = Math.ceil((dl - new Date()) / 86400000);
       info.days = days;
-      if (days < 0) { info.overdue = true; info.urgent = true; info.text = '已到期・待退還'; info.color = 'var(--red)'; }
-      else if (days <= 90) { info.urgent = true; info.text = '即將到期'; info.color = 'var(--orange)'; }  // 到期前 3 個月提醒（同租賃頁）
-      else { info.text = '保固中'; info.color = 'var(--text-2)'; }
+      if (days < 0) { info.overdue = true; info.urgent = true; info.text = '已到期・待退還'; info.color = 'var(--red)'; info.cls = 'red'; }
+      else if (days <= 90) { info.urgent = true; info.text = '即將到期'; info.color = 'var(--orange)'; info.cls = 'orange'; }  // 到期前 3 個月提醒（同租賃頁）
+      else { info.text = '保固中'; info.color = 'var(--green)'; info.cls = 'green'; }
     }
   } else {
     info.text = info.paid ? '已繳未退' : '需繳納';
-    info.color = 'var(--text-3)';
+    info.color = 'var(--text-3)'; info.cls = 'gray';
   }
   return info;
 }
@@ -6447,7 +6447,7 @@ function viewTenders(v) {
         <td class="r money nowrap">${t.settle_amount ? money(t.settle_amount) : '—'}</td>
         <td>${esc(t.winner_name || '—')}</td>
         <td class="nowrap">${winfo
-          ? `${winfo.amount ? esc(money(winfo.amount)) : (winfo.required ? '需繳納' : '<span class="muted">有</span>')}${winfo.text ? `<div style="font-size:11px;font-weight:700;color:${winfo.color}">${(winfo.deadline && !winfo.done && !(winfo.required && !winfo.paid)) ? esc(fmtDateShort(winfo.deadline)) + '｜' : ''}${winfo.text}</div>` : ''}`
+          ? `${winfo.amount ? esc(money(winfo.amount)) : (winfo.required ? '需繳納' : '<span class="muted">有</span>')}<div style="margin-top:3px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">${(winfo.deadline && !winfo.done && !(winfo.required && !winfo.paid)) ? `<span style="font-size:11px;color:var(--text-3)">${esc(fmtDateShort(winfo.deadline))}</span>` : ''}<span class="bdg ${winfo.cls || 'gray'}">${winfo.text}</span></div>`
           : '<span class="muted">—</span>'}</td>
         <td class="muted" style="white-space:pre-line;min-width:160px">${esc(t.note || '')}</td>
       </tr>`;
