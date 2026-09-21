@@ -244,6 +244,7 @@ table.mini-tbl tfoot td{font-weight:700;background:var(--bg-2);border-top:1px so
 .bdg.blue{background:var(--blue-bg);color:#1D4ED8}
 .bdg.gray{background:var(--gray-bg);color:var(--text-2)}
 .bdg.slate{background:var(--slate-bg,#E2E8F0);color:var(--slate-fg,#475569)}
+.bdg.teal{background:var(--teal-bg,#CCFBF1);color:var(--teal-fg,#0F766E)}
 .bdg.plain::before{display:none}
 .rt-kvs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 22px}
 .rt-kv{display:flex;justify-content:space-between;gap:12px;font-size:13px;border-bottom:1px dashed var(--line);padding-bottom:6px;min-width:0}
@@ -5359,38 +5360,97 @@ function viewUsers(v) {
       <button class="btn sm danger" onclick="bulkDeleteUsers()">🗑 刪除已選取</button>
     </div>
     <div class="card"><div class="card-b tight"><div class="tbl-wrap" id="ulist"></div><div id="uPageBar"></div></div></div>`;
-  const run = (resetPage) => {
-    const kw = document.getElementById('us').value.trim().toLowerCase();
-    const list = DB.users.filter(u => !kw || (u.name + (u.phone || '') + (u.email || '')).toLowerCase().includes(kw));
-    const info = paginateList('users', list, resetPage);
-    const page = info.pageItems;
-    const allChecked = page.length && page.every(u => uSelected.has(u.id));
-    keepScroll('ulist');
-    document.getElementById('ulist').innerHTML = !list.length
-      ? `<div class="empty"><div class="e">${icon('user')}</div><h3>沒有業務</h3>
-         <button class="btn primary" onclick="editUser(null)">＋ 新增業務</button></div>`
+  const run = () => {
+    const kw = document.getElementById('ts_kw').value.trim().toLowerCase();
+    const st = document.getElementById('ts_status').value;
+    f.kw = document.getElementById('ts_kw').value.trim();
+    f.status = st;
+    let list = DB.tenders.slice();
+    if (kw) list = list.filter(t => (`${t.tender_no || ''} ${t.tender_name || ''} ${t.agency_name || ''}`).toLowerCase().includes(kw));
+    if (st) list = list.filter(t => (t.status || 'bidding') === st);
+
+    // 統計（用全部標案，不受篩選影響）；得標＝履約中＋履約完成
+    const all = DB.tenders;
+    const isWon = x => x === 'won' || x === 'won_done';
+    const nBidding = all.filter(t => (t.status || 'bidding') === 'bidding').length;
+    const won = all.filter(t => isWon(t.status)).length;
+    const lost = all.filter(t => t.status === 'lost').length;
+    const winRate = (won + lost) ? Math.round(won / (won + lost) * 100) : null;
+    const yr = String(new Date().getFullYear());
+    const wonAmt = all.filter(t => isWon(t.status) && tenderYear(t) === yr).reduce((s, t) => s + (+t.award_amount || 0), 0);
+    const urgent = all.filter(t => (t.status || 'bidding') === 'bidding' && (tenderDeadlineInfo(t) || {}).urgent).length;
+    const overdueBidding = all.filter(t => (t.status || 'bidding') === 'bidding' && (tenderDeadlineInfo(t) || {}).overdue).length;
+    const wbInfos = all.map(t => warrantyBondInfo(t)).filter(Boolean);
+    const wbDue = wbInfos.filter(w => !w.done && (w.overdue || w.urgent)).length;
+    const wbOverdue = wbInfos.filter(w => w.overdue).length;
+    const statCard = (label, val, color, extra) => `<div style="flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
+      <div style="font-size:11px;color:var(--text-2);letter-spacing:.03em">${label}</div>
+      <div style="font-size:19px;font-weight:800;color:${color || 'var(--text-1)'};line-height:1.3">${val}</div>
+      ${extra ? `<div style="font-size:10.5px;color:var(--text-3)">${extra}</div>` : ''}</div>`;
+    const statsEl = document.getElementById('tStats');
+    if (statsEl) statsEl.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">
+      ${statCard('投標中', nBidding + ' 件', 'var(--primary-600)')}
+      ${statCard('得標率', winRate == null ? '—' : winRate + '%', 'var(--green)', `得標 ${won} · 未得標 ${lost}`)}
+      ${statCard(yr + ' 年得標金額', money(wonAmt), 'var(--green)')}
+      ${statCard('近 3 天截止', (urgent + overdueBidding) + ' 件', (urgent + overdueBidding) ? 'var(--red)' : 'var(--text-1)', overdueBidding ? `其中 ${overdueBidding} 件已過期未結案` : '投標中且即將截止')}
+      ${statCard('保固保證金待處理', wbDue + ' 件', wbDue ? 'var(--red)' : 'var(--text-1)', wbOverdue ? `其中 ${wbOverdue} 件已到期待退還` : '未繳納或即將到期')}
+    </div>`;
+
+    // 分兩區塊：進行中（投標中→履約中）、結案（履約完成→未得標/流標/棄標/廢標）
+    const rank = { bidding: 0, won: 1, won_done: 2, lost: 3, failed: 4, abandoned: 5, voided: 6 };
+    const cmp = (a, b) => {
+      const ra = rank[a.status || 'bidding'] ?? 99, rb = rank[b.status || 'bidding'] ?? 99;
+      if (ra !== rb) return ra - rb;
+      const va = tenderSortValue(a, tSortState.key), vb = tenderSortValue(b, tSortState.key);
+      const dd = va < vb ? -1 : va > vb ? 1 : 0;
+      return tSortState.dir === 'desc' ? -dd : dd;
+    };
+    const active = list.filter(t => ['bidding', 'won'].includes(t.status || 'bidding')).sort(cmp);
+    const closed = list.filter(t => !['bidding', 'won'].includes(t.status || 'bidding')).sort(cmp);
+    const closedOpen = tClosedOpen || !!kw || !!st;
+
+    const rowHtml = (t) => {
+      const isBid = (t.status || 'bidding') === 'bidding';
+      const dinfo = isBid ? tenderDeadlineInfo(t) : null;
+      const winfo = warrantyBondInfo(t);
+      let rowHl = dinfo && dinfo.urgent ? 'box-shadow:inset 3px 0 0 var(--red)' : (dinfo && dinfo.overdue ? 'box-shadow:inset 3px 0 0 var(--text-3)' : '');
+      if (!rowHl && winfo && winfo.overdue) rowHl = 'box-shadow:inset 3px 0 0 var(--red)';
+      else if (!rowHl && winfo && winfo.urgent) rowHl = 'box-shadow:inset 3px 0 0 var(--orange)';
+      return `<tr onclick="go('tender/${t.id}')" style="${rowHl}">
+        <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
+        <td>${esc(t.agency_name || '—')}</td>
+        <td>${esc(t.tender_name || '—')}</td>
+        <td class="nowrap">${t.announce_seq ? '第 ' + esc(String(t.announce_seq)) + ' 次' : '—'}</td>
+        <td class="nowrap">${t.bid_deadline_date ? fmtDateShort(t.bid_deadline_date) + (t.bid_deadline_time ? ' <b class="ttime">' + esc(t.bid_deadline_time) + '</b>' : '') : '—'}${dinfo ? `<div style="font-size:11px;font-weight:700;color:${dinfo.color}">${dinfo.text}</div>` : ''}</td>
+        <td class="nowrap">${t.open_date ? fmtDateShort(t.open_date) + (t.open_time ? ' <b class="ttime">' + esc(t.open_time) + '</b>' : '') : '—'}</td>
+        <td class="nowrap">${badge(TS, t.status || 'bidding')}${(t.status === 'abandoned' && t.abandon_reason) ? `<div class="ship-way">原因：${esc(t.abandon_reason)}</div>` : ''}${(isWon(t.status) && t.won_done_date) ? `<div class="ship-way">驗收 ${esc(fmtDateShort(t.won_done_date))}</div>` : ''}</td>
+        <td class="r money nowrap">${t.budget_amount ? money(t.budget_amount) : '—'}</td>
+        <td class="r money nowrap">${t.bid_amount ? money(t.bid_amount) : '—'}</td>
+        <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
+        <td class="r money nowrap">${t.settle_amount ? money(t.settle_amount) : '—'}</td>
+        <td>${esc(t.winner_name || '—')}</td>
+        <td class="nowrap">${winfo
+          ? `${winfo.amount ? esc(money(winfo.amount)) : (winfo.required ? '需繳納' : '<span class="muted">有</span>')}${winfo.text ? `<div style="font-size:11px;font-weight:700;color:${winfo.color}">${(winfo.deadline && !winfo.done && !(winfo.required && !winfo.paid)) ? esc(fmtDateShort(winfo.deadline)) + '｜' : ''}${winfo.text}</div>` : ''}`
+          : '<span class="muted">—</span>'}</td>
+        <td class="muted" style="white-space:pre-line;min-width:160px">${esc(t.note || '')}</td>
+      </tr>`;
+    };
+    const nCols = T_COLS.length;
+    const grp = (title, n, extra) => `<tr class="tgrp"><td colspan="${nCols}" style="background:var(--bg-2);font-weight:800;color:var(--text-2);padding:7px 10px;border-top:2px solid var(--line)">${title}　<span style="color:var(--text-3);font-weight:600">${n} 件</span>${extra || ''}</td></tr>`;
+
+    keepScroll('tlist');
+    document.getElementById('tlist').innerHTML = !list.length
+      ? `<div class="empty"><div class="e">${icon('accounts')}</div><h3>${DB.tenders.length ? '沒有符合條件的標案' : '還沒有標案'}</h3>
+          ${canEdit() && !DB.tenders.length ? '<p>按右上角「＋ 新增標案」開始建立</p>' : ''}</div>`
       : `<table class="tbl"><thead><tr>
-          <th style="width:32px" onclick="event.stopPropagation()">
-            <input type="checkbox" ${allChecked ? 'checked' : ''}
-              onclick="toggleSelAll('u', this.checked, ${esc(JSON.stringify(page.map(u => u.id)))})"></th>
-          <th>姓名</th><th>電話</th><th>Email</th><th>角色</th><th>部門</th><th class="c">負責報價</th><th class="c">狀態</th>
-        </tr></thead><tbody>
-        ${page.map(u => {
-          const n = DB.quotes.filter(q => q.sales_user_id === u.id).length;
-          return `<tr onclick="editUser('${u.id}')">
-            <td onclick="event.stopPropagation()"><input type="checkbox" ${uSelected.has(u.id) ? 'checked' : ''} onchange="toggleSel('u','${u.id}', this.checked)"></td>
-            <td><b>${esc(u.name)}</b></td>
-            <td style="font-family:var(--mono)">${esc(u.phone || '—')}</td>
-            <td class="muted">${esc(u.email || '—')}</td>
-            <td><span class="bdg gray plain">${esc(u.role || '未設定')}</span></td>
-            <td>${deptName(u.department) ? `<span class="bdg blue plain">${esc(deptName(u.department))}</span>` : '<span class="muted">—</span>'}</td>
-            <td class="c">${n || '<span class="muted">—</span>'}</td>
-            <td class="c">${u.is_active ? '<span class="bdg green">啟用</span>' : '<span class="bdg gray">停用</span>'}</td>
-          </tr>`;
-        }).join('')}</tbody></table>`;
-    document.getElementById('uPageBar').innerHTML = list.length ? pageBarHtml('users', info) : '';
-    makeColumnsResizable('ulist', 'users');
-    updateBulkBar('u');
+          ${T_COLS.map(([k, label, cls]) => `<th class="sortable ${cls || ''}" data-sortkey="${k}">${label}${sortArrow(tSortState, k)}</th>`).join('')}
+          </tr></thead><tbody>
+        ${active.length ? grp('進行中', active.length) + active.map(rowHtml).join('') : ''}
+        ${closed.length ? grp('結案', closed.length, `<button class="btn sm" style="margin-left:10px;vertical-align:baseline" onclick="event.stopPropagation();toggleClosedTenders()">${closedOpen ? '收合 ▲' : '顯示全部 ▼'}</button>`) + (closedOpen ? closed.map(rowHtml).join('') : '') : ''}
+        </tbody></table>`;
+    document.getElementById('tPageBar').innerHTML = '';
+    bindTableSort('tlist', tSortState, run);
+    makeColumnsResizable('tlist', 'tenders');
   };
   registerPageRunner('users', run);
   document.getElementById('us').addEventListener('input', () => run(true));
@@ -6166,7 +6226,8 @@ let sSelected = new Set();
    =========================================================== */
 const TS = {
   bidding:   { label: '投標中', color: 'blue' },
-  won:       { label: '已得標', color: 'green' },
+  won:       { label: '得標·履約中', color: 'green' },
+  won_done:  { label: '得標·履約完成', color: 'teal' },
   lost:      { label: '未得標', color: 'red' },
   failed:    { label: '流標',   color: 'orange' },
   abandoned: { label: '棄標',   color: 'gray' },
@@ -6251,6 +6312,8 @@ function pickAgency(tid) {
 }
 
 let tSortState = { key: 'bid_deadline', dir: 'asc' };
+let tClosedOpen = false;   // 結案區塊是否展開（預設收合）
+let tRun = null;
 // 總表欄位順序與排序鍵：標案案號／機關名稱／標案名稱／預算金額／截止投標／開標時間／狀態／得標金額／備註
 const T_COLS = [
   ['tender_no', '標案案號', 'nowrap'],
@@ -6265,6 +6328,7 @@ const T_COLS = [
   ['award_amount', '得標金額', 'r'],
   ['settle_amount', '決標金額', 'r'],
   ['winner_name', '得標廠商', ''],
+  ['warranty_bond', '保固保證金', 'nowrap'],
   ['note', '備註', '']
 ];
 function tenderSortValue(t, key) {
@@ -6283,6 +6347,7 @@ function tenderSortValue(t, key) {
     case 'open': return (t.open_date || '9999-99-99') + ' ' + (t.open_time || '');
     case 'status': return (TS[t.status || 'bidding'] || {}).label || '';
     case 'note': return t.note || '';
+    case 'warranty_bond': return t.wb_deadline || '9999-99-99';
     default: return '';
   }
 }
@@ -6300,6 +6365,31 @@ function tenderDeadlineInfo(t) {
   if (days <= 7) return { days, text: `剩 ${days} 天`, color: 'var(--orange)', overdue: false, urgent: false };
   return { days, text: `剩 ${days} 天`, color: 'var(--text-2)', overdue: false, urgent: false };
 }
+// 保固保證金提醒：依保固期限（wb_deadline）計算，僅在該案需要／已有保固保證金資料時回傳
+function warrantyBondInfo(t) {
+  const has = t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded;
+  if (!has) return null;
+  const info = { amount: +t.wb_amount || 0, deadline: t.wb_deadline || '',
+    required: t.wb_required === '是', paid: t.wb_paid === '是', refunded: t.wb_refunded === '是',
+    days: null, urgent: false, overdue: false, done: false, text: '', color: 'var(--text-2)' };
+  if (info.refunded) { info.done = true; info.text = '已退還'; info.color = 'var(--green)'; return info; }
+  if (info.required && !info.paid) { info.text = '未繳納'; info.color = 'var(--orange)'; info.urgent = true; return info; }
+  if (info.deadline) {
+    const dl = new Date(info.deadline + 'T23:59');
+    if (!isNaN(dl)) {
+      const days = Math.ceil((dl - new Date()) / 86400000);
+      info.days = days;
+      if (days < 0) { info.overdue = true; info.urgent = true; info.text = '已到期・待退還'; info.color = 'var(--red)'; }
+      else if (days <= 30) { info.urgent = true; info.text = '剩 ' + days + ' 天'; info.color = 'var(--orange)'; }
+      else if (days <= 90) { info.text = '剩 ' + days + ' 天'; info.color = 'var(--text-2)'; }
+      else { info.text = '保固中'; info.color = 'var(--text-2)'; }
+    }
+  } else {
+    info.text = info.paid ? '已繳未退' : '需繳納';
+    info.color = 'var(--text-3)';
+  }
+  return info;
+}
 // 從連結報價單概估未稅成本（BOM 用零件成本、一般用預設成本；另加組裝配件成本）
 function quoteCostTotal(q) {
   let c = 0;
@@ -6315,6 +6405,7 @@ function tenderYear(t) {
   return (d || '').slice(0, 4);
 }
 
+function toggleClosedTenders() { tClosedOpen = !tClosedOpen; if (tRun) tRun(); }
 function viewTenders(v) {
   const f = listFilterState('tenders');
   v.innerHTML = `
@@ -6323,7 +6414,8 @@ function viewTenders(v) {
       <select class="inp" id="ts_status" style="width:130px">
         <option value="">全部狀態</option>
         <option value="bidding" ${f.status === 'bidding' ? 'selected' : ''}>投標中</option>
-        <option value="won" ${f.status === 'won' ? 'selected' : ''}>已得標</option>
+        <option value="won" ${f.status === 'won' ? 'selected' : ''}>得標·履約中</option>
+        <option value="won_done" ${f.status === 'won_done' ? 'selected' : ''}>得標·履約完成</option>
         <option value="lost" ${f.status === 'lost' ? 'selected' : ''}>未得標</option>
         <option value="failed" ${f.status === 'failed' ? 'selected' : ''}>流標</option>
         <option value="abandoned" ${f.status === 'abandoned' ? 'selected' : ''}>棄標</option>
@@ -6355,6 +6447,9 @@ function viewTenders(v) {
     const wonAmt = all.filter(t => t.status === 'won' && tenderYear(t) === yr).reduce((s, t) => s + (+t.award_amount || 0), 0);
     const urgent = all.filter(t => (t.status || 'bidding') === 'bidding' && (tenderDeadlineInfo(t) || {}).urgent).length;
     const overdueBidding = all.filter(t => (t.status || 'bidding') === 'bidding' && (tenderDeadlineInfo(t) || {}).overdue).length;
+    const wbInfos = all.map(t => warrantyBondInfo(t)).filter(Boolean);
+    const wbDue = wbInfos.filter(w => !w.done && (w.overdue || w.urgent)).length;
+    const wbOverdue = wbInfos.filter(w => w.overdue).length;
     const statCard = (label, val, color, extra) => `<div style="flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
       <div style="font-size:11px;color:var(--text-2);letter-spacing:.03em">${label}</div>
       <div style="font-size:19px;font-weight:800;color:${color || 'var(--text-1)'};line-height:1.3">${val}</div>
@@ -6365,6 +6460,7 @@ function viewTenders(v) {
       ${statCard('得標率', winRate == null ? '—' : winRate + '%', 'var(--green)', `已得標 ${won} · 未得標 ${lost}`)}
       ${statCard(yr + ' 年得標金額', money(wonAmt), 'var(--green)')}
       ${statCard('近 3 天截止', (urgent + overdueBidding) + ' 件', (urgent + overdueBidding) ? 'var(--red)' : 'var(--text-1)', overdueBidding ? `其中 ${overdueBidding} 件已過期未結案` : '投標中且即將截止')}
+      ${statCard('保固保證金待處理', wbDue + ' 件', wbDue ? 'var(--red)' : 'var(--text-1)', wbOverdue ? `其中 ${wbOverdue} 件已到期待退還` : '未繳納或即將到期')}
     </div>`;
 
     const info = paginateList('tenders', list, resetPage);
@@ -6379,7 +6475,10 @@ function viewTenders(v) {
         ${page.map(t => {
           const isBid = (t.status || 'bidding') === 'bidding';
           const dinfo = isBid ? tenderDeadlineInfo(t) : null;
-          const rowHl = dinfo && dinfo.urgent ? 'box-shadow:inset 3px 0 0 var(--red)' : (dinfo && dinfo.overdue ? 'box-shadow:inset 3px 0 0 var(--text-3)' : '');
+          const winfo = warrantyBondInfo(t);
+          let rowHl = dinfo && dinfo.urgent ? 'box-shadow:inset 3px 0 0 var(--red)' : (dinfo && dinfo.overdue ? 'box-shadow:inset 3px 0 0 var(--text-3)' : '');
+          if (!rowHl && winfo && winfo.overdue) rowHl = 'box-shadow:inset 3px 0 0 var(--red)';
+          else if (!rowHl && winfo && winfo.urgent) rowHl = 'box-shadow:inset 3px 0 0 var(--orange)';
           return `<tr onclick="go('tender/${t.id}')" style="${rowHl}">
             <td class="nowrap"><b>${esc(t.tender_no || '—')}</b></td>
             <td>${esc(t.agency_name || '—')}</td>
@@ -6393,6 +6492,9 @@ function viewTenders(v) {
             <td class="r money nowrap">${t.award_amount ? money(t.award_amount) : '—'}</td>
             <td class="r money nowrap">${t.settle_amount ? money(t.settle_amount) : '—'}</td>
             <td>${esc(t.winner_name || '—')}</td>
+            <td class="nowrap">${winfo
+              ? `${winfo.amount ? esc(money(winfo.amount)) : (winfo.required ? '需繳納' : '<span class=\'muted\'>有</span>')}${winfo.text ? `<div style="font-size:11px;font-weight:700;color:${winfo.color}">${(winfo.deadline && !winfo.done && !(winfo.required && !winfo.paid)) ? esc(fmtDateShort(winfo.deadline)) + '｜' : ''}${winfo.text}</div>` : ''}`
+              : '<span class="muted">—</span>'}</td>
             <td class="muted" style="white-space:pre-line;min-width:160px">${esc(t.note || '')}</td>
           </tr>`;
         }).join('')}</tbody></table>`;
@@ -6400,6 +6502,7 @@ function viewTenders(v) {
     bindTableSort('tlist', tSortState, run);
     makeColumnsResizable('tlist', 'tenders');
   };
+  tRun = run;
   registerPageRunner('tenders', run);
   document.getElementById('ts_kw').addEventListener('input', () => run(true));
   document.getElementById('ts_status').addEventListener('change', () => run(true));
@@ -6485,7 +6588,7 @@ function viewTender(v) {
   const lq = t.quote_id ? byId(DB.quotes, t.quote_id) : null;
   const _rate = DB.settings.tax_rate || 0.05;
   const bidRatio = (t.budget_amount && t.bid_amount) ? (t.bid_amount / t.budget_amount * 100) : null;
-  const revInclBase = t.status === 'won' ? (t.award_amount || t.bid_amount) : t.bid_amount;
+  const revInclBase = (t.status === 'won' || t.status === 'won_done') ? (t.award_amount || t.bid_amount) : t.bid_amount;
   const revEx = revInclBase ? round0(revInclBase / (1 + _rate)) : 0;
   const cost = lq ? quoteCostTotal(lq) : 0;
   const margin = revEx - cost;
@@ -6505,7 +6608,7 @@ function viewTender(v) {
           <div style="flex:1;min-width:130px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
             <div style="font-size:11px;color:var(--text-2)">預估未稅營收</div>
             <div style="font-size:18px;font-weight:800">${revEx ? money(revEx) : '—'}</div>
-            <div style="font-size:10.5px;color:var(--text-3)">${t.status === 'won' ? '依得標金額' : '依投標金額'}回推</div>
+            <div style="font-size:10.5px;color:var(--text-3)">${(t.status === 'won' || t.status === 'won_done') ? '依得標金額' : '依投標金額'}回推</div>
           </div>
           <div style="flex:1;min-width:130px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px">
             <div style="font-size:11px;color:var(--text-2)">預估毛利</div>
@@ -6606,7 +6709,8 @@ function viewTender(v) {
           <div class="field"><label>狀態</label>
             <select class="inp" data-t="status" ${dis}>
               <option value="bidding" ${(t.status || 'bidding') === 'bidding' ? 'selected' : ''}>投標中</option>
-              <option value="won" ${t.status === 'won' ? 'selected' : ''}>已得標</option>
+              <option value="won" ${t.status === 'won' ? 'selected' : ''}>得標·履約中</option>
+              <option value="won_done" ${t.status === 'won_done' ? 'selected' : ''}>得標·履約完成</option>
               <option value="lost" ${t.status === 'lost' ? 'selected' : ''}>未得標</option>
               <option value="failed" ${t.status === 'failed' ? 'selected' : ''}>流標</option>
               <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
@@ -6622,7 +6726,8 @@ function viewTender(v) {
         </div>` : ''}
         ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
           <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
-        ${(t.status === 'won' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? `
+        ${(t.status === 'won' || t.status === 'won_done') ? `<div class="field" style="max-width:240px;margin:0 0 10px"><label>履約完成（驗收）日</label><input class="inp" type="date" data-t="won_done_date" value="${esc(t.won_done_date || '')}" ${dis}></div>` : ''}
+        ${(t.status === 'won' || t.status === 'won_done' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? `
           <div style="border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--bg-2)">
             <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px">保固保證金<span style="font-weight:400;color:var(--text-3);margin-left:6px">得標後視個案需要</span></div>
             <div class="field" style="max-width:240px;margin:0 0 ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? '10px' : '0'}"><label>本案是否需繳納保固保證金</label><select class="inp" data-t="wb_required" ${dis}>${yn(t.wb_required)}</select></div>
@@ -6636,7 +6741,7 @@ function viewTender(v) {
             ${(t.wb_paid === '是' && t.wb_refunded !== '是')
               ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin-top:6px">⚠ 保固保證金已繳未退，保固期滿記得辦理退還</div>`
               : (t.wb_paid === '是' && t.wb_refunded === '是' ? `<div style="color:var(--green);font-weight:600;font-size:12px;margin-top:6px">✓ 保固保證金已退還</div>` : '')}` : ''}
-          </div>` : (ed ? `<div class="muted" style="font-size:12px;margin:0 0 10px">保固保證金：得標後（狀態設為「已得標」）會在此顯示；非每案都需要，可於該處選擇是否需繳納。</div>` : '')}
+          </div>` : (ed ? `<div class="muted" style="font-size:12px;margin:0 0 10px">保固保證金：得標後（狀態選「得標·履約中／履約完成」）會在此顯示；非每案都需要，可於該處選擇是否需繳納。</div>` : '')}
         <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
       </div>
     </div>
