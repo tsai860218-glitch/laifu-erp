@@ -6288,7 +6288,7 @@ function tenderSortValue(t, key) {
     case 'open': return (t.open_date || '9999-99-99') + ' ' + (t.open_time || '');
     case 'status': return (TS[t.status || 'bidding'] || {}).label || '';
     case 'note': return t.note || '';
-    case 'warranty_bond': return t.wb_deadline || '9999-99-99';
+    case 'warranty_bond': return (warrantyBondInfo(t) || {}).deadline || '9999-99-99';
     default: return '';
   }
 }
@@ -6306,23 +6306,32 @@ function tenderDeadlineInfo(t) {
   if (days <= 7) return { days, text: `剩 ${days} 天`, color: 'var(--orange)', overdue: false, urgent: false };
   return { days, text: `剩 ${days} 天`, color: 'var(--text-2)', overdue: false, urgent: false };
 }
-// 保固保證金提醒：依保固期限（wb_deadline）計算，僅在該案需要／已有保固保證金資料時回傳
+// 保固保證金提醒：到期日＝開發票日＋自填年限；到期前 3 個月「即將到期」。僅在該案需要／已有資料時回傳
 function warrantyBondInfo(t) {
-  const has = t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded;
+  const has = t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_deadline || t.wb_refunded;
   if (!has) return null;
-  const info = { amount: +t.wb_amount || 0, deadline: t.wb_deadline || '',
+  // 保固到期日 = 開發票日 + 保固年限（年）；舊資料若只有手填到期日則沿用
+  let deadline = '';
+  if (t.wb_invoice_date && (+t.wb_years > 0)) {
+    const d = new Date(t.wb_invoice_date);
+    if (!isNaN(d.getTime())) {
+      d.setFullYear(d.getFullYear() + (+t.wb_years));
+      const p = n => String(n).padStart(2, '0');
+      deadline = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+  } else if (t.wb_deadline) { deadline = t.wb_deadline; }
+  const info = { amount: +t.wb_amount || 0, invoiceDate: t.wb_invoice_date || '', years: +t.wb_years || 0, deadline,
     required: t.wb_required === '是', paid: t.wb_paid === '是', refunded: t.wb_refunded === '是',
     days: null, urgent: false, overdue: false, done: false, text: '', color: 'var(--text-2)' };
   if (info.refunded) { info.done = true; info.text = '已退還'; info.color = 'var(--green)'; return info; }
   if (info.required && !info.paid) { info.text = '未繳納'; info.color = 'var(--orange)'; info.urgent = true; return info; }
-  if (info.deadline) {
-    const dl = new Date(info.deadline + 'T23:59');
+  if (deadline) {
+    const dl = new Date(deadline + 'T23:59');
     if (!isNaN(dl)) {
       const days = Math.ceil((dl - new Date()) / 86400000);
       info.days = days;
       if (days < 0) { info.overdue = true; info.urgent = true; info.text = '已到期・待退還'; info.color = 'var(--red)'; }
-      else if (days <= 30) { info.urgent = true; info.text = '剩 ' + days + ' 天'; info.color = 'var(--orange)'; }
-      else if (days <= 90) { info.text = '剩 ' + days + ' 天'; info.color = 'var(--text-2)'; }
+      else if (days <= 90) { info.urgent = true; info.text = '即將到期'; info.color = 'var(--orange)'; }  // 到期前 3 個月提醒（同租賃頁）
       else { info.text = '保固中'; info.color = 'var(--text-2)'; }
     }
   } else {
@@ -6685,20 +6694,27 @@ function viewTender(v) {
         ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
           <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
         ${(t.status === 'won' || t.status === 'won_done') ? `<div class="field" style="max-width:240px;margin:0 0 10px"><label>履約完成（驗收）日</label><input class="inp" type="date" data-t="won_done_date" value="${esc(t.won_done_date || '')}" ${dis}></div>` : ''}
-        ${(t.status === 'won' || t.status === 'won_done' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? `
+        ${(t.status === 'won' || t.status === 'won_done' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_deadline || t.wb_refunded) ? `
           <div style="border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--bg-2)">
             <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px">保固保證金<span style="font-weight:400;color:var(--text-3);margin-left:6px">得標後視個案需要</span></div>
-            <div class="field" style="max-width:240px;margin:0 0 ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? '10px' : '0'}"><label>本案是否需繳納保固保證金</label><select class="inp" data-t="wb_required" ${dis}>${yn(t.wb_required)}</select></div>
-            ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_deadline || t.wb_refunded) ? `
+            <div class="field" style="max-width:240px;margin:0 0 ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_refunded) ? '10px' : '0'}"><label>本案是否需繳納保固保證金</label><select class="inp" data-t="wb_required" ${dis}>${yn(t.wb_required)}</select></div>
+            ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_refunded) ? (() => {
+              const _w = warrantyBondInfo(t) || {};
+              return `
             <div class="grid g4">
               <div class="field"><label>是否已繳納</label><select class="inp" data-t="wb_paid" ${dis}>${yn(t.wb_paid)}</select></div>
               <div class="field"><label>繳納金額</label><input class="inp num" type="number" data-t="wb_amount" value="${t.wb_amount || ''}" ${dis}></div>
-              <div class="field"><label>保固期限</label><input class="inp" type="date" data-t="wb_deadline" value="${esc(t.wb_deadline || '')}" ${dis}></div>
+              <div class="field"><label>開發票日</label><input class="inp" type="date" data-t="wb_invoice_date" value="${esc(t.wb_invoice_date || '')}" ${dis}></div>
+              <div class="field"><label>保固年限（年，自填）</label><input class="inp num" type="number" step="1" min="0" max="30" data-t="wb_years" value="${t.wb_years || ''}" placeholder="例如 1" ${dis}></div>
+            </div>
+            <div class="grid g4">
+              <div class="field"><label>保固到期（開發票日＋年限，自動）</label><input class="inp" readonly style="background:var(--bg-2)" value="${esc(_w.deadline || '—')}"></div>
               <div class="field"><label>是否已退還</label><select class="inp" data-t="wb_refunded" ${dis}>${yn(t.wb_refunded)}</select></div>
             </div>
-            ${(t.wb_paid === '是' && t.wb_refunded !== '是')
-              ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin-top:6px">⚠ 保固保證金已繳未退，保固期滿記得辦理退還</div>`
-              : (t.wb_paid === '是' && t.wb_refunded === '是' ? `<div style="color:var(--green);font-weight:600;font-size:12px;margin-top:6px">✓ 保固保證金已退還</div>` : '')}` : ''}
+            ${(_w.overdue && !_w.done) ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin-top:2px">⚠ 保固已到期，記得辦理保固保證金退還</div>`
+              : ((_w.urgent && !_w.done && !(_w.required && !_w.paid)) ? `<div style="color:var(--orange);font-weight:700;font-size:12px;margin-top:2px">⏰ 保固即將到期（3 個月內），可準備辦理退還</div>` : '')}
+            ${(t.wb_paid === '是' && t.wb_refunded === '是') ? `<div style="color:var(--green);font-weight:600;font-size:12px;margin-top:2px">✓ 保固保證金已退還</div>` : ((t.wb_paid === '是' && t.wb_refunded !== '是' && !_w.overdue && !_w.urgent) ? `<div style="color:var(--text-3);font-size:12px;margin-top:2px">已繳未退（保固中）</div>` : '')}`;
+            })() : ''}
           </div>` : (ed ? `<div class="muted" style="font-size:12px;margin:0 0 10px">保固保證金：得標後（狀態選「得標·履約中／履約完成」）會在此顯示；非每案都需要，可於該處選擇是否需繳納。</div>` : '')}
         <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
       </div>
@@ -6709,7 +6725,7 @@ function viewTender(v) {
     const k = el.dataset.t;
     t[k] = el.type === 'number' ? (+el.value || 0) : el.value;
     save();
-    if (['status', 'bid_bond', 'bid_bond_amount', 'wb_required', 'wb_paid', 'wb_refunded'].includes(k)) render();  // 切棄標顯示原因、切換押標金顯示繳退日
+    if (['status', 'bid_bond', 'bid_bond_amount', 'wb_required', 'wb_paid', 'wb_refunded', 'wb_invoice_date', 'wb_years'].includes(k)) render();  // 切棄標顯示原因、切換押標金顯示繳退日
   }));
 }
 
