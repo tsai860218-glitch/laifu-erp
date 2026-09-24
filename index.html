@@ -937,8 +937,9 @@ body.st-q-cancelled .main{background:#F5F5F5}
 .card.tsec-agency>.card-h{background:#E4EFFF;color:#0C447C}
 .card.tsec-bid{background:var(--card);border-color:#EFDFBC}
 .card.tsec-bid>.card-h{background:#FBF0D8;color:#8A5A00}
-.tsec-grp{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:13px 14px 3px;margin-bottom:12px}
-.tsec-grp:last-child{margin-bottom:0}
+.tsec-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+@media(max-width:820px){.tsec-cols{grid-template-columns:1fr}}
+.tsec-grp{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:13px 14px 3px;margin:0 0 14px;break-inside:avoid;-webkit-column-break-inside:avoid}
 .tq-row{padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer}
 .ttime{color:var(--primary-600);font-weight:700}
 .tq-row:hover{background:#F3F6FB;border-color:var(--primary-600)}
@@ -6524,6 +6525,20 @@ function pickTenderQuote(tid) {
   });
 }
 
+// 狀態欄位底色（依狀態；永遠醒目）
+function tenderStatusFieldStyle(st) {
+  const m = {
+    bidding:   ['var(--blue-bg)',            '#1D4ED8'],
+    won:       ['var(--green-bg)',           '#15803D'],
+    won_done:  ['var(--teal-bg,#CCFBF1)',    '#0F766E'],
+    lost:      ['var(--red-bg)',             '#B91C1C'],
+    failed:    ['var(--orange-bg)',          '#C2410C'],
+    abandoned: ['var(--gray-bg)',            '#475569'],
+    voided:    ['var(--slate-bg,#E2E8F0)',   '#475569']
+  };
+  const c = m[st || 'bidding'] || m.bidding;
+  return `background:${c[0]};color:${c[1]};font-weight:700;border-color:${c[1]}`;
+}
 function viewTender(v) {
   const t = byId(DB.tenders, route.id);
   if (!t) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這筆標案</h3></div>`; return; }
@@ -6637,45 +6652,8 @@ function viewTender(v) {
       <div class="card-h" style="min-height:auto;padding:8px 14px"><b>標案資料</b></div>
       <div class="card-b">
         <div class="tsec-grp">
-        <div class="grid g2">
-          <div class="field"><label>標案案號</label><input class="inp" data-t="tender_no" value="${esc(t.tender_no || '')}" ${dis}></div>
-          <div class="field"><label>標案名稱</label><input class="inp" data-t="tender_name" value="${esc(t.tender_name || '')}" ${dis}></div>
-          <div class="field"><label>招標公告　第 O 次</label><input class="inp num" type="number" min="1" data-t="announce_seq" value="${t.announce_seq || ''}" ${dis}></div>
-          <div class="field"><label>公告日</label><input class="inp" type="date" data-t="announce_date" value="${esc(t.announce_date || '')}" ${dis}></div>
-          <div class="field"><label>截止投標</label>
-            <div style="display:flex;gap:6px">
-              <input class="inp" type="date" data-t="bid_deadline_date" value="${esc(t.bid_deadline_date || '')}" ${dis}>
-              <input class="inp" type="time" data-t="bid_deadline_time" value="${esc(t.bid_deadline_time || '08:30')}" style="width:136px" ${dis}>
-            </div></div>
-          <div class="field"><label>開標時間</label>
-            <div style="display:flex;gap:6px">
-              <input class="inp" type="date" data-t="open_date" value="${esc(t.open_date || '')}" ${dis}>
-              <input class="inp" type="time" data-t="open_time" value="${esc(t.open_time || '10:00')}" style="width:136px" ${dis}>
-            </div></div>
-          <div class="field"><label>開標地點</label><input class="inp" data-t="open_place" value="${esc(t.open_place || '')}" ${dis}></div>
-          <div class="field"><label>預算金額</label><input class="inp num" type="number" data-t="budget_amount" value="${t.budget_amount || ''}" ${dis}></div>
-        </div>
-        </div>
-        <div class="tsec-grp">
-        <div class="grid g2">
-          <div class="field"><label>是否提供電子領標</label><select class="inp" data-t="e_bidding" ${dis}>${yn(t.e_bidding)}</select></div>
-          <div class="field"><label>是否須繳納押標金</label><select class="inp" data-t="bid_bond" ${dis}>${yn(t.bid_bond)}</select></div>
-          <div class="field"><label>押標金金額</label><input class="inp num" type="number" data-t="bid_bond_amount" value="${t.bid_bond_amount || ''}" ${dis}></div>
-        </div>
-        ${(t.bid_bond === '是' || t.bid_bond_amount) ? `<div class="grid g3">
-          <div class="field"><label>押標金繳納日</label><input class="inp" type="date" data-t="bid_bond_paid_date" value="${esc(t.bid_bond_paid_date || '')}" ${dis}></div>
-          <div class="field"><label>押標金退還日</label><input class="inp" type="date" data-t="bid_bond_returned_date" value="${esc(t.bid_bond_returned_date || '')}" ${dis}></div>
-          <div class="field"><label>&nbsp;</label>${(t.bid_bond_paid_date && !t.bid_bond_returned_date && (t.status || 'bidding') !== 'bidding')
-            ? `<div style="color:var(--red);font-weight:700;font-size:12px;padding-top:8px">⚠ 押標金已繳未退，記得辦理退還</div>`
-            : (t.bid_bond_paid_date && t.bid_bond_returned_date ? `<div style="color:var(--green);font-weight:600;font-size:12px;padding-top:8px">✓ 押標金已退還</div>` : '')}</div>
-        </div>` : ''}
-        </div>
-        <div class="tsec-grp">
-        <div class="grid g2">
-          <div class="field"><label>投標金額</label><input class="inp num" type="number" data-t="bid_amount" value="${t.bid_amount || ''}" ${dis}></div>
-          <div class="field"><label>連結報價單</label>${qlink}</div>
-          <div class="field"><label>狀態</label>
-            <select class="inp" data-t="status" ${dis}>
+          <div class="field" style="margin:0"><label>狀態</label>
+            <select class="inp" data-t="status" ${dis} style="${tenderStatusFieldStyle(t.status)}">
               <option value="bidding" ${(t.status || 'bidding') === 'bidding' ? 'selected' : ''}>投標中</option>
               <option value="won" ${t.status === 'won' ? 'selected' : ''}>得標·履約中</option>
               <option value="won_done" ${t.status === 'won_done' ? 'selected' : ''}>得標·履約完成</option>
@@ -6684,46 +6662,89 @@ function viewTender(v) {
               <option value="abandoned" ${t.status === 'abandoned' ? 'selected' : ''}>棄標</option>
               <option value="voided" ${t.status === 'voided' ? 'selected' : ''}>廢標</option>
             </select></div>
+          ${t.status === 'abandoned' ? `<div class="field" style="margin:10px 0 0"><label>棄標原因</label>
+            <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
+          ${(t.status === 'won' || t.status === 'won_done') ? `<div class="field" style="max-width:240px;margin:10px 0 0"><label>履約完成（驗收）日</label><input class="inp" type="date" data-t="won_done_date" value="${esc(t.won_done_date || '')}" ${dis}></div>` : ''}
         </div>
-        ${t.status === 'abandoned' ? `<div class="field" style="margin:0 0 10px"><label>棄標原因</label>
-          <input class="inp" data-t="abandon_reason" value="${esc(t.abandon_reason || '')}" placeholder="請說明棄標原因" ${dis}></div>` : ''}
-        ${(t.status === 'won' || t.status === 'won_done') ? `<div class="field" style="max-width:240px;margin:0 0 10px"><label>履約完成（驗收）日</label><input class="inp" type="date" data-t="won_done_date" value="${esc(t.won_done_date || '')}" ${dis}></div>` : ''}
-        </div>
-        <div class="tsec-grp">
-        <div class="grid g2">
-          <div class="field"><label>得標廠商（我方未得標時填實際得標者，供日後定價參考）</label><input class="inp" data-t="winner_name" value="${esc(t.winner_name || '')}" placeholder="例：○○資訊有限公司" ${dis}></div>
-          <div class="field"><label>決標金額</label><input class="inp num" type="number" data-t="award_amount" value="${t.award_amount || ''}" ${dis}></div>
-          <div class="field"><label>決標方式</label>
-            <select class="inp" data-t="award_method" ${dis}>
-              <option value="" ${!t.award_method ? 'selected' : ''}>—</option>
-              ${AWARD_METHODS.map(m => `<option value="${m}" ${t.award_method === m ? 'selected' : ''}>${m}</option>`).join('')}
-            </select></div>
-        </div>
-        ${(t.status === 'won' || t.status === 'won_done' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_deadline || t.wb_refunded) ? `
-          <div style="border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px;background:var(--bg-2)">
-            <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px">保固保證金<span style="font-weight:400;color:var(--text-3);margin-left:6px">得標後視個案需要</span></div>
-            <div class="field" style="max-width:240px;margin:0 0 ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_refunded) ? '10px' : '0'}"><label>本案是否需繳納保固保證金</label><select class="inp" data-t="wb_required" ${dis}>${yn(t.wb_required)}</select></div>
-            ${(t.wb_required === '是' || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_refunded) ? (() => {
-              const _w = warrantyBondInfo(t) || {};
-              return `
-            <div class="grid g4">
-              <div class="field"><label>是否已繳納</label><select class="inp" data-t="wb_paid" ${dis}>${yn(t.wb_paid)}</select></div>
-              <div class="field"><label>繳納金額</label><input class="inp num" type="number" data-t="wb_amount" value="${t.wb_amount || ''}" ${dis}></div>
-              <div class="field"><label>開發票日</label><input class="inp" type="date" data-t="wb_invoice_date" value="${esc(t.wb_invoice_date || '')}" ${dis}></div>
-              <div class="field"><label>保固年限（年，自填）</label><input class="inp num" type="number" step="1" min="0" max="30" data-t="wb_years" value="${t.wb_years || ''}" placeholder="例如 1" ${dis}></div>
+        <div class="tsec-cols">
+          <div class="tsec-col">
+            <div class="tsec-grp">
+              <div class="grid g2">
+                <div class="field"><label>標案案號</label><input class="inp" data-t="tender_no" value="${esc(t.tender_no || '')}" ${dis}></div>
+                <div class="field"><label>標案名稱</label><input class="inp" data-t="tender_name" value="${esc(t.tender_name || '')}" ${dis}></div>
+                <div class="field"><label>招標公告　第 O 次</label><input class="inp num" type="number" min="1" data-t="announce_seq" value="${t.announce_seq || ''}" ${dis}></div>
+                <div class="field"><label>公告日</label><input class="inp" type="date" data-t="announce_date" value="${esc(t.announce_date || '')}" ${dis}></div>
+                <div class="field"><label>截止投標</label>
+                  <div style="display:flex;gap:6px">
+                    <input class="inp" type="date" data-t="bid_deadline_date" value="${esc(t.bid_deadline_date || '')}" ${dis}>
+                    <input class="inp" type="time" data-t="bid_deadline_time" value="${esc(t.bid_deadline_time || '08:30')}" style="width:112px" ${dis}>
+                  </div></div>
+                <div class="field"><label>開標時間</label>
+                  <div style="display:flex;gap:6px">
+                    <input class="inp" type="date" data-t="open_date" value="${esc(t.open_date || '')}" ${dis}>
+                    <input class="inp" type="time" data-t="open_time" value="${esc(t.open_time || '10:00')}" style="width:112px" ${dis}>
+                  </div></div>
+                <div class="field"><label>開標地點</label><input class="inp" data-t="open_place" value="${esc(t.open_place || '')}" ${dis}></div>
+                <div class="field"><label>預算金額</label><input class="inp num" type="number" data-t="budget_amount" value="${t.budget_amount || ''}" ${dis}></div>
+              </div>
             </div>
-            <div class="grid g4">
-              <div class="field"><label>保固到期（開發票日＋年限，自動）</label><input class="inp" readonly style="background:var(--bg-2)" value="${esc(_w.deadline || '—')}"></div>
-              <div class="field"><label>是否已退還</label><select class="inp" data-t="wb_refunded" ${dis}>${yn(t.wb_refunded)}</select></div>
+            <div class="tsec-grp">
+              <div class="grid g3">
+                <div class="field"><label>是否提供電子領標</label><select class="inp" data-t="e_bidding" ${dis}>${yn(t.e_bidding)}</select></div>
+                <div class="field"><label>是否須繳納押標金</label><select class="inp" data-t="bid_bond" ${dis}>${yn(t.bid_bond)}</select></div>
+                <div class="field"><label>押標金金額</label><input class="inp num" type="number" data-t="bid_bond_amount" value="${t.bid_bond_amount || ''}" ${dis}></div>
+              </div>
+              ${(t.bid_bond === '是' || t.bid_bond_amount) ? `<div class="grid g3">
+                <div class="field"><label>押標金繳納日</label><input class="inp" type="date" data-t="bid_bond_paid_date" value="${esc(t.bid_bond_paid_date || '')}" ${dis}></div>
+                <div class="field"><label>押標金退還日</label><input class="inp" type="date" data-t="bid_bond_returned_date" value="${esc(t.bid_bond_returned_date || '')}" ${dis}></div>
+                <div class="field"><label>&nbsp;</label>${(t.bid_bond_paid_date && !t.bid_bond_returned_date && (t.status || 'bidding') !== 'bidding')
+                  ? `<div style="color:var(--red);font-weight:700;font-size:12px;padding-top:8px">⚠ 押標金已繳未退，記得辦理退還</div>`
+                  : (t.bid_bond_paid_date && t.bid_bond_returned_date ? `<div style="color:var(--green);font-weight:600;font-size:12px;padding-top:8px">✓ 押標金已退還</div>` : '')}</div>
+              </div>` : ''}
             </div>
-            ${(_w.overdue && !_w.done) ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin-top:2px">⚠ 保固已到期，記得辦理保固保證金退還</div>`
-              : ((_w.urgent && !_w.done && !(_w.required && !_w.paid)) ? `<div style="color:var(--orange);font-weight:700;font-size:12px;margin-top:2px">⏰ 保固即將到期（3 個月內），可準備辦理退還</div>` : '')}
-            ${(t.wb_paid === '是' && t.wb_refunded === '是') ? `<div style="color:var(--green);font-weight:600;font-size:12px;margin-top:2px">✓ 保固保證金已退還</div>` : ((t.wb_paid === '是' && t.wb_refunded !== '是' && !_w.overdue && !_w.urgent) ? `<div style="color:var(--text-3);font-size:12px;margin-top:2px">已繳未退（保固中）</div>` : '')}`;
-            })() : ''}
-          </div>` : (ed ? `<div class="muted" style="font-size:12px;margin:0 0 10px">保固保證金：得標後（狀態選「得標·履約中／履約完成」）會在此顯示；非每案都需要，可於該處選擇是否需繳納。</div>` : '')}
-        </div>
-        <div class="tsec-grp">
-        <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
+          </div>
+          <div class="tsec-col">
+            <div class="tsec-grp">
+              <div class="field"><label>決標方式</label>
+                <select class="inp" data-t="award_method" ${dis}>
+                  <option value="" ${!t.award_method ? 'selected' : ''}>—</option>
+                  ${AWARD_METHODS.map(m => `<option value="${m}" ${t.award_method === m ? 'selected' : ''}>${m}</option>`).join('')}
+                </select></div>
+              <div class="grid g2">
+                <div class="field"><label>投標金額</label><input class="inp num" type="number" data-t="bid_amount" value="${t.bid_amount || ''}" ${dis}></div>
+                <div class="field"><label>連結報價單</label>${qlink}</div>
+              </div>
+              <div class="grid g2">
+                <div class="field"><label>決標金額</label><input class="inp num" type="number" data-t="award_amount" value="${t.award_amount || ''}" ${dis}></div>
+                <div class="field"><label>得標廠商（未得標時填實際得標者）</label><input class="inp" data-t="winner_name" value="${esc(t.winner_name || '')}" placeholder="例：○○資訊有限公司" ${dis}></div>
+              </div>
+              ${(t.status === 'won' || t.status === 'won_done' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_deadline || t.wb_refunded) ? (() => {
+                const _w = warrantyBondInfo(t) || {};
+                return `
+              <div style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:10px;padding:11px 12px 3px;margin-top:2px">
+                <div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:8px">保固保證金</div>
+                <div class="grid g3">
+                  <div class="field"><label>是否需繳納</label><select class="inp" data-t="wb_required" ${dis}>${yn(t.wb_required)}</select></div>
+                  <div class="field"><label>是否已繳納</label><select class="inp" data-t="wb_paid" ${dis}>${yn(t.wb_paid)}</select></div>
+                  <div class="field"><label>繳納金額</label><input class="inp num" type="number" data-t="wb_amount" value="${t.wb_amount || ''}" ${dis}></div>
+                </div>
+                <div class="grid g2">
+                  <div class="field"><label>開發票日</label><input class="inp" type="date" data-t="wb_invoice_date" value="${esc(t.wb_invoice_date || '')}" ${dis}></div>
+                  <div class="field"><label>保固年限（年，自填）</label><input class="inp num" type="number" step="1" min="0" max="30" data-t="wb_years" value="${t.wb_years || ''}" placeholder="例如 1" ${dis}></div>
+                </div>
+                <div class="grid g2">
+                  <div class="field"><label>保固到期（自動）</label><input class="inp" readonly style="background:var(--card)" value="${esc(_w.deadline || '—')}"></div>
+                  <div class="field"><label>是否已退還</label><select class="inp" data-t="wb_refunded" ${dis}>${yn(t.wb_refunded)}</select></div>
+                </div>
+                ${(_w.overdue && !_w.done) ? `<div style="color:var(--red);font-weight:700;font-size:12px;margin:0 0 8px">⚠ 保固已到期，記得辦理保固保證金退還</div>`
+                  : ((_w.urgent && !_w.done && !(_w.required && !_w.paid)) ? `<div style="color:var(--orange);font-weight:700;font-size:12px;margin:0 0 8px">⏰ 保固即將到期（3 個月內），可準備辦理退還</div>` : '')}
+                ${(t.wb_paid === '是' && t.wb_refunded === '是') ? `<div style="color:var(--green);font-weight:600;font-size:12px;margin:0 0 8px">✓ 保固保證金已退還</div>` : ((t.wb_paid === '是' && t.wb_refunded !== '是' && !_w.overdue && !_w.urgent) ? `<div style="color:var(--text-3);font-size:12px;margin:0 0 8px">已繳未退（保固中）</div>` : '')}
+              </div>`; })() : (ed ? `<div class="muted" style="font-size:12px;margin-top:8px">保固保證金：狀態設為得標後在此顯示；非每案都需要，可選是否需繳納。</div>` : '')}
+            </div>
+            <div class="tsec-grp">
+              <div class="field" style="margin:0"><label>備註</label><textarea class="inp" rows="3" data-t="note" ${dis}>${esc(t.note || '')}</textarea></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
