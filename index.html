@@ -6715,9 +6715,11 @@ function viewTender(v) {
                 <div class="field"><label>投標金額</label><input class="inp num" type="number" data-t="bid_amount" value="${t.bid_amount || ''}" ${dis}></div>
                 <div class="field"><label>連結報價單</label>${qlink}</div>
               </div>
-              <div class="grid g2">
+              <div style="background:var(--green-bg);border:1px solid var(--green);border-radius:10px;padding:11px 12px 3px;margin-top:2px">
+                <div class="grid g2">
                 <div class="field"><label>決標金額</label><input class="inp num" type="number" data-t="award_amount" value="${t.award_amount || ''}" ${dis}></div>
                 <div class="field"><label>得標廠商（未得標時填實際得標者）</label><input class="inp" data-t="winner_name" value="${esc(t.winner_name || '')}" placeholder="例：○○資訊有限公司" ${dis}></div>
+                </div>
               </div>
               ${(t.status === 'won' || t.status === 'won_done' || t.wb_required || t.wb_paid || t.wb_amount || t.wb_invoice_date || t.wb_years || t.wb_deadline || t.wb_refunded) ? (() => {
                 const _w = warrantyBondInfo(t) || {};
