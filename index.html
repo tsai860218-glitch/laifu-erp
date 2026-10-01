@@ -1960,6 +1960,40 @@ function isFirestoreEmpty(data) {
   return FS_COLLECTIONS.every(col => !data[col] || !data[col].length);
 }
 
+// 開機首次載入：優先讀本機離線快取（命中就不向伺服器計費），只有快取沒有
+// （第一次使用、或該集合目前是空的）才回伺服器拿。用意是大幅降低「每次開啟就把整個
+// 資料庫重讀一遍」的讀取量。開機後緊接著掛上的即時監聽，會用「快取＋差異」把別台剛改的
+// 最新資料補進畫面，所以不會一直看到舊資料。
+// 注意：只用於「正常開機載入」；補送未同步修改與同步基準自我修復仍走 firestoreLoadAll()
+// （伺服器真值），以免用快取蓋掉別人較新的資料。
+async function firestoreLoadAllCacheFirst() {
+  const result = {};
+  const getColl = async col => {
+    try {
+      const snap = await fbDb.collection(col).get({ source: 'cache' });
+      if (!snap.empty) return snap.docs.map(d => d.data());
+    } catch (e) { /* 快取未命中，往下走伺服器 */ }
+    try {
+      const snap = await fbDb.collection(col).get({ source: 'server' });
+      return snap.docs.map(d => d.data());
+    } catch (e) {
+      console.warn('集合「' + col + '」讀取失敗，先略過（其他資料照常載入）', e);
+      return [];
+    }
+  };
+  await Promise.all(FS_COLLECTIONS.map(async col => { result[col] = await getColl(col); }));
+  const getMeta = async id => {
+    try { const d = await fbDb.collection('meta').doc(id).get({ source: 'cache' }); if (d && d.exists) return d; } catch (e) {}
+    try { return await fbDb.collection('meta').doc(id).get({ source: 'server' }); } catch (e) { return null; }
+  };
+  const [s, c, sch, del] = await Promise.all([getMeta('settings'), getMeta('counters'), getMeta('schema'), getMeta('deletions')]);
+  result.settings = (s && s.exists) ? s.data() : {};
+  result.counters = (c && c.exists) ? c.data() : {};
+  result._schema = (sch && sch.exists) ? (sch.data().v || 1) : 1;
+  result._deletions = (del && del.exists) ? (del.data() || {}) : {};
+  return result;
+}
+
 // 小睡一下（給 Firestore 寫入串流時間排空，避免一次塞太多把佇列塞爆）
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -2780,7 +2814,7 @@ async function load() {
           return;
         }
       }
-      const remote = await firestoreLoadAll();
+      const remote = await firestoreLoadAllCacheFirst();
       if (isFirestoreEmpty(remote)) {
         // 雲端資料庫還是空的：優先把本機既有資料搬上去，沒有的話就用「空白資料」(不再自動塞示範/預設資料)
         const localRaw = localStorage.getItem(KEY);
