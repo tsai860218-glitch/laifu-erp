@@ -1756,6 +1756,7 @@ function fbInit() {
           showAppShell();
           setBootLoading(true);
           await load();
+          autoPurgeOldTrash();   // 垃圾桶保留 3 天，開機時自動清掉過期的
           cloudConnected = true;
           initCostDefault();
           wireCoreListeners();
@@ -8006,7 +8007,7 @@ function markOrdered(id) {
 function unlockQuote(id) {
   const q = byId(DB.quotes, id);
   const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled' && !d.deleted_at);
-  if (dv.length) return toast('已開立出貨單，不可再改報價。請先作廢出貨單。', 'err');
+  if (dv.length) return toast('已開立出貨單，不可再改報價。請先刪除出貨單。', 'err');
   confirmBox('編輯報價單', `單號 <b>${esc(q.quote_no)}</b> 會保留，版次由 ${q.revision} 變成 ${q.revision + 1}。<br><br>
     <b>提醒：</b>客戶手上已有舊版 PDF，改完記得重新發一份給客戶。<br>確定要編輯？`, () => {
     q.unlocked = true; q.revision = (q.revision || 1) + 1;
@@ -8046,7 +8047,7 @@ function renewQuote(id) {
 function cancelQuote(id) {
   const q = byId(DB.quotes, id);
   const dv = DB.deliveries.filter(d => d.quote_id === id && d.status !== 'cancelled' && !d.deleted_at);
-  if (dv.length) return toast(`還有 ${dv.length} 張出貨單未作廢，無法取消報價`, 'err');
+  if (dv.length) return toast(`還有 ${dv.length} 張出貨單未刪除，無法取消報價`, 'err');
   confirmBox('取消報價', '取消後會退回「草稿」狀態，內容都會保留，可以直接繼續編輯、之後重新送出。<br><br>確定要取消嗎？', () => {
     q.status = 'draft'; q.unlocked = false;
     q.order_method = null; q.order_note = ''; q.signed_back_at = null; q.signed_back_file = null; q.sent_at = null;
@@ -9821,16 +9822,13 @@ function viewDelivery(v) {
         <div class="btn-row">
           ${nxt && d.status !== 'cancelled'
             ? `<button class="btn ${nxt === 'shipped' ? ACTION_COLOR.shipped : nxt === 'closed' ? ACTION_COLOR.closed : 'primary'} lg" style="flex:1" onclick="advance('${d.id}')">→ ${DS[nxt].label}</button>` : ''}
-          ${!['closed', 'cancelled'].includes(d.status)
-            ? `<button class="btn danger" onclick="cancelDelivery('${d.id}')">作廢</button>` : ''}
         </div>
         <div class="btn-row">
           <button class="btn danger" onclick="deleteDelivery('${d.id}')">🗑 刪除出貨單</button>
         </div>
         <div class="muted" style="font-size:11.5px;line-height:1.7;margin:2px 2px 6px">
-          <b>作廢</b>：單子留在總表、標記「已取消」(灰色)，紀錄保留可查、不列入統計。<br>
           <b>刪除</b>：單子移到「🗑 垃圾桶」、總表看不到，可撈回或永久刪除。<br>
-          兩者都會回補已扣庫存，來源報價會回到可重新開單的狀態。
+          會回補已扣庫存，來源報價會回到可重新開單的狀態。
         </div>
         ${canEditThis ? `<div class="btn-row">
           ${editable
@@ -10195,13 +10193,26 @@ function emptyDeliveryTrash() {
     saveNow(); toast('垃圾桶已清空', 'ok'); render();
   }, true);
 }
+// 垃圾桶保留 3 天：刪除時間超過 3 天的出貨單自動永久清除。
+// 做法與手動永久刪除相同——從 DB 移除後 saveNow，交由同步差異登記墓碑、傳到雲端，避免別台又同步回來。
+const TRASH_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+function autoPurgeOldTrash() {
+  if (!Array.isArray(DB.deliveries) || !canEdit()) return 0;
+  const cutoff = Date.now() - TRASH_RETENTION_MS;
+  const before = DB.deliveries.length;
+  DB.deliveries = DB.deliveries.filter(d => !(d.deleted_at && d.deleted_at < cutoff));
+  const removed = before - DB.deliveries.length;
+  if (removed > 0) saveNow();
+  return removed;
+}
 function openDeliveryTrash() {
+  autoPurgeOldTrash();
   const trashed = DB.deliveries.filter(d => d.deleted_at).sort((a, b) => (b.deleted_at || 0) - (a.deleted_at || 0));
   openModal({
     title: '垃圾桶（已刪除的出貨單）',
     size: 'wide',
     body: trashed.length
-      ? `<div class="muted" style="font-size:12px;margin-bottom:8px">撈回會把出貨單放回總表；<b>庫存不會自動重扣</b>，如需扣庫請撈回後重新確認出貨。</div>
+      ? `<div class="muted" style="font-size:12px;margin-bottom:8px">撈回會把出貨單放回總表；<b>庫存不會自動重扣</b>，如需扣庫請撈回後重新確認出貨。<br>垃圾桶內的出貨單會在刪除滿 <b>3 天</b> 後自動永久清除。</div>
          <div style="max-height:58vh;overflow:auto">
          <table class="tbl" style="font-size:12.5px"><thead><tr><th>出貨單號</th><th>客戶</th><th>刪除時間</th><th>刪除人</th><th class="r">金額</th><th></th></tr></thead><tbody>
          ${trashed.map(d => `<tr>
@@ -10229,7 +10240,7 @@ function deleteDelivery(id) {
   const d = byId(DB.deliveries, id);
   confirmBox('刪除出貨單', `將 ${esc(d.delivery_no)} <b>移到垃圾桶</b>（總表看不到，可再撈回）。<br>
     來源報價會回到「已下單」、可重新開立出貨單。<br>
-    <span class="muted">想保留紀錄、日後查得到請改用「作廢」。</span><br><br>確定刪除？`, () => {
+    <span class="muted">移到垃圾桶後仍可撈回查看。</span><br><br>確定刪除？`, () => {
     // 已扣過庫存 → 移入垃圾桶前先回補，避免庫存憑空少掉（撈回時會回到未扣狀態）
     if (invEnabled() && d._stock_deducted) {
       stockRestore({ ref_type: 'delivery', ref_id: d.id, reason: '出貨刪除回補 ' + (d.delivery_no || '') });
@@ -11405,6 +11416,7 @@ function paRecords() {
   const mg = paMergeMap();
   const recs = [];
   (DB.deliveries || []).forEach(d => {
+    if (d.deleted_at) return;                 // 已丟垃圾桶的出貨單不列入產品分析
     if (d.status === 'cancelled') return;
     if (paState.company && d.company_id !== paState.company) return;
     if (paState.dept && userDeptId(d.sales_user_id) !== paState.dept) return;
