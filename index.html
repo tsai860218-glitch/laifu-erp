@@ -9650,14 +9650,14 @@ let dvAsmOpen = {};
    結案（closed）或作廢（cancelled）之前都可以編輯；預設一律唯讀，
    按「編輯」才解開欄位，改完按「存檔」鎖回唯讀，或按「取消」還原。 */
 // 這張單「允許」被編輯嗎？（有權限 且 還沒結案／作廢）
-function dvCanEdit(d) { return canEdit() && !['closed', 'cancelled'].includes(d.status); }
+function dvCanEdit(d) { return canEdit() && d.status !== 'cancelled' && !d.deleted_at; }
 // 這張單「現在正處於」編輯中嗎？（允許編輯 且 已按下編輯鈕）
 function dvEditing(d) { return dvCanEdit(d) && dvEditFor === d.id; }
 
 function dvStartEdit(id) {
   const d = byId(DB.deliveries, id);
   if (!d) return;
-  if (!dvCanEdit(d)) return toast('這張單已結案／作廢，無法編輯', 'err');
+  if (!dvCanEdit(d)) return toast('這張單已作廢，無法編輯', 'err');
   dvSnapshot = JSON.parse(JSON.stringify(d));  // 備份，供「取消」還原
   dvEditFor = id;
   render();
@@ -9715,7 +9715,7 @@ function viewDelivery(v) {
     ${d._legacy ? `<div class="banner warn"><span class="bi">⚠</span><div>
       <b>舊格式出貨單</b>　這張是改版前建立的，明細為 BOM 零件層級、沒有單價。保留供查閱，不建議再編輯。</div></div>` : ''}
     ${roView ? `<div class="banner" style="background:var(--gray-bg);border:1px solid var(--line-2);color:var(--text-1)"><span class="bi">🔒</span><div>
-      <b>唯讀檢視中</b>　結案前都可以修改。要改內容請按右側的「<b>✎ 編輯</b>」，改完按「<b>存檔</b>」。</div></div>` : ''}
+      <b>唯讀檢視中</b>　結案後仍可修改。要改內容請按右側的「<b>✎ 編輯</b>」，改完按「<b>存檔</b>」。</div></div>` : ''}
     ${editable ? `<div class="banner info"><span class="bi">✎</span><div>
       <b>編輯中</b>　欄位已解鎖，可直接修改。改完記得按右側「<b>存檔</b>」，或按「取消」還原成原本內容。</div></div>` : ''}
 
