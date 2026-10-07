@@ -10822,7 +10822,8 @@ function dpBlankRowHtml(padPx) {
 // 產生一整頁（表頭資訊 + 表格 + 是否含總計/簽名區）
 // 總計/簽名區固定貼在紙張底部（不管表格內容多少都不會跟著表格漂移）
 function dpPageHtml(d, co, c, t, ship, rowsHtml, pageNum, totalPages, includeSummary, zoomClass) {
-  const incTax = (d.invoice_copies === 2) || (d.price_display === 'tax_included');
+  const _ic = +d.invoice_copies;
+  const incTax = _ic === 2 ? true : _ic === 3 ? false : (d.price_display === 'tax_included');
   return `<div class="paper a5${incTax ? ' dp-green' : ''}">
     <div class="dp-head">
       <div class="dp-co-wrap">
@@ -11020,7 +11021,8 @@ function deliveryPaper(d) {
   const c = d.customer_snapshot || {};
   const t = quoteTotals(d);
   // 二聯式（或此單設定只顯示含稅）：先算好每一列的含稅小計（尾差補到最後一項），供列印用
-  const taxInc = (d.invoice_copies === 2) || (d.price_display === 'tax_included');
+  const _ic = +d.invoice_copies;
+  const taxInc = _ic === 2 ? true : _ic === 3 ? false : (d.price_display === 'tax_included');
   _dpTax = { on: taxInc, incl: {} };
   if (taxInc) {
     const real = (d.items || []).filter(i => (i.name || '').trim() || +i.qty || +i.unit_price);
