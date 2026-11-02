@@ -4570,6 +4570,12 @@ function rentalUsageFee(r, use) {
     (+use.scan || 0) * (+r.p_scan || 0)
   );
 }
+// 報價單／出貨單清單搜尋用：品項本身＋組裝配件＋內部組成（BOM）的品名／料號／品牌／規格都納入搜尋
+function itemSearchText(i) {
+  if (!i) return '';
+  const f = x => (x.name || '') + ' ' + (x.part_no || '') + ' ' + (x.brand || '') + ' ' + (x.spec || '');
+  return [f(i), ...(i.assembly_items || []).map(f), ...(i.components || []).map(f)].join(' ');
+}
 function rentalMachine(r) { return [r.brand, r.model].filter(Boolean).join(' '); }
 function rentalRoc(iso) {
   if (!iso || !iso.includes('-')) return iso || '—';
@@ -7407,7 +7413,7 @@ function viewQuotes(v) {
       const hay = ((q.quote_no || '') + ' ' +
         (q.customer_snapshot?.name || '') + ' ' +
         (userName(q.sales_user_id) || q.sales_name || '') + ' ' +
-        q.items.map(i => (i.name || '') + ' ' + (i.part_no || '') + ' ' + (i.brand || '') + ' ' + (i.spec || '')).join(' ')
+        (q.items || []).map(itemSearchText).join(' ')
       ).toLowerCase();
       return terms.every(t => hay.includes(t));
     });
@@ -9424,7 +9430,7 @@ function viewDeliveries(v) {
     if (terms.length) list = list.filter(d => {
       const hay = ((d.delivery_no || '') + ' ' + (d.quote_no || '') + ' ' +
         (d.customer_snapshot?.name || '') + ' ' +
-        d.items.map(i => (i.name || '') + ' ' + (i.part_no || '') + ' ' + (i.brand || '') + ' ' + (i.spec || '')).join(' ')
+        (d.items || []).map(itemSearchText).join(' ')
       ).toLowerCase();
       return terms.every(t => hay.includes(t));
     });
