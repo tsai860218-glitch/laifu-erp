@@ -4143,15 +4143,37 @@ async function restoreBackupFolders() {
 
 async function pickBackupFolder(key) {
   if (!supportsFSAccess) return toast('這個瀏覽器不支援選擇資料夾，電腦版 Chrome / Edge 才有支援', 'err');
+  const info = folderTypesList()[key];
+  if (!info) return toast('找不到這個存檔項目，請重新整理頁面後再試', 'err');
+  let handle;
   try {
-    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (e) {
+    // 以前取消／被 Chrome 拒絕時完全沒有提示，看起來像「選了沒反應」
+    if (e && e.name === 'AbortError')
+      return toast('沒有設定到資料夾：視窗被取消，或 Chrome 不允許使用那個資料夾（桌面／文件／下載的最上層、系統資料夾都不行，請在裡面另開一個子資料夾再選）', 'err');
+    console.error('選擇資料夾失敗', e);
+    return toast('選擇資料夾失敗：' + (e && (e.message || e.name) || e), 'err');
+  }
+  try {
+    // 確認真的拿到「可寫入」權限（Chrome 會再問一次「允許編輯檔案？」，按了取消就寫不進去）
+    let perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted')
+      return toast('Chrome 沒有給這個資料夾「編輯檔案」的權限，請再選一次，跳出詢問時按「編輯檔案／允許」', 'err');
     folderHandles[key] = handle;
     folderNeedsPermission[key] = false;
     await fsIdbSaveHandle(key, handle);
-    toast(`已記住「${folderTypesList()[key].label}」資料夾：${handle.name}`, 'ok');
+    const saved = await fsIdbLoadHandle(key);
     refreshBackupFolderUI();
+    if (!saved) {
+      toast(`「${info.label}」這次可以用，但瀏覽器沒有記住資料夾（重新整理後要再選一次）。可能是無痕視窗或瀏覽器封鎖了網站資料。`, 'err');
+      return;
+    }
+    toast(`已記住「${info.label}」資料夾：${handle.name}`, 'ok');
   } catch (e) {
-    if (e.name !== 'AbortError') toast('選擇資料夾失敗', 'err');
+    console.error('設定資料夾失敗', e);
+    toast('設定資料夾失敗：' + (e && (e.message || e.name) || e), 'err');
   }
 }
 
