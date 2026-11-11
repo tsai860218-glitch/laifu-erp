@@ -3441,6 +3441,9 @@ function categoryFilterNames(catId) {
 }
 function companyColor(co) {
   if (!co) return '#94A3B8';
+  // 設定裡有指定「標籤顏色」就用指定的（固定不變）；沒指定才依公司順序輪流配色
+  const live = co.id ? (DB.companies.find(x => x.id === co.id) || co) : co;
+  if (/^#[0-9a-f]{6}$/i.test(live.badge_color || '')) return live.badge_color;
   const i = DB.companies.findIndex(x => x.id === co.id);
   return COMPANY_PALETTE[(i < 0 ? 0 : i) % COMPANY_PALETTE.length];
 }
@@ -13664,6 +13667,7 @@ function viewSettings(v) {
               : '<div style="width:44px;height:38px;border:1px dashed var(--line-2);border-radius:6px;display:grid;place-items:center;color:var(--text-3);font-size:10px">無<br>Logo</div>'}
             <div style="flex:1">
               <b style="font-size:14px">${esc(c.name)}</b>
+              <span class="co-badge" style="margin-left:6px;background:${companyColor(c)}22;color:${companyColor(c)};border:1px solid ${companyColor(c)}55;font-weight:700">${esc(c.badge || c.code)}</span>
               <div class="muted" style="font-size:11px">代碼 ${esc(c.code)}　標籤 ${esc(c.badge || '—')}　簡稱 ${esc(c.short_name || '—')}　統編 ${esc(c.tax_id || '—')}</div>
             </div>
             <button class="btn sm" onclick="editCompany('${c.id}')">編輯</button>
@@ -13941,6 +13945,15 @@ function editCompany(id) {
         <div class="field"><label class="req">簡稱</label><input class="inp" data-f="short_name" value="${esc(c.short_name || '')}">
           <div class="hint">用於 PDF 檔名</div></div>
       </div>
+      <div class="field"><label>標籤顏色（列表、選客戶時的公司徽章）</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="bcPrev"></span>
+          <input type="color" id="bcColor" value="${esc(companyColor(isNew ? null : c) === '#94A3B8' ? COMPANY_PALETTE[DB.companies.length % COMPANY_PALETTE.length] : companyColor(c))}"
+            style="width:44px;height:32px;padding:0;border:1px solid var(--line);border-radius:6px;background:#fff">
+          ${['#2563EB', '#D97706', '#059669', '#DB2777', '#7C3AED', '#0891B2', '#DC2626', '#65A30D', '#475569'].map(h =>
+            `<button type="button" class="bc-sw" data-hex="${h}" title="${h}" style="width:22px;height:22px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);background:${h};cursor:pointer"></button>`).join('')}
+        </div>
+        <div class="hint">選好後這家公司的徽章顏色就固定，不會因為新增／刪除其他公司而改變。</div></div>
       <div class="grid g2">
         <div class="field"><label class="req">公司全名</label><input class="inp" data-f="name" value="${esc(c.name)}"></div>
         <div class="field"><label>統一編號</label><input class="inp" data-f="tax_id" value="${esc(c.tax_id)}"></div>
@@ -14005,6 +14018,17 @@ function editCompany(id) {
     footer: `${isNew ? '' : `<button class="btn ghost" data-del style="margin-right:auto;color:var(--red, #DC2626)">刪除公司</button>`}
       <button class="btn" data-no>取消</button><button class="btn primary" data-ok>${isNew ? '新增' : '儲存'}</button>`,
     onMount(el, close) {
+      // 標籤顏色：即時預覽徽章
+      const bcInp = el.querySelector('#bcColor');
+      const drawBc = () => {
+        const col = bcInp.value, txt = el.querySelector('[data-f="badge"]').value.trim() || '標籤';
+        el.querySelector('#bcPrev').innerHTML = `<span class="co-badge" style="background:${col}22;color:${col};border:1px solid ${col}55;font-weight:700">${esc(txt)}</span>`;
+        el.querySelectorAll('.bc-sw').forEach(b => b.style.boxShadow = b.dataset.hex.toLowerCase() === col.toLowerCase() ? '0 0 0 2px ' + col : '0 0 0 1px var(--line)');
+      };
+      bcInp.oninput = drawBc;
+      el.querySelector('[data-f="badge"]').addEventListener('input', drawBc);
+      el.querySelectorAll('.bc-sw').forEach(b => b.onclick = () => { bcInp.value = b.dataset.hex; drawBc(); });
+      drawBc();
       // 報價單樣式選擇
       const colorInp = el.querySelector('#qsColor');
       const syncQs = () => {
@@ -14077,7 +14101,8 @@ function editCompany(id) {
         if (DB.companies.some(x => x.id !== c.id && String(x.code).toUpperCase() === o.code))
           return toast(`代碼「${o.code}」已經有別家公司在用，請換一個`, 'err');
         Object.assign(c, o, { logo_url: logo, stamp_url: stamp, brand_logos: brands,
-          quote_style: qStyle, quote_color: colorInp.value || QUOTE_STYLE_DEFAULT_COLOR });
+          quote_style: qStyle, quote_color: colorInp.value || QUOTE_STYLE_DEFAULT_COLOR,
+          badge_color: bcInp.value });
         if (isNew) DB.companies.push(c);
         save(); close(); render(); toast(isNew ? `已新增「${c.name}」` : '已儲存', 'ok');
       };
