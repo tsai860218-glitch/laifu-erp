@@ -622,6 +622,105 @@ body.cost-on.mobile .cost-warn{display:flex}
 .pp-foot-l{float:left}
 .pp-foot-r{float:right;font-family:var(--mono)}
 
+/* ---------- A4 報價單「樣式 2：色帶商務」 ----------
+   表格／摘要／簽章／頁尾沿用樣式 1 的結構（版面量測與分頁共用同一套），只換抬頭與配色。
+   主色由公司設定的 quote_color 透過 --qa 帶入。 */
+.paper.qs2{--qa:#0F4C5C;--qa-bg:#EEF3F4;--qa-line:#AFC4C9} /* 實際值由 qsVars() 依公司主色計算後以 inline style 帶入（html2canvas 不支援 color-mix） */
+.paper.qs2,.paper.qs2 *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.q2-head{display:flex;justify-content:space-between;align-items:flex-end;gap:6mm;padding-bottom:2.2mm}
+.q2-brand{display:flex;align-items:center;gap:3mm;min-width:0;flex:1}
+.q2-logo{height:15mm;max-width:46mm;object-fit:contain;flex:0 0 auto}
+.q2-co{font-size:14pt;font-weight:800;color:var(--qa);letter-spacing:.04em;line-height:1.2}
+.q2-meta{text-align:right;font-size:7.3pt;color:#444;line-height:1.55;flex:0 0 auto;max-width:82mm}
+.q2-band{display:flex;align-items:center;gap:3mm;background:var(--qa);color:#fff;
+  margin:0 -15mm;padding:2.2mm 15mm}
+.q2-title{font-size:17pt;font-weight:800;letter-spacing:.32em;line-height:1}
+.q2-sub{font-size:8pt;letter-spacing:.35em;opacity:.8;font-weight:600}
+.q2-no{margin-left:auto;font-family:var(--mono);font-size:10pt;font-weight:700;letter-spacing:.04em}
+.q2-info{display:grid;grid-template-columns:19mm minmax(0,1.35fr) 19mm minmax(0,1fr);margin-top:3mm;
+  border:.6pt solid var(--qa-line);border-bottom:none;border-right:none;font-size:8.3pt}
+.q2-info>div{border-right:.6pt solid var(--qa-line);border-bottom:.6pt solid var(--qa-line);
+  padding:1.3mm 2mm;line-height:1.45;min-width:0;word-break:break-all}
+.q2-info .k{background:var(--qa-bg);color:var(--qa);font-weight:700;letter-spacing:.06em;white-space:nowrap}
+.q2-info .v{font-weight:700}
+.q2-info .v.span3{grid-column:span 3}
+.q2-cont{display:flex;justify-content:space-between;align-items:center;background:var(--qa);color:#fff;
+  margin:0 -15mm;padding:1.8mm 15mm;font-size:9pt;font-weight:700}
+.q2-cont span:last-child{font-family:var(--mono);font-size:8.5pt}
+.paper.qs2 .pp-tbl{margin-top:3mm}
+.paper.qs2 .pp-tbl th{background:var(--qa);color:#fff;border:.5pt solid var(--qa);letter-spacing:0;white-space:nowrap}
+.paper.qs2 .pp-tbl td{border:none;border-bottom:.5pt solid #D5D9DE}
+.paper.qs2 .pp-tbl td+td{border-left:.5pt dotted #D5D9DE}
+.paper.qs2 .pp-tbl tbody tr:not(.blank):nth-child(even) td{background:#F6F8F9}
+.paper.qs2 .pp-tbl tbody tr:last-child td{border-bottom:1pt solid var(--qa)}
+.paper.qs2 .pp-sum-r{border:none;border-radius:0}
+.paper.qs2 .pp-sl{border-bottom:.5pt solid #E1E4E8}
+.paper.qs2 .pp-sl.total{background:var(--qa);color:#fff}
+.paper.qs2 .pp-sl.total span,.paper.qs2 .pp-sl.total b{color:#fff}
+.paper.qs2 .pp-note{border:none;border-left:1.2mm solid var(--qa-line);border-radius:0;background:var(--qa-bg)}
+.paper.qs2 .pp-sbox{border:.6pt solid var(--qa-line);padding:1.6mm 2mm 0}
+.paper.qs2 .pp-slabel{color:var(--qa);border-bottom-color:var(--qa-line)}
+.paper.qs2 .pp-sarea{height:22mm}
+.paper.qs2 .pp-stamp{margin-top:6mm}
+.paper.qs2 .pp-foot{border-top:.8pt solid var(--qa);padding-top:1.2mm}
+.paper.qs2 .pp-foot .pp-brands{border-bottom:none}
+.paper.qs2 .pp-foot-l,.paper.qs2 .pp-foot-r{color:var(--qa)}
+
+/* ---------- A4 報價單「樣式 3：簡約黑白」 ----------
+   無底色、只用黑色線條與字重做層次，黑白印表機與傳真最清楚。表格以下沿用共用結構。 */
+.q3-head{display:flex;justify-content:space-between;align-items:flex-end;gap:6mm;padding-bottom:3mm;border-bottom:2pt solid #111}
+.q3-title{font-size:26pt;font-weight:900;letter-spacing:.18em;color:#111;line-height:1}
+.q3-sub{font-size:8pt;letter-spacing:.5em;color:#555;margin-top:1.5mm;font-weight:600}
+.q3-co-wrap{text-align:right;min-width:0;max-width:110mm}
+.q3-logo{height:11mm;max-width:40mm;object-fit:contain;display:block;margin-left:auto;margin-bottom:1.2mm}
+.q3-co{font-size:12pt;font-weight:800;color:#111;letter-spacing:.03em}
+.q3-meta{font-size:7.2pt;color:#444;line-height:1.55;margin-top:.6mm}
+.q3-docline{display:flex;border-bottom:.6pt solid #111;font-size:8pt}
+.q3-docline>div{flex:1;padding:1.6mm 0;display:flex;gap:2mm;align-items:baseline;min-width:0}
+.q3-docline>div+div{border-left:.4pt solid #BBB;padding-left:3mm}
+.q3-docline span{color:#666;white-space:nowrap}
+.q3-docline b{font-weight:700;color:#111;word-break:break-all}
+.q3-docline>div:first-child b{font-family:var(--mono)}
+.q3-to{display:flex;gap:6mm;margin-top:3mm;align-items:flex-start}
+.q3-to-l{flex:1.2;min-width:0}
+.q3-lbl{font-size:7pt;letter-spacing:.2em;color:#666;font-weight:700}
+.q3-cname{font-size:12pt;font-weight:800;color:#111;margin-top:1mm;line-height:1.3}
+.q3-caddr{font-size:8pt;color:#333;margin-top:.8mm;line-height:1.5}
+.q3-to-r{flex:1;min-width:0;font-size:8.2pt}
+.q3-to-r>div{display:flex;gap:2.5mm;border-bottom:.4pt dotted #999;padding:.9mm 0}
+.q3-to-r span{color:#666;flex:0 0 16mm;letter-spacing:.06em}
+.q3-to-r b{font-weight:700;color:#111;flex:1;min-width:0;word-break:break-all}
+.q3-cont{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1.6pt solid #111;
+  padding-bottom:1.6mm;font-size:9pt;font-weight:800;color:#111}
+.q3-cont span:last-child{font-family:var(--mono);font-size:8.5pt}
+.paper.qs3 .pp-tbl{margin-top:4mm}
+.paper.qs3 .pp-tbl th{background:none;color:#111;border:none;border-top:1.2pt solid #111;border-bottom:1.2pt solid #111;
+  letter-spacing:.04em;white-space:nowrap}
+.paper.qs3 .pp-tbl td{border:none;border-bottom:.4pt solid #CFCFCF}
+.paper.qs3 .pp-tbl tbody tr:last-child td{border-bottom:1.2pt solid #111}
+.paper.qs3 .pp-sum-r{border:none;border-radius:0}
+.paper.qs3 .pp-sl{border-bottom:.4pt solid #CFCFCF}
+.paper.qs3 .pp-sl.total{background:none;border-top:1.2pt solid #111;border-bottom:3pt double #111;font-weight:800}
+.paper.qs3 .pp-sl.total span,.paper.qs3 .pp-sl.total b{color:#111}
+.paper.qs3 .pp-note{border:none;border-top:.6pt solid #111;border-radius:0;padding-left:0}
+.paper.qs3 .pp-slabel{color:#111;border-bottom:1pt solid #111}
+.paper.qs3 .pp-foot{border-top:.6pt solid #111;padding-top:1.2mm}
+.paper.qs3 .pp-foot .pp-brands{border-bottom:none}
+.paper.qs3 .pp-foot-l,.paper.qs3 .pp-foot-r{color:#333}
+
+/* 公司設定：樣式選擇卡 */
+.qs-pick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media(max-width:760px){.qs-pick{grid-template-columns:1fr}}
+.qs-opt{border:1.5px solid var(--line);border-radius:10px;padding:10px;cursor:pointer;background:#fff;display:flex;gap:10px;align-items:flex-start}
+.qs-opt.on{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-050)}
+.qs-opt{flex-direction:column;align-items:flex-start;position:relative}
+.qs-opt input{position:absolute;top:10px;right:10px;margin:0}
+.qs-thumb{flex:none;width:54px;height:72px;border:1px solid var(--line);border-radius:3px;background:#fff;padding:4px;display:flex;flex-direction:column;gap:3px}
+.qs-thumb i{display:block;height:3px;background:#D5D9DE;border-radius:1px}
+.qs-thumb .t1{height:5px;background:#1E3A8A;width:60%}
+.qs-thumb .hl{height:2px;background:#1E3A8A}
+.qs-thumb .band{height:7px;margin:0 -4px;border-radius:0}
+
 /* ---------- A5 出貨單 ---------- */
 .dp-head{display:flex;gap:4mm;align-items:center;border-bottom:1.4pt solid #1E3A8A;padding-bottom:1.4mm}
 .dp-co-wrap{display:flex;gap:2.5mm;align-items:center;flex:1;min-width:0}
@@ -10445,6 +10544,28 @@ function taxInclusiveAmounts(items, taxRate, grandTotal) {
   return amts;
 }
 
+/* 報價單樣式：每家公司在「設定 → 公司資料」各自指定，之後這家公司開的報價單一律套用。
+   新增樣式時：在這裡加一筆，並在 qpPageHtml 補上對應的抬頭。 */
+const QUOTE_STYLES = [
+  { id: 'classic', label: '樣式 1：經典藍線', desc: '左上公司抬頭、右上大標題，藍色細線分隔（原本的格式）' },
+  { id: 'band',    label: '樣式 2：色帶商務', desc: '公司名稱置頂，整條色帶標題，表格式客戶資料，主色可自訂' },
+  { id: 'minimal', label: '樣式 3：簡約黑白', desc: '大標題靠左、無底色只用黑線，黑白列印／傳真最清楚' }
+];
+const QUOTE_STYLE_DEFAULT_COLOR = '#0F4C5C';
+function quoteStyleOf(co) {
+  const id = co && co.quote_style;
+  return QUOTE_STYLES.some(s => s.id === id) ? id : 'classic';
+}
+function quoteStyleLabel(id) { return (QUOTE_STYLES.find(s => s.id === id) || QUOTE_STYLES[0]).label; }
+// 主色 → 淺底色／框線色（用 JS 算好再帶進 CSS 變數，PDF 輸出的 html2canvas 才讀得懂）
+function qsVars(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  const h = m ? m[1] : QUOTE_STYLE_DEFAULT_COLOR.slice(1);
+  const rgb = [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16));
+  const mix = p => '#' + rgb.map(v => Math.round(v * p + 255 * (1 - p)).toString(16).padStart(2, '0')).join('');
+  return `--qa:#${h};--qa-bg:${mix(0.09)};--qa-line:${mix(0.35)}`;
+}
+
 // 報價單單頁 HTML。ctx 帶入整份資料，pg 描述這一頁要放的品項、空白列、是否含摘要、字級縮放
 function qpPageHtml(ctx, pg) {
   const { q, co, c, t, taxIncluded, taxRate, inclAmts } = ctx;
@@ -10467,8 +10588,67 @@ function qpPageHtml(ctx, pg) {
     }
     blankRows = arr.join('');
   }
-  return `<div class="paper a4">
-      ${isFirst ? `<div class="pp-head">
+  const qStyle = quoteStyleOf(co);
+  const salesNm = userName(q.sales_user_id) || q.sales_name || '—';
+  // 樣式 2 的抬頭（首頁）與續頁抬頭；表格以下沿用共用結構
+  const headBand = isFirst ? `<div class="q2-head">
+        <div class="q2-brand">
+          ${co.logo_url ? `<img class="q2-logo" src="${co.logo_url}" alt="">` : ''}
+          <div class="q2-co">${esc(co.name)}</div>
+        </div>
+        <div class="q2-meta">
+          統一編號：${esc(co.tax_id || '')}<br>
+          ${esc(co.address || '')}<br>
+          TEL：${esc(co.phone || '')}${co.fax ? '　FAX：' + esc(co.fax) : ''}
+        </div>
+      </div>
+      <div class="q2-band"><span class="q2-title">報價單</span><span class="q2-sub">QUOTATION</span>
+        <span class="q2-no">No. ${esc(q.quote_no)}</span></div>
+      <div class="q2-info">
+        <div class="k">客戶名稱</div><div class="v">${esc(c.name || '')}</div>
+        <div class="k">統一編號</div><div class="v">${esc(c.tax_id || '')}</div>
+        <div class="k">聯 絡 人</div><div class="v">${esc(c.contact_person || '')}</div>
+        <div class="k">電　　話</div><div class="v">${esc(c.phone || '')}</div>
+        <div class="k">地　　址</div><div class="v">${esc(c.address || '')}</div>
+        <div class="k">傳　　真</div><div class="v">${esc(c.fax || '')}</div>
+        <div class="k">報價日期</div><div class="v">${fmtDate(q.quote_date)}</div>
+        <div class="k">有效日期</div><div class="v">${fmtDate(q.valid_until)}</div>
+        <div class="k">負責業務</div><div class="v span3">${esc(salesNm)}</div>
+      </div>` : `<div class="q2-cont"><span>報價單（續）　${esc(c.name || '')}</span><span>${esc(q.quote_no)}</span></div>`;
+  // 樣式 3 的抬頭（首頁）與續頁抬頭
+  const headMin = isFirst ? `<div class="q3-head">
+        <div class="q3-title-wrap">
+          <div class="q3-title">報價單</div>
+          <div class="q3-sub">QUOTATION</div>
+        </div>
+        <div class="q3-co-wrap">
+          ${co.logo_url ? `<img class="q3-logo" src="${co.logo_url}" alt="">` : ''}
+          <div class="q3-co">${esc(co.name)}</div>
+          <div class="q3-meta">統一編號 ${esc(co.tax_id || '')}　TEL ${esc(co.phone || '')}${co.fax ? '　FAX ' + esc(co.fax) : ''}<br>${esc(co.address || '')}</div>
+        </div>
+      </div>
+      <div class="q3-docline">
+        <div><span>單號</span><b>${esc(q.quote_no)}</b></div>
+        <div><span>報價日期</span><b>${fmtDate(q.quote_date)}</b></div>
+        <div><span>有效日期</span><b>${fmtDate(q.valid_until)}</b></div>
+        <div><span>負責業務</span><b>${esc(salesNm)}</b></div>
+      </div>
+      <div class="q3-to">
+        <div class="q3-to-l">
+          <div class="q3-lbl">報價對象 TO</div>
+          <div class="q3-cname">${esc(c.name || '')}</div>
+          <div class="q3-caddr">${esc(c.address || '')}</div>
+        </div>
+        <div class="q3-to-r">
+          <div><span>統一編號</span><b>${esc(c.tax_id || '')}</b></div>
+          <div><span>聯 絡 人</span><b>${esc(c.contact_person || '')}</b></div>
+          <div><span>電　　話</span><b>${esc(c.phone || '')}</b></div>
+          <div><span>傳　　真</span><b>${esc(c.fax || '')}</b></div>
+        </div>
+      </div>` : `<div class="q3-cont"><span>報價單（續）　${esc(c.name || '')}</span><span>${esc(q.quote_no)}</span></div>`;
+  const paperCls = qStyle === 'band' ? ' qs2' : qStyle === 'minimal' ? ' qs3' : '';
+  return `<div class="paper a4${paperCls}"${qStyle === 'band' ? ` style="${qsVars(co.quote_color)}"` : ''}>
+      ${qStyle === 'band' ? headBand : qStyle === 'minimal' ? headMin : isFirst ? `<div class="pp-head">
         <div class="pp-co-wrap">
           ${co.logo_url ? `<img class="pp-logo" src="${co.logo_url}" alt="">` : ''}
           <div>
@@ -10501,7 +10681,7 @@ function qpPageHtml(ctx, pg) {
         </div>
       </div>
 
-      <div class="pp-salesbar"><span>負責業務</span><b>${esc(userName(q.sales_user_id) || q.sales_name || '—')}</b></div>` : `<div class="pp-cont-head"><span>報價單（續）　${esc(c.name || '')}</span><span>${esc(q.quote_no)}</span></div>`}
+      <div class="pp-salesbar"><span>負責業務</span><b>${esc(salesNm)}</b></div>` : `<div class="pp-cont-head"><span>報價單（續）　${esc(c.name || '')}</span><span>${esc(q.quote_no)}</span></div>`}
 
       <table class="pp-tbl ${zoomClass || 'z-100'}">
         <thead><tr>
@@ -10738,7 +10918,10 @@ async function quotePaper(q) {
   const co = Object.assign({}, _snap, {
     logo_url: _liveCo.logo_url || _snap.logo_url || '',
     stamp_url: _liveCo.stamp_url || _snap.stamp_url || '',
-    brand_logos: (_liveCo.brand_logos && _liveCo.brand_logos.length ? _liveCo.brand_logos : _snap.brand_logos) || []
+    brand_logos: (_liveCo.brand_logos && _liveCo.brand_logos.length ? _liveCo.brand_logos : _snap.brand_logos) || [],
+    // 樣式跟著公司「目前」的設定走（改了設定，舊單重印也會套新樣式）
+    quote_style: _liveCo.quote_style || 'classic',
+    quote_color: _liveCo.quote_color || QUOTE_STYLE_DEFAULT_COLOR
   });
   const c = q.customer_snapshot || {};
   const items = (q.items || []).filter(i => (i.name || '').trim());
@@ -13275,7 +13458,10 @@ function editProduct(id, seed, onSaved) {
 function viewSettings(v) {
   const s = DB.settings;
   v.innerHTML = `
-    <div class="sec-title">公司資料（報價單抬頭 / 發票章 / 品牌 Logo）</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="sec-title" style="flex:1">公司資料（報價單抬頭 / 發票章 / 品牌 Logo / 報價單樣式）</div>
+      <button class="btn sm primary" onclick="editCompany(null)">＋ 新增公司</button>
+    </div>
     <div class="grid g2">
       ${DB.companies.map(c => `
         <div class="card"><div class="card-b">
@@ -13287,6 +13473,12 @@ function viewSettings(v) {
               <div class="muted" style="font-size:11px">代碼 ${esc(c.code)}　標籤 ${esc(c.badge || '—')}　簡稱 ${esc(c.short_name || '—')}　統編 ${esc(c.tax_id || '—')}</div>
             </div>
             <button class="btn sm" onclick="editCompany('${c.id}')">編輯</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <span class="bdg plain" style="display:inline-flex;align-items:center;gap:5px">
+              ${quoteStyleOf(c) === 'band' ? `<i style="width:10px;height:10px;border-radius:2px;background:${esc(c.quote_color || QUOTE_STYLE_DEFAULT_COLOR)};display:inline-block"></i>` : ''}
+              報價單：${esc(quoteStyleLabel(quoteStyleOf(c)))}</span>
+            <a href="javascript:void(0)" onclick="previewCompanyQuoteStyle('${c.id}')" style="font-size:12px">預覽樣式</a>
           </div>
           <div style="font-size:11.5px;color:var(--text-2);line-height:1.7">
             ${esc(c.address || '—')}<br>TEL ${esc(c.phone || '—')}　FAX ${esc(c.fax || '—')}</div>
@@ -13530,11 +13722,21 @@ function readImg(file, cb, maxW) {
 }
 
 function editCompany(id) {
-  const c = byId(DB.companies, id);
+  const isNew = !id;
+  if (isNew && !canEdit()) return toast('目前是唯讀權限，沒辦法新增公司', 'err');
+  const c = isNew
+    ? { id: uid('co'), code: '', name: '', short_name: '', badge: '', tax_id: '', address: '', phone: '', fax: '',
+        email: '', logo_url: '', stamp_url: '', brand_logos: [],
+        filename_pattern: '{date}-{short}報價單-{customer}-{product}', is_active: true,
+        quote_style: 'classic', quote_color: QUOTE_STYLE_DEFAULT_COLOR }
+    : byId(DB.companies, id);
+  if (!c) return toast('找不到這家公司', 'err');
   let logo = c.logo_url || '', stamp = c.stamp_url || '', brands = (c.brand_logos || []).slice();
+  let qStyle = quoteStyleOf(c);
+  const usedBy = isNew ? 0 : DB.quotes.filter(q => q.company_id === c.id).length + DB.deliveries.filter(d => d.company_id === c.id).length;
 
   const m = openModal({
-    title: '編輯公司資料', size: 'lg',
+    title: isNew ? '新增公司' : '編輯公司資料', size: 'lg',
     body: `
       <div class="grid g3">
         <div class="field"><label class="req">公司代碼</label><input class="inp" data-f="code" value="${esc(c.code)}" maxlength="4">
@@ -13577,14 +13779,60 @@ function editCompany(id) {
           <button class="btn sm ghost" id="brandClr">全部清除</button></div>
         <div class="hint">建議透明背景 PNG，高度會自動縮到約 8mm</div></div>
 
+      <div class="sec-title" style="margin:16px 0 8px">報價單樣式</div>
+      <div class="qs-pick" id="qsPick">
+        ${QUOTE_STYLES.map(s => `<label class="qs-opt${s.id === qStyle ? ' on' : ''}" data-qs="${s.id}">
+          <input type="radio" name="qsRadio" value="${s.id}" ${s.id === qStyle ? 'checked' : ''}>
+          <div class="qs-thumb">${s.id === 'band'
+            ? `<i style="width:55%;height:4px;background:var(--qsc)"></i><i class="band" style="background:var(--qsc)"></i><i></i><i></i><i style="height:4px;background:var(--qsc)"></i><i></i><i></i><i></i>`
+            : s.id === 'minimal'
+            ? `<i style="width:45%;height:7px;background:#111"></i><i style="height:1px;background:#111"></i><i></i><i style="width:60%"></i><i style="height:1px;background:#111;margin-top:2px"></i><i></i><i></i><i style="height:1px;background:#111"></i>`
+            : `<i class="t1"></i><i class="hl"></i><i></i><i></i><i style="height:4px;background:#E8EDF7"></i><i></i><i></i><i></i>`}</div>
+          <div><b style="font-size:13px">${esc(s.label)}</b><div class="hint" style="margin-top:3px">${esc(s.desc)}</div></div>
+        </label>`).join('')}
+      </div>
+      <div class="field" id="qsColorRow" style="margin-top:10px;${qStyle === 'band' ? '' : 'display:none'}">
+        <label>樣式 2 主色（色帶、表頭、合計）</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="color" id="qsColor" value="${esc(c.quote_color || QUOTE_STYLE_DEFAULT_COLOR)}" style="width:44px;height:32px;padding:0;border:1px solid var(--line);border-radius:6px;background:#fff">
+          ${['#0F4C5C', '#1E3A8A', '#7C2D12', '#14532D', '#4C1D95', '#334155'].map(h =>
+            `<button type="button" class="qs-sw" data-hex="${h}" title="${h}" style="width:22px;height:22px;border-radius:5px;border:1px solid var(--line);background:${h};cursor:pointer"></button>`).join('')}
+        </div>
+      </div>
+      <div class="hint">這家公司開的報價單一律套用此樣式（含已開立的單重新列印／下載時）。</div>
+
       <div class="sec-title" style="margin:16px 0 8px">PDF 檔名規則</div>
       <div class="field">
         <input class="inp" data-f="filename_pattern" value="${esc(c.filename_pattern || '')}" style="font-family:var(--mono);font-size:12px">
         <div class="hint">可用代碼：<b>{date}</b> 20260714　<b>{short}</b> 簡稱　<b>{name}</b> 全名　
           <b>{product}</b> 第一項品名　<b>{part_no}</b> 第一項料號　<b>{customer}</b> 客戶名　<b>{no}</b> 單號<br>
           目前預覽：<b id="fnPrev" style="font-family:var(--mono)"></b></div></div>`,
-    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
+    footer: `${isNew ? '' : `<button class="btn ghost" data-del style="margin-right:auto;color:var(--red, #DC2626)">刪除公司</button>`}
+      <button class="btn" data-no>取消</button><button class="btn primary" data-ok>${isNew ? '新增' : '儲存'}</button>`,
     onMount(el, close) {
+      // 報價單樣式選擇
+      const colorInp = el.querySelector('#qsColor');
+      const syncQs = () => {
+        el.querySelectorAll('.qs-opt').forEach(o => o.classList.toggle('on', o.dataset.qs === qStyle));
+        el.querySelector('#qsColorRow').style.display = qStyle === 'band' ? '' : 'none';
+        el.querySelector('#qsPick').style.setProperty('--qsc', colorInp.value);
+      };
+      el.querySelectorAll('input[name="qsRadio"]').forEach(r => r.onchange = () => { qStyle = r.value; syncQs(); });
+      colorInp.oninput = syncQs;
+      el.querySelectorAll('.qs-sw').forEach(b => b.onclick = () => { colorInp.value = b.dataset.hex; syncQs(); });
+      syncQs();
+
+      const delBtn = el.querySelector('[data-del]');
+      if (delBtn) delBtn.onclick = () => {
+        if (!canEdit()) return toast('目前是唯讀權限，沒辦法刪除', 'err');
+        if (DB.companies.length <= 1) return toast('至少要保留一家公司', 'err');
+        if (usedBy) return toast(`這家公司已有 ${usedBy} 張報價單／出貨單，不能刪除（避免舊單據失去抬頭）`, 'err');
+        confirmBox('刪除公司', `確定要刪除「<b>${esc(c.name)}</b>」嗎？<br>以這家為預設公司的客戶會改成沒有預設公司。`, () => {
+          DB.customers.forEach(cu => { if (cu.default_company_id === c.id) cu.default_company_id = ''; });
+          DB.companies = DB.companies.filter(x => x.id !== c.id);
+          save(); close(); render(); toast('已刪除公司', 'ok');
+        }, true);
+      };
       const slot = (host, url, ph) => {
         host.innerHTML = url ? `<img src="${url}">` : `<span>${ph}</span>`;
       };
@@ -13629,11 +13877,38 @@ function editCompany(id) {
         if (!o.name || !o.code) return toast('公司全名與代碼必填', 'err');
         if (!o.short_name) o.short_name = shortenName(o.name);
         if (!o.badge) o.badge = o.short_name || o.code;
-        Object.assign(c, o, { logo_url: logo, stamp_url: stamp, brand_logos: brands });
-        save(); close(); render(); toast('已儲存', 'ok');
+        o.code = o.code.toUpperCase();
+        if (!/^[A-Z0-9]{1,4}$/.test(o.code)) return toast('公司代碼請用 1～4 碼英文或數字（會用在單號上）', 'err');
+        if (DB.companies.some(x => x.id !== c.id && String(x.code).toUpperCase() === o.code))
+          return toast(`代碼「${o.code}」已經有別家公司在用，請換一個`, 'err');
+        Object.assign(c, o, { logo_url: logo, stamp_url: stamp, brand_logos: brands,
+          quote_style: qStyle, quote_color: colorInp.value || QUOTE_STYLE_DEFAULT_COLOR });
+        if (isNew) DB.companies.push(c);
+        save(); close(); render(); toast(isNew ? `已新增「${c.name}」` : '已儲存', 'ok');
       };
     }
   });
+}
+
+// 設定頁「預覽樣式」：用一張示範報價單，套這家公司目前的抬頭／圖片／樣式顯示 A4 預覽
+async function previewCompanyQuoteStyle(id) {
+  const co = byId(DB.companies, id);
+  if (!co) return;
+  const d = today();
+  const demo = {
+    id: 'demo', quote_no: `Q-${co.code || 'XX'}-${d.slice(0, 7).replace('-', '')}-001`, company_id: co.id,
+    company_snapshot: null, quote_date: d, valid_until: addDays(d, docSetting('valid_days') || 7),
+    sales_user_id: (DB.users[0] || {}).id, price_display: 'tax_excluded',
+    customer_snapshot: { name: '示範客戶股份有限公司', tax_id: '12345678', contact_person: '王小明',
+      phone: '04-2222-3333', fax: '04-2222-3334', address: '台中市西屯區示範路 100 號' },
+    note: '本報價單為樣式預覽，內容為示範資料。',
+    items: [
+      { id: 'd1', brand: 'FUJIFILM', name: 'ApeosPrint 4620 SDN 黑白雷射印表機', spec: 'A4／46ppm／雙面列印', part_no: 'AP4620SDN', qty: 1, unit_price: 28500 },
+      { id: 'd2', brand: 'FUJIFILM', name: 'CT203484 原廠碳粉匣', spec: '', part_no: 'CT203484', qty: 4, unit_price: 3200 },
+      { id: 'd3', brand: 'Logitech', name: '無線鍵盤滑鼠組', spec: 'MK270r', part_no: '', qty: 2, unit_price: 650 }
+    ]
+  };
+  doPreview(await quotePaper(demo), 'A4');
 }
 
 function exportJSON() {
