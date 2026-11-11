@@ -7229,7 +7229,7 @@ const Q_COLS = [
    =========================================================== */
 const CUST_COLS = [
   ['name', '客戶名稱'], ['tax_id', '統一編號'], ['site', '聯絡窗口／廠區'], ['phone', '電話'],
-  ['company', '預設公司'], ['sales', '預設業務'], ['quotes', '報價數']
+  ['company', '預設公司'], ['sales', '預設業務'], ['quotes', '報價數'], ['copy', '複製']
 ];
 const PROD_COLS = [
   ['fav', '★ 我的最愛'], ['part_no', '料號'], ['name', '品名'], ['brand', '品牌'], ['category', '分類'],
@@ -7886,7 +7886,11 @@ function viewQuote(v) {
     save();
   });
   const fco = document.getElementById('fco');
-  if (fco) fco.addEventListener('change', () => { q.company_id = fco.value; save(); });
+  if (fco) fco.addEventListener('change', () => {
+    q.company_id = fco.value; save();
+    const w = document.getElementById('custCoWarn');
+    if (w) w.innerHTML = custCoWarnHtml(q, q.customer_id ? byId(DB.customers, q.customer_id) : null);
+  });
 
   drawItems();
   mobileSticky(q);
@@ -7960,8 +7964,10 @@ function custBox(q, editable) {
   const multiSite = cust && cust.sites && cust.sites.length > 1;
   return `<div class="banner info" style="margin-bottom:12px;display:block">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+      ${cust ? custCoBadge(cust) : ''}
       <b>${esc(c.name)}</b>
       ${c.site_label ? `<span class="bdg blue plain" style="height:18px">📍 ${esc(c.site_label)}</span>` : ''}
+      <span id="custCoWarn">${custCoWarnHtml(q, cust)}</span>
       <span class="bdg blue plain" style="height:18px">統編 ${esc(c.tax_id || '—')}</span>
       <span class="ba" style="display:flex;gap:6px">
         ${editable && multiSite ? `<button class="btn sm ghost" onclick="pickCustomerSitePrompt(QE, byId(DB.customers,'${cust.id}'))">切換聯絡窗口／廠區</button>` : ''}
@@ -8187,6 +8193,23 @@ function cloneQuote(id) {
   toast('已複製為新草稿');
 }
 
+// 客戶「預設報價公司」的彩色標籤（顏色同列表的公司配色）。同一家客戶可能分別建檔給不同公司報價，
+// 選客戶時一眼分辨這筆是哪家公司的。沒設預設公司就顯示灰色「未設定公司」。
+function custCoBadge(c, small) {
+  const co = c && c.default_company_id ? byId(DB.companies, c.default_company_id) : null;
+  const sz = small ? 'height:18px;font-size:10.5px;padding:0 8px' : 'height:20px;font-size:11px;padding:0 9px';
+  if (!co) return `<span class="co-badge" style="${sz};background:#F1F5F9;color:#94A3B8">未設定公司</span>`;
+  const col = companyColor(co);
+  return `<span class="co-badge" style="${sz};background:${col}1F;color:${col};border:1px solid ${col}55;font-weight:700">${esc(co.badge || co.short_name || co.code)}</span>`;
+}
+
+// 這張單的報價公司跟客戶預設公司不同時提醒（不擋，只是讓人確認沒選錯）
+function custCoWarnHtml(q, cust) {
+  if (!cust || !cust.default_company_id || !q.company_id || cust.default_company_id === q.company_id) return '';
+  const a = byId(DB.companies, cust.default_company_id) || {}, b = byId(DB.companies, q.company_id) || {};
+  return `<span class="bdg orange plain" style="height:18px">⚠ 此客戶預設「${esc(a.badge || a.code || '')}」，這張單用「${esc(b.badge || b.code || '')}」報價</span>`;
+}
+
 /* 客戶自動完成 */
 function bindCustAC(q, editable) {
   const inp = document.getElementById('fcust');
@@ -8202,7 +8225,8 @@ function bindCustAC(q, editable) {
       const rows = r.slice(0, 8).map(c => {
         const d = defaultSite(c);
         const n = (c.sites || []).length;
-        return { c, html: `<div class="m"><div class="t">${esc(c.name)}${n > 1 ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">${n} 處</span>` : ''}</div>
+        const co = c.default_company_id ? byId(DB.companies, c.default_company_id) : null;
+        return { c, html: `<div class="m" style="border-left:4px solid ${co ? companyColor(co) : '#CBD5E1'};padding-left:8px;margin-left:-4px"><div class="t" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${custCoBadge(c, true)}<span>${esc(c.name)}</span>${n > 1 ? ` <span class="bdg blue plain" style="height:16px;font-size:9px">${n} 處</span>` : ''}</div>
           <div class="s">${esc(d ? d.contact_person || '' : '')} · ${esc(d ? d.phone || '' : '')} · 統編 ${esc(c.tax_id || '—')}</div></div>` };
       });
       rows.push({
@@ -11292,7 +11316,7 @@ function viewCustomers(v) {
           <th style="width:32px" onclick="event.stopPropagation()">
             <input type="checkbox" ${allChecked ? 'checked' : ''}
               onclick="toggleSelAll('c', this.checked, ${esc(JSON.stringify(page.map(c => c.id)))})"></th>
-          ${th('name', '客戶名稱')}${th('tax_id', '統一編號')}${th('site', '聯絡窗口／廠區')}${th('phone', '電話')}${th('company', '預設公司')}${th('sales', '預設業務')}${th('quotes', '報價數', 'c')}
+          ${th('name', '客戶名稱')}${th('tax_id', '統一編號')}${th('site', '聯絡窗口／廠區')}${th('phone', '電話')}${th('company', '預設公司')}${th('sales', '預設業務')}${th('quotes', '報價數', 'c')}<th style="width:76px" class="c">複製</th>
         </tr></thead><tbody>
         ${page.map(c => {
           const n = DB.quotes.filter(q => q.customer_id === c.id).length;
@@ -11309,7 +11333,8 @@ function viewCustomers(v) {
             <td style="font-family:var(--mono)">${esc(d ? d.phone || '—' : '—')}</td>
             <td>${co ? `<span class="co-badge" style="background:${companyColor(co)}22;color:${companyColor(co)}">${esc(co.badge || co.code)}</span>` : '—'}</td>
             <td class="muted">${esc(salesUser ? salesUser.name : '—')}</td>
-            <td class="c">${n || '<span class="muted">—</span>'}</td></tr>`;
+            <td class="c">${n || '<span class="muted">—</span>'}</td>
+            <td class="c" onclick="event.stopPropagation()"><button class="btn sm ghost" title="複製成一筆新客戶" onclick="copyCustomer('${c.id}')">📋 複製</button></td></tr>`;
         }).join('')}</tbody></table>`;
     document.getElementById('cPageBar').innerHTML = list.length ? pageBarHtml('customers', info) : '';
     makeColumnsResizable('clist', 'customers');
@@ -11339,17 +11364,36 @@ function bulkDeleteCustomers() {
   }, true);
 }
 
-function editCustomer(id) {
-  const c = id ? byId(DB.customers, id) : {
+// 複製客戶：把這筆客戶的所有資料（含聯絡窗口／廠區、出貨單預設）帶進「新增客戶」視窗，
+// 名稱後面加「（複製）」，改好名稱／統編再儲存就是一筆新的客戶，原本那筆不受影響
+function copyCustomer(id) {
+  const src = byId(DB.customers, id);
+  if (!src) return toast('找不到這位客戶', 'err');
+  if (!canEdit()) return toast('目前是唯讀權限，沒辦法新增客戶', 'err');
+  editCustomer(null, src);
+}
+
+function editCustomer(id, copyFrom) {
+  // 複製模式：深拷貝來源客戶，拿掉 id／修改時間，聯絡窗口換新 id
+  let copyBase = null;
+  if (!id && copyFrom) {
+    copyBase = JSON.parse(JSON.stringify(copyFrom));
+    delete copyBase.id; delete copyBase.last_modified_at; delete copyBase.created_at;
+    copyBase.name = (copyFrom.name || '') + '（複製）';
+    copyBase.sites = (copyBase.sites || []).map(s => Object.assign(s, { id: uid('cs') }));
+  }
+  const c = id ? byId(DB.customers, id) : (copyBase || {
     id: null, name: '', tax_id: '', note: '',
     default_company_id: DB.companies[0].id, default_sales_user_id: '', is_active: true, sites: []
-  };
-  const sites = id ? JSON.parse(JSON.stringify(c.sites || [])) : [];
+  });
+  const sites = (id || copyBase) ? JSON.parse(JSON.stringify(c.sites || [])) : [];
   if (!sites.length) sites.push({ id: uid('cs'), label: '', contact_person: '', phone: '', fax: '', address: '', email: '', note: '', is_default: true });
 
   const m = openModal({
-    title: id ? '編輯客戶' : '新增客戶', size: 'lg',
+    title: id ? '編輯客戶' : copyBase ? `新增客戶（複製自「${esc(copyFrom.name)}」）` : '新增客戶', size: 'lg',
     body: `
+      ${copyBase ? `<div class="banner info" style="margin-bottom:10px"><span class="bi">ℹ</span><div>
+        已帶入「<b>${esc(copyFrom.name)}</b>」的全部資料（含聯絡窗口／廠區、出貨單預設）。請修改客戶名稱等不同的地方再儲存，會新增成另一筆客戶，原本的客戶不受影響。</div></div>` : ''}
       <div class="field"><label class="req">客戶名稱</label><input class="inp" data-f="name" value="${esc(c.name)}"></div>
       <div class="grid g2">
         <div class="field"><label>統一編號</label><input class="inp" data-f="tax_id" inputmode="numeric" value="${esc(c.tax_id)}"></div>
@@ -11396,8 +11440,8 @@ function editCustomer(id) {
         建報價單選客戶時可以挑要用哪一筆。</div></div>
       <div id="siteList"></div>
       <button class="btn sm" id="addSite" style="margin-top:8px">＋ 新增聯絡窗口／廠區</button>`,
-    footer: `${id ? '<button class="btn danger left" data-del>刪除</button>' : ''}
-             <button class="btn" data-no>取消</button><button class="btn primary" data-ok>儲存</button>`,
+    footer: `${id ? '<button class="btn danger left" data-del>刪除</button><button class="btn" data-copy>📋 複製</button>' : ''}
+             <button class="btn" data-no>取消</button><button class="btn primary" data-ok>${copyBase ? '新增' : '儲存'}</button>`,
     onMount(el, close) {
       const drawSites = () => {
         el.querySelector('#siteList').innerHTML = sites.map((s, n) => `
@@ -11436,7 +11480,11 @@ function editCustomer(id) {
         drawSites();
       };
 
-      el.querySelector('[data-f="name"]').focus();
+      const nameInp = el.querySelector('[data-f="name"]');
+      nameInp.focus();
+      if (copyBase) nameInp.select();   // 複製時直接選取名稱，打字就能覆蓋
+      const cpBtn = el.querySelector('[data-copy]');
+      if (cpBtn) cpBtn.onclick = () => { close(); copyCustomer(id); };
       el.querySelector('[data-no]').onclick = close;
       el.querySelector('[data-ok]').onclick = () => {
         if (!canEdit()) return toast('目前是唯讀權限，沒辦法儲存修改', 'err');
@@ -11447,7 +11495,7 @@ function editCustomer(id) {
         o.sites = sites;
         const doSave = () => {
           if (id) Object.assign(c, o);
-          else DB.customers.push(Object.assign({ id: uid('cu'), is_active: true }, o));
+          else DB.customers.push(Object.assign({}, copyBase || {}, { id: uid('cu'), is_active: true }, o));
           saveNow(); render(); toast('已儲存', 'ok');
         };
         if (id) { doSave(); close(); return; }
