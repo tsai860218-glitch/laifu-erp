@@ -4174,6 +4174,17 @@ function clearBackupFolder(key) {
   refreshBackupFolderUI();
 }
 
+// 設定頁打開時，把還沒載入的公司資料夾（開機後才新增／同步進來的公司）補載入並更新畫面
+async function restoreMissingFolders() {
+  if (!supportsFSAccess) return;
+  let changed = false;
+  for (const key of Object.keys(folderTypesList())) {
+    if (folderHandles[key]) continue;
+    if (await ensureFolderHandle(key)) changed = true;
+  }
+  if (changed) refreshBackupFolderUI();
+}
+
 function refreshBackupFolderUI() {
   Object.keys(folderTypesList()).forEach(key => {
     const el = document.getElementById('backupFolderStatus_' + key);
@@ -4226,8 +4237,32 @@ function confirmYesNo(title, msg) {
 // 統一的「存檔」入口：folderKey指定要用哪一個資料夾(backup/quotePdf/deliveryPdf，預設backup)。
 // 有設定且權限OK就直接寫進去（檔名重複會先問是否覆蓋，不會自動變成(1)(2)），否則照舊用瀏覽器下載。
 // contentFn 可以是同步或非同步函式（PDF產生是非同步的），回傳字串或Blob都可以。
+// 開機時只還原「當下已知公司」的資料夾；之後才新增（或從雲端同步進來）的公司，
+// 在第一次存檔時從 IndexedDB 補載入，避免設定好的資料夾被當成沒設定。
+async function ensureFolderHandle(key) {
+  if (!supportsFSAccess || folderHandles[key]) return folderHandles[key] || null;
+  const h = await fsIdbLoadHandle(key);
+  if (!h) return null;
+  try {
+    const perm = await h.queryPermission({ mode: 'readwrite' });
+    folderHandles[key] = h;
+    folderNeedsPermission[key] = perm !== 'granted';
+  } catch (e) { return null; }
+  return h;
+}
+
 async function saveFileSmart(filename, contentFn, mimeType, countForToast, folderKey) {
   folderKey = folderKey || 'backup';
+  await ensureFolderHandle(folderKey);
+  // 資料夾已設定但瀏覽器要求重新授權：這次是使用者按按鈕觸發的，直接就地請求授權，
+  // 不要默默改成瀏覽器下載（看起來會像「沒反應」）
+  if (folderHandles[folderKey] && folderNeedsPermission[folderKey]) {
+    try {
+      const perm = await folderHandles[folderKey].requestPermission({ mode: 'readwrite' });
+      folderNeedsPermission[folderKey] = perm !== 'granted';
+      refreshBackupFolderUI();
+    } catch (e) {}
+  }
   const handle = folderHandles[folderKey];
   if (handle && !folderNeedsPermission[folderKey]) {
     try {
@@ -10504,16 +10539,30 @@ async function renderPDF(html, size, filename, folderKey) {
   }
 }
 
+// 按下「另存 PDF」的當下（還在使用者點擊的有效期間內）先把資料夾載入並取得授權，
+// 等 PDF 產生完（可能好幾秒）再要授權，瀏覽器會拒絕，結果就變成默默改用下載。
+async function prepFolderForSave(key) {
+  try {
+    const h = await ensureFolderHandle(key);
+    if (h && folderNeedsPermission[key]) {
+      const perm = await h.requestPermission({ mode: 'readwrite' });
+      folderNeedsPermission[key] = perm !== 'granted';
+    }
+  } catch (e) { console.warn('資料夾授權失敗', e); }
+}
+
 async function downloadQuotePDF(id) {
   const q = byId(DB.quotes, id);
+  await prepFolderForSave('quotePdf_' + q.company_id);
   if (!q.customer_snapshot) return toast('請先選擇客戶', 'err');
   if (!q.items.some(i => (i.name || '').trim())) return toast('請至少填一項商品', 'err');
   const co = byId(DB.companies, q.company_id);
   renderPDF(await quotePaper(q), 'A4', buildFileName(q, co, 'quote'), 'quotePdf_' + q.company_id);
 }
 
-function downloadDeliveryPDF(id) {
+async function downloadDeliveryPDF(id) {
   const d = byId(DB.deliveries, id);
+  await prepFolderForSave('deliveryPdf_' + d.company_id);
   const co = byId(DB.companies, d.company_id);
   renderPDF(deliveryPaper(d), 'A5', buildFileName(d, co, 'delivery'), 'deliveryPdf_' + d.company_id);
 }
@@ -13645,6 +13694,7 @@ function viewSettings(v) {
     saveUserDocSettings(u);
     render(); toast('設定已儲存（稅率為全公司共用，其餘為本機各自設定）', 'ok');
   };
+  restoreMissingFolders();
   document.getElementById('sAutoBackup').onchange = e => {
     s.auto_backup_interval = e.target.value;
     save();
