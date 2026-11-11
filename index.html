@@ -4147,7 +4147,17 @@ async function pickBackupFolder(key) {
   if (!info) return toast('找不到這個存檔項目，請重新整理頁面後再試', 'err');
   let handle;
   try {
-    handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    // 分兩段：先用「唯讀」選資料夾（不會觸發編輯權限詢問，Chrome 封鎖權限時也選得到），
+    // 選到之後再另外要「編輯」權限——這樣才分得出是「選資料夾」還是「編輯權限」出問題。
+    // startIn：從已設定的資料夾開始，方便直接在同一層選
+    const opts = { mode: 'read' };
+    const near = folderHandles[key] || Object.values(folderHandles).find(h => h);
+    if (near) opts.startIn = near;
+    try { handle = await window.showDirectoryPicker(opts); }
+    catch (e1) {
+      if (e1 && e1.name === 'TypeError' && opts.startIn) { delete opts.startIn; handle = await window.showDirectoryPicker(opts); }
+      else throw e1;
+    }
   } catch (e) {
     // 以前取消／被 Chrome 拒絕時完全沒有提示，看起來像「選了沒反應」
     if (e && e.name === 'AbortError')
@@ -4158,9 +4168,10 @@ async function pickBackupFolder(key) {
   try {
     // 確認真的拿到「可寫入」權限（Chrome 會再問一次「允許編輯檔案？」，按了取消就寫不進去）
     let perm = await handle.queryPermission({ mode: 'readwrite' });
-    if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
-    if (perm !== 'granted')
-      return toast('Chrome 沒有給這個資料夾「編輯檔案」的權限，請再選一次，跳出詢問時按「編輯檔案／允許」', 'err');
+    if (perm !== 'granted') {
+      try { perm = await handle.requestPermission({ mode: 'readwrite' }); } catch (e2) { perm = 'denied'; }
+    }
+    if (perm !== 'granted') { showFileEditBlockedHelp(handle.name); return; }
     folderHandles[key] = handle;
     folderNeedsPermission[key] = false;
     await fsIdbSaveHandle(key, handle);
@@ -4175,6 +4186,71 @@ async function pickBackupFolder(key) {
     console.error('設定資料夾失敗', e);
     toast('設定資料夾失敗：' + (e && (e.message || e.name) || e), 'err');
   }
+}
+
+// 不用再開 Chrome 的選資料夾視窗：在「已經設定好的資料夾」裡直接建立一個子資料夾，或直接共用同一個資料夾。
+// 用在選資料夾視窗一直被 Chrome 拒絕／取消的情況（例如雲端硬碟根目錄、系統資料夾）。
+function reuseFolderFor(key) {
+  const info = folderTypesList()[key];
+  if (!info) return toast('找不到這個存檔項目，請重新整理頁面後再試', 'err');
+  const all = folderTypesList();
+  const srcs = Object.keys(folderHandles).filter(k => k !== key && folderHandles[k]);
+  if (!srcs.length) return toast('目前還沒有其他已設定的資料夾', 'err');
+  const defName = '@' + info.label.replace(/\s*PDF$/, '').replace(/^(.+?)(報價單|出貨單)$/, '$1 業務$2');
+  openModal({
+    title: `設定「${info.label}」資料夾`,
+    body: `
+      <div class="field"><label>從哪個已設定的資料夾</label>
+        <select class="inp" id="rfSrc">${srcs.map(k => `<option value="${k}">${esc(folderHandles[k].name)}（${esc((all[k] || {}).label || k)}）</option>`).join('')}</select></div>
+      <div class="field"><label class="cchk"><input type="radio" name="rfMode" value="sub" checked> 在裡面建立子資料夾（建議，各公司分開放）</label>
+        <input class="inp" id="rfName" value="${esc(defName)}" style="margin-top:6px"></div>
+      <div class="field"><label class="cchk"><input type="radio" name="rfMode" value="same"> 直接共用同一個資料夾</label></div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>設定</button>`,
+    onMount(el, close) {
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelector('[data-ok]').onclick = async () => {
+        const src = folderHandles[el.querySelector('#rfSrc').value];
+        const mode = el.querySelector('input[name="rfMode"]:checked').value;
+        try {
+          let perm = await src.queryPermission({ mode: 'readwrite' });
+          if (perm !== 'granted') perm = await src.requestPermission({ mode: 'readwrite' });
+          if (perm !== 'granted') return toast('Chrome 沒有給那個資料夾編輯權限，請在詢問時按「允許」', 'err');
+          let h = src;
+          if (mode === 'sub') {
+            const nm = el.querySelector('#rfName').value.trim().replace(/[\\/:*?"<>|]/g, '');
+            if (!nm) return toast('請輸入子資料夾名稱', 'err');
+            h = await src.getDirectoryHandle(nm, { create: true });
+          }
+          folderHandles[key] = h; folderNeedsPermission[key] = false;
+          await fsIdbSaveHandle(key, h);
+          close(); refreshBackupFolderUI();
+          toast(`已設定「${info.label}」資料夾：${mode === 'sub' ? src.name + ' / ' : ''}${h.name}`, 'ok');
+        } catch (e) {
+          console.error(e);
+          toast('設定失敗：' + (e && (e.message || e.name) || e), 'err');
+        }
+      };
+    }
+  });
+}
+
+// 資料夾選到了，但 Chrome 不給「編輯檔案」權限（通常是之前取消過幾次，Chrome 暫時自動封鎖詢問）
+function showFileEditBlockedHelp(folderName) {
+  openModal({
+    title: 'Chrome 封鎖了「編輯檔案」權限',
+    body: `<div class="banner info" style="margin-bottom:12px"><span class="bi">ℹ</span><div>
+        資料夾「<b>${esc(folderName)}</b>」有選到，但 Chrome 不允許這個網站寫入檔案，所以沒辦法設定。
+        通常是之前「要讓這個網站編輯檔案嗎？」被取消或關掉幾次後，Chrome 自動暫時封鎖了這個詢問。</div></div>
+      <ol style="margin:0;padding-left:20px;line-height:1.9;font-size:13px">
+        <li>點網址列最左邊的 <b>鎖頭（或調整圖示）</b></li>
+        <li>點「<b>網站設定</b>」</li>
+        <li>找到「<b>檔案編輯</b>」（File editing），改成「<b>允許</b>」；若沒有這一項，按「<b>重設權限</b>」</li>
+        <li>回到這頁按 <b>Ctrl+F5</b> 重新整理，再按一次「選擇資料夾」，跳出詢問時按「<b>編輯檔案</b>」</li>
+      </ol>
+      <div class="hint" style="margin-top:10px">已經設定好的其他資料夾不受影響。不想改瀏覽器設定的話，也可以用「📂 從已設定的資料夾建立／沿用」。</div>`,
+    footer: `<button class="btn primary" data-no>知道了</button>`,
+    onMount(el, close) { el.querySelector('[data-no]').onclick = close; }
+  });
 }
 
 async function reauthBackupFolder(key) {
@@ -4223,8 +4299,10 @@ function backupFolderStatusHtml(key) {
   }
   const handle = folderHandles[key];
   if (!handle) {
+    const others = Object.keys(folderHandles).filter(k => k !== key && folderHandles[k]);
     return `<div id="${id}" class="btn-row">
-      <button class="btn sm" onclick="pickBackupFolder('${key}')">📁 選擇資料夾</button></div>`;
+      <button class="btn sm" onclick="pickBackupFolder('${key}')">📁 選擇資料夾</button>
+      ${others.length ? `<button class="btn sm ghost" onclick="reuseFolderFor('${key}')">📂 從已設定的資料夾建立／沿用</button>` : ''}</div>`;
   }
   if (folderNeedsPermission[key]) {
     return `<div id="${id}" class="btn-row" style="align-items:center">
