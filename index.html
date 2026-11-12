@@ -1026,7 +1026,7 @@ body.st-q-completed .main{background:#F8F5FC}
 body.st-q-expired .main{background:#FFF4F4}
 body.st-q-cancelled .main{background:#F5F5F5}
 
-/* 出貨：待配送→已出貨→結案 */
+/* 出貨：出貨中→結案 */
 .ship-way{font-size:11px;color:var(--text-3);margin-top:2px;font-weight:400}
 /* 標案編輯頁：機關資料（藍底）與標案資料（琥珀底）用底色區別 */
 .card.tsec-agency{background:var(--card);border-color:#CFE0F5}
@@ -2502,7 +2502,7 @@ const KEY = 'erp_quote_delivery_v1';
 // 標記「本機有存檔、但還不確定雲端有沒有收到」的旗標——開機時如果這個旗標還在，
 // 代表上次可能是存檔後太快關掉/重整，雲端同步的250ms防抖還沒送出去，這種情況下開機不能直接信任雲端資料
 const PENDING_SYNC_KEY = 'erp_pending_sync';
-const SCHEMA_V = 22;                    // ← 每次改結構就 +1
+const SCHEMA_V = 23;                    // ← 每次改結構就 +1
 let DB = null;
 
 const DEFAULT_SETTINGS = {
@@ -3381,6 +3381,13 @@ function migrate(db) {
       delete t.settle_amount;
     });
   }
+  // 出貨流程改為「出貨中 ▸ 結案」：舊的「待配送」一律轉為出貨中（每次載入都檢查，相容舊版用戶端寫入的資料）
+  (db.deliveries || []).forEach(d => {
+    if (d.status === 'pending_delivery') {
+      d.status = 'shipped';
+      if (!d.shipped_at) d.shipped_at = d.created_at || new Date().toISOString();
+    }
+  });
   db.agencies = db.agencies || []; // 機關通訊錄（標案重複帶入）
   db.movements  = db.movements  || [];
   db.stock_locks= db.stock_locks|| [];
@@ -3471,18 +3478,15 @@ const ORDER_METHODS = {
 };
 
 const DS = {
-  pending_delivery: { label: '待配送', color: 'orange' },
-  shipped:          { label: '已出貨', color: 'blue'   },
+  shipped:          { label: '出貨中', color: 'orange' },
   closed:           { label: '結案',   color: 'green'  },
   cancelled:        { label: '已取消', color: 'gray'   }
 };
 
-// 簡化後的出貨流程：待配送 ▸ 已出貨 ▸ 結案。
-// 初始狀態由「配送方式」決定（見 SHIP_INIT_STATUS）：貨到公司／貨到公司組裝／業務親送＝待配送；
-// 代理商直送／貨運＝已出貨。流程本身固定三態，跟品項是否需組裝／叫貨無關。
+// 出貨流程：出貨中 ▸ 結案。不論配送方式為何，開單一律為「出貨中」。
 function dsFlow(dv) {
-  // 一律：待配送 ▸ 已出貨 ▸ 結案（開單一律待配送，配送方式不影響流程）
-  return ['pending_delivery', 'shipped', 'closed'];
+  // 一律：出貨中 ▸ 結案（配送方式不影響流程）
+  return ['shipped', 'closed'];
 }
 // 主列 + BOM 子列（出貨要看的所有實體）
 function allLines(dv) {
@@ -3502,14 +3506,10 @@ function dsFirst(dv) { return dsFlow(dv)[0]; }
 // 六種配送方式，以及每種對應的初始出貨狀態
 const SHIP_METHODS    = ['代理商直送', '貨到公司', '貨到公司組裝', '貨運', '業務親送', '其他'];
 const SHIP_INIT_STATUS = {
-  '代理商直送': 'shipped',          // 廠商直接送到客戶，開單即已出貨
-  '貨運':       'shipped',          // 走貨運，開單即已出貨
-  '貨到公司':     'pending_delivery',
-  '貨到公司組裝': 'pending_delivery', // 組裝併入待配送，不另立組裝狀態
-  '業務親送':     'pending_delivery',
-  '其他':        'pending_delivery'
+  '代理商直送': 'shipped', '貨運': 'shipped', '貨到公司': 'shipped',
+  '貨到公司組裝': 'shipped', '業務親送': 'shipped', '其他': 'shipped'   // 一律出貨中
 };
-function shipInitStatus(method) { return SHIP_INIT_STATUS[method] || 'pending_delivery'; }
+function shipInitStatus(method) { return 'shipped'; }
 const INVOICE_METHODS = ['隨貨', '通知後開立', '郵寄正本', '其他'];
 const PAY_METHODS     = ['現金', '匯款', '即期支票', '附回郵', '月結', '貨到付款'];
 // 付款方式選項：優先用設定裡的自訂清單（可自行新增預設），沒有就用內建清單；'其他' 為特殊自填項，另外附加
@@ -5418,7 +5418,7 @@ function render() {
 // 讓按鈕在畫面上夠明顯，同時每個步驟一眼就能分辨。
 const STAGE_CLASSES = [
   'st-q-draft', 'st-q-sent', 'st-q-signed', 'st-q-completed', 'st-q-expired', 'st-q-cancelled',
-  'st-d-pending_delivery', 'st-d-shipped', 'st-d-closed'
+  'st-d-shipped', 'st-d-closed'
 ];
 function applyStageColor() {
   document.body.classList.remove(...STAGE_CLASSES);
@@ -5433,7 +5433,7 @@ function applyStageColor() {
 
 function renderNav() {
   markExpired();
-  const pend = DB.deliveries.filter(d => d.status === 'pending_delivery' && !d.deleted_at).length;
+  const pend = DB.deliveries.filter(d => d.status === 'shipped' && !d.deleted_at).length;
   const nav = document.getElementById('nav');
   let html = '', lastGroup = null;
   ROUTES.filter(r => (!r.adminOnly || isAdmin()) && (!r.flag || DB.settings[r.flag])).forEach(r => {
@@ -5501,7 +5501,7 @@ function viewDash(v) {
   const toShip = DQ.filter(q => q.status === 'signed'
     && !DD.some(d => d.quote_id === q.id && d.status !== 'cancelled' && !d.deleted_at)).length;
   const shippedToday = DD.filter(d => d.shipped_at && d.shipped_at.slice(0, 10) === td).length;
-  const pendingDeliver = DD.filter(d => d.status === 'pending_delivery').length;
+  const pendingDeliver = DD.filter(d => d.status === 'shipped').length;
   // 印表機租賃：本月應收月租（生效中合約的月租合計）與 3 個月內即將到期數
   const rtActive = (DB.rentals || []).filter(r => rentalStatus(r).k !== 'ended');
   const rtMonthly = rtActive.reduce((s, r) => s + (rentalRent(r).v || 0), 0);
@@ -5536,8 +5536,8 @@ function viewDash(v) {
     <div class="stats">
       <div class="stat click" onclick="go('quotes')"><div class="k">今日新增報價</div><div class="v">${todayQuotes}<small>張</small></div></div>
       <div class="stat click ${toShip ? 'alert' : ''}" onclick="go('quotes?status=signed')"><div class="k">已下單待開出貨</div><div class="v">${toShip}<small>張</small></div></div>
-      <div class="stat click" onclick="go('deliveries')"><div class="k">今日已出貨</div><div class="v">${shippedToday}<small>張</small></div></div>
-      <div class="stat click ${pendingDeliver ? 'alert' : ''}" onclick="go('deliveries?status=pending_delivery')"><div class="k">待配送</div><div class="v">${pendingDeliver}<small>張</small></div></div>
+      <div class="stat click" onclick="go('deliveries')"><div class="k">今日出貨</div><div class="v">${shippedToday}<small>張</small></div></div>
+      <div class="stat click ${pendingDeliver ? 'alert' : ''}" onclick="go('deliveries?status=shipped')"><div class="k">出貨中</div><div class="v">${pendingDeliver}<small>張</small></div></div>
     </div>
 
     ${dashDept ? '' : `
@@ -6069,7 +6069,7 @@ function viewStock(v) {
   v.innerHTML = `
     <div class="banner info"><span class="bi">ℹ</span><div>
       庫存以「<b>進貨批次</b>」記錄：每批各自的進價、貨況、儲位、入庫日；出貨預設<b>先進先出</b>。
-      進銷存已串接：<b>出貨扣庫</b>（出貨單轉「已出貨」自動先進先出扣庫並留異動；作廢／刪除自動回補）、<b>鎖貨</b>、<b>代理商庫存</b>、<b>安全庫存提醒</b>。點商品可開右側明細抽屜管理。</div></div>
+      進銷存已串接：<b>出貨扣庫</b>（開立出貨單自動先進先出扣庫並留異動；作廢／刪除自動回補）、<b>鎖貨</b>、<b>代理商庫存</b>、<b>安全庫存提醒</b>。點商品可開右側明細抽屜管理。</div></div>
     <div class="toolbar"><div class="grow">
       <input class="inp" id="stkSearch" placeholder="搜尋商品（品名／料號／品牌）…" value="${esc(stockSearch)}"></div>
       <button class="btn primary" onclick="receiveNewProduct()">＋ 入庫新商品</button></div>
@@ -9336,7 +9336,7 @@ function startDelivery(qid) {
         <select class="inp" data-f="shipping_method" id="dvShip">
           ${SHIP_METHODS.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
         </select>
-        <div class="hint" id="dvShipHint">開立後狀態為「待配送」，配送完成再推進到「已出貨」、最後「結案」。</div></div>
+        <div class="hint" id="dvShipHint">開立後狀態一律為「出貨中」，完成後再推進到「結案」。</div></div>
       <div class="field" id="dvShipOtherWrap" style="display:none"><label>其他配送方式說明</label>
         <input class="inp" data-f="shipping_method_other" placeholder="請說明配送方式"></div>
       <div class="field"><label>備註</label>
@@ -9348,7 +9348,7 @@ function startDelivery(qid) {
       const hint = el.querySelector('#dvShipHint');
       const syncShip = () => {
         otherWrap.style.display = shipSel.value === '其他' ? '' : 'none';
-        hint.textContent = '開立後狀態為「待配送」，配送完成再推進到「已出貨」、最後「結案」。';
+        hint.textContent = '開立後狀態一律為「出貨中」，完成後再推進到「結案」。';
       };
       shipSel.onchange = syncShip; syncShip();
       el.querySelector('[data-no]').onclick = close;
@@ -9393,7 +9393,7 @@ function makeDelivery(q, co, o) {
     sales_user_id: o.sales_user_id || q.sales_user_id || null,
     created_by: o.created_by || '',
     delivery_date: o.delivery_date || today(),
-    status: 'pending_delivery',
+    status: 'shipped',
     delivery_target: (cust && cust.default_delivery_target) || '',
     delivery_contact: (cust && cust.default_delivery_contact)
       || [q.customer_snapshot && q.customer_snapshot.contact_person, q.customer_snapshot && q.customer_snapshot.phone].filter(Boolean).join('　')
@@ -9411,10 +9411,11 @@ function makeDelivery(q, co, o) {
     invoiced: false, invoice_date: '', invoice_no: '', customer_po: q.customer_po || '',
     items, _legacy: false, created_at: new Date().toISOString()
   };
-  // 一律以「待配送」開單；配送方式只作記錄，不再影響初始狀態
-  dv.status = 'pending_delivery';
+  // 一律以「出貨中」開單；配送方式只作記錄，不影響狀態
+  dv.status = 'shipped';
+  dv.shipped_at = new Date().toISOString();
   // 「開立出貨單即扣庫」：建立當下就先進先出扣掉公司庫存（代理商叫貨／其他供貨不扣），
-  // 並保留異動紀錄；作廢或刪除會自動回補。之後推進到「已出貨」時因已標記，不會重複扣。
+  // 並保留異動紀錄；作廢或刪除會自動回補。因已標記，之後不會重複扣。
   if (invEnabled()) {
     const lines = deliveryStockLines(dv);
     const done = [], zero = [];
@@ -9489,7 +9490,7 @@ function deliverySortValue(d, key) {
 }
 const D_COLS = [
   ['delivery_no', '出貨單號'], ['customer', '客戶'], ['product', '商品'], ['quote_no', '來源報價'],
-  ['sales', '業務'], ['created_by', '開單人員'], ['delivery_date', '日期'], ['items', '品項'],
+  ['sales', '業務'], ['created_by', '開單人員'], ['delivery_date', '出貨日期'], ['items', '品項'],
   ['amount', '未稅金額'], ['buy', '待採購'], ['status', '狀態'], ['invoiced', '已開發票'],
   ['invoice_no', '發票號碼'], ['customer_po', '客戶PO單號'], ['note', '備註'], ['edit_log', '異動紀錄']
 ];
@@ -9566,7 +9567,7 @@ function deliveryTable(list, opts) {
         <td class="c">${d.items.length}</td>
         <td class="r money nowrap">${money(t.subtotal)}</td>
         <td class="c">${buy ? `<span class="bdg orange plain">${buy}</span>` : '<span class="muted">—</span>'}</td>
-        <td class="nowrap">${badge(DS, d.status)}${(d.status === 'pending_delivery' || d.status === 'shipped') ? (() => {
+        <td class="nowrap">${badge(DS, d.status)}${(d.status === 'shipped') ? (() => {
           const sm = d.shipping_method === '其他' ? (d.shipping_method_other || '其他') : (d.shipping_method || '');
           return sm ? `<div class="ship-way">${esc(sm)}</div>` : '';
         })() : ''}</td>
