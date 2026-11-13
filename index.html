@@ -8110,9 +8110,16 @@ function custBox(q, editable) {
       </span>
     </div>
     <div style="font-size:11.5px;line-height:1.7;color:#1E40AF">
-      ${esc(c.contact_person || '—')}　${esc(c.phone || '—')}　${esc(c.address || '—')}
+      <b>聯絡窗口</b>　${esc(c.contact_person || '—')}　${esc(c.phone || '—')}　${esc(c.address || '—')}
     </div>
-    ${editable ? '<div style="font-size:10.5px;margin-top:4px;opacity:.75">此處資料為報價當下的快照，修改不會影響客戶主檔。</div>' : ''}
+    <div style="font-size:11.5px;line-height:1.7;color:#1E40AF;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span><b>送貨地點</b>　${q.ship_to
+        ? `${q.ship_to.label ? '📍 ' + esc(q.ship_to.label) + '　' : ''}${esc(q.ship_to.contact_person || '—')}　${esc(q.ship_to.phone || '—')}　${esc(q.ship_to.address || '—')}`
+        : '<span style="opacity:.75">同聯絡窗口</span>'}</span>
+      ${editable ? `<button class="btn sm act-orange" style="font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.15)" onclick="pickShipToPrompt(QE)">🚚 ${q.ship_to ? '更改送貨地點' : '設定不同送貨地點'}</button>` : ''}
+      ${editable && q.ship_to ? `<button class="btn sm ghost" onclick="clearShipTo(QE)">改回同聯絡窗口</button>` : ''}
+    </div>
+    ${editable ? '<div style="font-size:10.5px;margin-top:4px;opacity:.75">此處資料為報價當下的快照，修改不會影響客戶主檔。送貨地點會在開立出貨單時帶入「交貨單位／聯絡人／送貨地址」。</div>' : ''}
   </div>`;
 }
 
@@ -8416,6 +8423,7 @@ function applySite(q, c, site) {
   // （例如雲端同步確認寫入回來），q有可能已經是脫離DB.quotes的舊物件，直接改q會憑空消失。
   q = byId(DB.quotes, q.id) || q;
   QE = q;
+  if (q.customer_id !== c.id) q.ship_to = null;   // 換了客戶 → 送貨地點重設為同聯絡窗口
   q.customer_id = c.id;
   q.customer_site_id = site ? site.id : null;
   q.customer_snapshot = {
@@ -8432,6 +8440,58 @@ function applySite(q, c, site) {
   saveNow(); render(); toast(`已帶入 ${c.name}${site && site.label ? '（' + site.label + '）' : ''}`);
 }
 
+
+// ── 送貨地點：可跟聯絡窗口不同（例：台中窗口 A 採購、送到台南 B 窗口）──
+function siteToShipTo(site) {
+  return { site_id: site.id || null, label: site.label || '', contact_person: site.contact_person || '',
+           phone: site.phone || '', address: site.address || '' };
+}
+function pickShipToPrompt(q) {
+  q = byId(DB.quotes, q.id) || q;
+  const c = q.customer_id ? byId(DB.customers, q.customer_id) : null;
+  const sites = (c && c.sites) || [];
+  const cur = q.ship_to || {};
+  openModal({
+    title: `選擇送貨地點${c ? ' — ' + c.name : ''}`,
+    body: `<div class="banner info" style="margin-bottom:12px"><span class="bi">ℹ</span><div>
+      聯絡窗口（報價對象）不變，只改出貨時的<b>交貨單位、聯絡人、送貨地址</b>。</div></div>
+      <div class="site-pick">
+      ${sites.map(s => `
+        <button class="site-opt" data-sid="${s.id}">
+          <div class="t">${s.label ? esc(s.label) : '（未命名）'}${s.id === q.customer_site_id ? ' <span class="bdg blue plain" style="height:16px;font-size:9px">目前聯絡窗口</span>' : ''}${s.id === cur.site_id ? ' <span class="bdg green plain" style="height:16px;font-size:9px">目前送貨地點</span>' : ''}</div>
+          <div class="s">${esc(s.contact_person || '—')}　${esc(s.phone || '—')}</div>
+          <div class="s">${esc(s.address || '—')}</div>
+        </button>`).join('')}
+      ${c ? '<button class="site-opt add" data-new>＋ 新增聯絡窗口／廠區（存入客戶主檔）</button>' : ''}
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:8px">或只填這張單（不存客戶主檔）</div>
+        <div class="grid g3">
+          <div class="field"><label>交貨單位／地點</label><input class="inp" data-f="label" value="${esc(cur.site_id ? '' : cur.label || '')}" placeholder="例：台南廠"></div>
+          <div class="field"><label>聯絡人</label><input class="inp" data-f="contact_person" value="${esc(cur.site_id ? '' : cur.contact_person || '')}"></div>
+          <div class="field"><label>電話</label><input class="inp" data-f="phone" value="${esc(cur.site_id ? '' : cur.phone || '')}"></div>
+        </div>
+        <div class="field"><label>送貨地址</label><input class="inp" data-f="address" value="${esc(cur.site_id ? '' : cur.address || '')}"></div>
+      </div>`,
+    footer: `<button class="btn" data-no>取消</button><button class="btn primary" data-ok>使用上面填的資料</button>`,
+    onMount(el, close) {
+      const done = st => { q.ship_to = st; saveNow(); close(); render(); toast('已設定送貨地點', 'ok'); };
+      el.querySelector('[data-no]').onclick = close;
+      el.querySelectorAll('[data-sid]').forEach(b => b.onclick = () => done(siteToShipTo(byId(sites, b.dataset.sid))));
+      const nb = el.querySelector('[data-new]');
+      if (nb) nb.onclick = () => { close(); editCustomerSite(c, null, s => { q.ship_to = siteToShipTo(s); saveNow(); render(); toast('已設定送貨地點', 'ok'); }); };
+      el.querySelector('[data-ok]').onclick = () => {
+        const o = { site_id: null }; el.querySelectorAll('[data-f]').forEach(i => o[i.dataset.f] = i.value.trim());
+        if (!o.address && !o.contact_person && !o.label) return toast('請至少填送貨地址或聯絡人', 'err');
+        done(o);
+      };
+    }
+  });
+}
+function clearShipTo(q) {
+  q = byId(DB.quotes, q.id) || q;
+  q.ship_to = null; saveNow(); render(); toast('送貨地點已改回同聯絡窗口');
+}
 
 /* ===========================================================
    §10 商品明細 —— 每一列都可自由編輯，也可搜尋主檔帶入
@@ -9394,11 +9454,14 @@ function makeDelivery(q, co, o) {
     created_by: o.created_by || '',
     delivery_date: o.delivery_date || today(),
     status: 'shipped',
-    delivery_target: (cust && cust.default_delivery_target) || '',
-    delivery_contact: (cust && cust.default_delivery_contact)
-      || [q.customer_snapshot && q.customer_snapshot.contact_person, q.customer_snapshot && q.customer_snapshot.phone].filter(Boolean).join('　')
-      || '',
-    ship_address: (q.customer_snapshot && q.customer_snapshot.address) || '',
+    // 報價單有設定「不同送貨地點」→ 交貨單位／聯絡人／地址都用送貨地點；否則沿用原本規則
+    delivery_target: (q.ship_to && q.ship_to.label) || (cust && cust.default_delivery_target) || '',
+    delivery_contact: (q.ship_to && (q.ship_to.contact_person || q.ship_to.phone))
+      ? [q.ship_to.contact_person, q.ship_to.phone].filter(Boolean).join('　')
+      : ((cust && cust.default_delivery_contact)
+        || [q.customer_snapshot && q.customer_snapshot.contact_person, q.customer_snapshot && q.customer_snapshot.phone].filter(Boolean).join('　')
+        || ''),
+    ship_address: (q.ship_to && q.ship_to.address) || (q.customer_snapshot && q.customer_snapshot.address) || '',
     shipping_method: o.shipping_method || '貨到公司', shipping_method_other: o.shipping_method_other || '',
     invoice_method: (cust && cust.default_invoice_method) || '隨貨',
     payment_method: (cust && cust.default_payment_method) || '月結',
@@ -9955,6 +10018,25 @@ function shipAddrOptions(d) {
   return [...addrs].map(a => `<option value="${esc(a)}">`).join('');
 }
 
+function dvCustSites(d) {
+  const q = d.quote_id ? byId(DB.quotes, d.quote_id) : null;
+  const cust = q && q.customer_id ? byId(DB.customers, q.customer_id) : null;
+  return (cust && cust.sites) || [];
+}
+// 選一個客戶窗口 → 一次填好交貨單位／聯絡人／送貨地址（沿用欄位本身的存檔流程）
+function dvFillShipFromSite(sel) {
+  const s = byId(dvCustSites(DE), sel.value); if (!s) return;
+  const set = (k, val) => {
+    const el = document.querySelector(`[data-d="${k}"]`);
+    if (el) { el.value = val; el.dispatchEvent(new Event('change', { bubbles: true })); }
+  };
+  set('delivery_target', s.label || '');
+  set('delivery_contact', [s.contact_person, s.phone].filter(Boolean).join('　'));
+  set('ship_address', s.address || '');
+  sel.value = '';
+  toast('已帶入 ' + (s.label || s.contact_person || '') + ' 的送貨資料', 'ok');
+}
+
 function viewDelivery(v) {
   const d = byId(DB.deliveries, route.id);
   if (!d) { v.innerHTML = `<div class="empty"><div class="e">${icon('notfound')}</div><h3>找不到這張出貨單</h3></div>`; return; }
@@ -10019,6 +10101,11 @@ function viewDelivery(v) {
                 <datalist id="userList">${DB.users.map(u => `<option value="${esc(u.name)}">`).join('')}</datalist></div>
               <div class="field"><label>出貨日期</label>
                 <input class="inp" type="date" data-d="delivery_date" value="${d.delivery_date}" ${editable ? '' : 'disabled'}></div>
+              ${editable ? (() => { const sites = dvCustSites(d); return sites.length ? `<div class="field" style="grid-column:1/-1"><label>從客戶聯絡窗口／廠區帶入送貨資料</label>
+                <select class="inp" onchange="dvFillShipFromSite(this)">
+                  <option value="">— 選擇後自動填入交貨單位、聯絡人、送貨地址 —</option>
+                  ${sites.map(s => `<option value="${s.id}">${esc((s.label || '（未命名）') + '｜' + (s.contact_person || '—') + ' ' + (s.phone || '') + '｜' + (s.address || '—'))}</option>`).join('')}
+                </select></div>` : ''; })() : ''}
               <div class="field"><label>交貨單位</label>
                 <input class="inp" data-d="delivery_target" value="${esc(d.delivery_target || '')}" placeholder="自行輸入" ${editable ? '' : 'disabled'}></div>
               <div class="field"><label>交貨單位聯絡人</label>
