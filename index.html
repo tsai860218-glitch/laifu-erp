@@ -2201,7 +2201,7 @@ let _syncRetryDelay = 0;     // 失敗重試的退避時間
 let _lastSyncError = '';     // 最近一次同步失敗的看得懂原因（顯示在同步狀態上）
 
 // 報價／出貨在編輯時（save()）就已經蓋過 last_modified_at，不在這裡重複蓋。
-const STAMP_SKIP_COLS = new Set(['quotes', 'deliveries']);
+const STAMP_SKIP_COLS = new Set(['quotes', 'deliveries']);   // deliveries 由 stampDirtyRecords 內的專用段落處理
 // 送雲端前，把「內容跟上次同步不一樣」的主檔記錄（商品、客戶、廠商、業務、分類…）蓋上最新修改時間。
 // 有了時間戳，reconcileNewerRemote 與即時監聽才能用「較新者勝」判斷，
 // 擋掉『剛編輯完、卻有一份較舊的雲端快照姍姍來遲把修改蓋回去』的情況（就是商品編輯後過陣子又跳回舊值的原因）。
@@ -2213,6 +2213,19 @@ function stampDirtyRecords() {
     if (STAMP_SKIP_COLS.has(col)) continue;
     const cur = DB[col];
     if (!Array.isArray(cur)) continue;
+    // 出貨單：清單上的快速編輯（發票日期等）若沒走 touchDelivery，這裡補蓋時間戳當保險：
+    // 內容跟上次同步不同、但 last_modified_at 沒變 → 代表有人改了卻沒蓋章。
+    if (col === 'deliveries' && _lastSynced) {
+      const pm = new Map((Array.isArray(_lastSynced[col]) ? _lastSynced[col] : []).map(x => [x.id, x]));
+      for (const item of cur) {
+        if (!item || item.id == null) continue;
+        const old = pm.get(item.id);
+        if (old && item.last_modified_at === old.last_modified_at && JSON.stringify(item) !== JSON.stringify(old)) {
+          item.last_modified_at = now;
+        }
+      }
+      continue;
+    }
     const prevMap = new Map((Array.isArray(_lastSynced[col]) ? _lastSynced[col] : []).map(x => [x.id, x]));
     for (const item of cur) {
       if (!item || item.id == null) continue;
@@ -2371,6 +2384,8 @@ function firestoreListen() {
           if (idx >= 0) {
             const lt = arr[idx] && arr[idx].last_modified_at, rt = data.last_modified_at;
             if (lt && (!rt || lt > rt)) return;  // 本機這筆較新 → 這份遠端資料是舊的，跳過
+            // 出貨單：時間戳相同、但遠端的發票日期是空的而本機有 → 遠端是舊快照，別把發票日期蓋掉
+            if (col === 'deliveries' && lt && lt === rt && arr[idx].invoice_date && !data.invoice_date) return;
             arr[idx] = data;
           } else arr.push(data);
         }
@@ -2708,6 +2723,13 @@ function reconcileNewerRemote(local, remote) {
         const l = lArr[idx];
         const lt = l && l.last_modified_at, rt = r.last_modified_at;
         if (rt && (!lt || rt > lt)) lArr[idx] = JSON.parse(JSON.stringify(r));   // 雲端較新 → 採用雲端
+        else if (col === 'deliveries' && l && r.invoiced && r.invoice_date && !l.invoice_date &&
+                 (lt || '') === (rt || '')) {
+          // 時間戳相同、本機卻是空白、雲端有發票日期 → 本機是沒有這次修改的舊快取，把發票欄位補回來，
+          // 不要讓舊快取補送上雲端、把已填的發票日期洗掉。
+          l.invoiced = true; l.invoice_date = r.invoice_date;
+          if (!l.invoice_no && r.invoice_no) l.invoice_no = r.invoice_no;
+        }
       }
     });
   });
@@ -9573,23 +9595,43 @@ function toggleDvInvoiced(id, el) {
   }
   applyInvoicedChange(id, checked);
 }
+// 出貨管理清單裡直接改發票欄位（已開發票／發票日期／發票號碼／PO）時，一定要蓋上「最後修改時間」。
+// 原本這幾個欄位只呼叫 save()，而 save() 只在「出貨單詳情頁」才會蓋 last_modified_at，
+// 結果清單裡改的發票日期沒有時間戳——同步時（reconcileNewerRemote／即時監聽）就分不出誰新誰舊，
+// 較舊的雲端快取或另一台裝置的舊資料就會把剛填的發票日期蓋回空白（重整或過幾天再看就不見）。
+function touchDelivery(d) {
+  d.last_modified_by = currentOperator();
+  d.last_modified_at = new Date().toISOString();
+  appendEditLog(d, '編輯');
+}
 function applyInvoicedChange(id, checked) {
   const d = byId(DB.deliveries, id);
+  if (!d) return;
+  if (!canEdit()) { toast('目前是唯讀權限，沒辦法儲存修改', 'err'); render(); return; }
   d.invoiced = checked;
   if (!d.invoiced) d.invoice_date = '';
   else if (!d.invoice_date) d.invoice_date = today();
-  save();
+  touchDelivery(d);
+  saveNow();
   const dateEl = document.querySelector(`[data-invdate="${id}"]`);
   if (dateEl) { dateEl.disabled = !checked; dateEl.value = d.invoice_date || ''; }
 }
 function setDvField(id, field, val) {
   const d = byId(DB.deliveries, id);
+  if (!d) return;
+  if (!canEdit()) { toast('目前是唯讀權限，沒辦法儲存修改', 'err'); render(); return; }
   d[field] = val.trim();
-  save();
+  touchDelivery(d);
+  saveNow();
 }
 function setDvInvoiceDate(id, val) {
   const d = byId(DB.deliveries, id);
-  d.invoice_date = val; save();
+  if (!d) return;
+  // 唯讀權限時不能先改記憶體再失敗存檔（畫面看起來有填、重整就消失），直接還原畫面
+  if (!canEdit()) { toast('目前是唯讀權限，沒辦法儲存修改', 'err'); render(); return; }
+  d.invoice_date = val;
+  touchDelivery(d);
+  saveNow();   // 一次性動作，立刻寫本機＋同步雲端，不等防抖，避免填完馬上重整而漏掉
 }
 
 let dSelected = new Set();
@@ -9876,6 +9918,7 @@ async function importDeliveriesExcel(file) {
           Object.assign(c.d, c.fields);
           if (c.fields.invoiced === true && !c.d.invoice_date) c.d.invoice_date = today();
           if (c.fields.invoiced === false) { c.d.invoice_date = ''; c.d.invoice_no = ''; c.d.customer_po = ''; }
+          touchDelivery(c.d);
         });
         saveNow(); render();
         toast(`已從 Excel 匯入更新 ${changes.length} 張出貨單`, 'ok');
