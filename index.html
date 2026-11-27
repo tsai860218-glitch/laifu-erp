@@ -2076,7 +2076,11 @@ async function fsBatchWrite(ops) {
       attempt++;
       try {
         const batch = fbDb.batch();
-        chunk.forEach(op => { if (op.type === 'set') batch.set(op.ref, op.data); else batch.delete(op.ref); });
+        chunk.forEach(op => {
+          if (op.type === 'set') batch.set(op.ref, op.data);
+          else if (op.type === 'update') batch.update(op.ref, op.fields);
+          else batch.delete(op.ref);
+        });
         await batch.commit();
         done = true;
       } catch (e) {
@@ -2100,7 +2104,14 @@ async function fsBatchWrite(ops) {
         }
         // 其他非暫時性錯誤（多半是資料格式）→ 逐筆隔離
         for (const op of chunk) {
-          try { if (op.type === 'set') await op.ref.set(op.data); else await op.ref.delete(); }
+          try {
+            if (op.type === 'set') await op.ref.set(op.data);
+            else if (op.type === 'update') {
+              // 欄位級更新：文件不存在（not-found）時退回整筆寫入
+              try { await op.ref.update(op.fields); }
+              catch (uErr) { if (uErr && uErr.code === 'not-found') await op.ref.set(op.data); else throw uErr; }
+            } else await op.ref.delete();
+          }
           catch (opErr) {
             const col = (op.ref && op.ref.parent && op.ref.parent.id) || '?';
             const id = (op.ref && op.ref.id) || '?';
@@ -2165,8 +2176,22 @@ function buildSyncOps(cur0, prev0) {
       // 已墓碑（被刪除）的記錄絕不再上傳，避免把已刪的單又推回雲端造成復活
       if (cur0._deletions && cur0._deletions[item.id]) continue;
       const old = prevMap.get(item.id);
-      if (!old || JSON.stringify(old) !== JSON.stringify(item)) {
+      if (!old) {
         ops.push({ type: 'set', ref: fbDb.collection(col).doc(item.id), data: JSON.parse(JSON.stringify(item)) });
+      } else if (JSON.stringify(old) !== JSON.stringify(item)) {
+        // ★ 欄位級同步：只送「這次真的有改」的欄位，不再整筆文件覆蓋。
+        // 原本只要改了一個欄位（例如清單裡填發票日期）就把整張出貨單／報價單連同「本機看到的舊狀態」
+        // 整份寫回雲端——若這台裝置沒收到別人剛按的「結案」，就會把狀態倒退回「出貨中」。
+        // 改成只更新有變動的欄位後，不同人改同一張單的不同欄位會自然合併、互不覆蓋。
+        const fields = {};
+        let safe = true;
+        new Set([...Object.keys(old), ...Object.keys(item)]).forEach(k => {
+          if (JSON.stringify(old[k]) === JSON.stringify(item[k])) return;
+          if (/[.~*\/\[\]`]/.test(k)) { safe = false; return; }
+          fields[k] = (item[k] === undefined) ? firebase.firestore.FieldValue.delete() : JSON.parse(JSON.stringify(item[k]));
+        });
+        if (!safe) ops.push({ type: 'set', ref: fbDb.collection(col).doc(item.id), data: JSON.parse(JSON.stringify(item)) });
+        else if (Object.keys(fields).length) ops.push({ type: 'update', ref: fbDb.collection(col).doc(item.id), fields, data: JSON.parse(JSON.stringify(item)) });
       }
     }
     for (const old of prev) {
@@ -2769,7 +2794,9 @@ function flushLocalPersist() {
   const cloudOn = FIREBASE_ENABLED && fbUser;
   try {
     localStorage.setItem(KEY, slimCacheString());
-    if (cloudOn) { try { localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (_) {} }
+    // 注意：「有未同步修改」旗標改由 save() 在真的有編輯時才設定。
+    // 原本這裡每次寫快取（包含關閉分頁、切走分頁）都設旗標，導致隔天開啟一律走「用本機舊快取當基準」
+    // 的路徑，舊快取就有機會把雲端較新的狀態（例如已結案）倒退回去。
   }
   catch (e) {
     console.error(e);
@@ -2812,6 +2839,7 @@ function save() {
   // 本機快取的實際寫入改走防抖（見 flushLocalPersist / scheduleLocalPersist）：
   // 連續打字時不會每個字都同步序列化整包資料，停手後才寫一次，避免卡頓。
   // 頁面關閉前（beforeunload / 分頁隱藏）與 saveNow() 會強制立即寫入，資料不會因為防抖而遺失。
+  if (FIREBASE_ENABLED && fbUser) { try { localStorage.setItem(PENDING_SYNC_KEY, '1'); } catch (_) {} }
   scheduleLocalPersist();
   scheduleFirestoreSync();
   return true;
@@ -3060,7 +3088,6 @@ function migrate(db) {
 
     // 業務：補啟用旗標
     db.users.forEach(u => { if (u.is_active == null) u.is_active = true; if (u.department == null) u.department = ''; });
-    if (!db.users.length) db.users.push({ id: uid('u'), name: '未指定', role: 'admin', is_active: true });
 
     // 商品：新增料號
     db.products.forEach(p => { if (p.part_no == null) p.part_no = ''; });
@@ -4652,113 +4679,8 @@ function seed() {
       filename_pattern: DEFAULT_PATTERN.YX, is_active: true }
   ];
 
-  const users = [
-    { id: 'u_1', name: 'Celia', phone: '', email: '', role: '管理者', is_active: true },
-    { id: 'u_2', name: '行政小幫手', phone: '', email: '', role: '行政', is_active: true }
-  ];
-
-  const suppliers = [
-    { id: 'sp_1', name: '聯強國際', contact_person: '林先生', phone: '04-2200-0000', note: '' },
-    { id: 'sp_2', name: '展碁國際', contact_person: '陳小姐', phone: '04-2300-0000', note: '' },
-    { id: 'sp_3', name: '建達國際', contact_person: '王先生', phone: '04-2400-0000', note: '' }
-  ];
-
-  const customers = [
-    { id: 'cu_1', name: '皇鑫機械股份有限公司', tax_id: '12345678', note: '',
-      default_company_id: c2, is_active: true,
-      sites: [{ id: 'cs_1', label: '', contact_person: '張經理', phone: '04-2500-1111',
-        fax: '04-2500-1112', address: '台中市大里區工業路 00 號', email: '', note: '', is_default: true }] },
-    { id: 'cu_2', name: '千附精密股份有限公司', tax_id: '23456789', note: 'CF-SRM 系統下單',
-      default_company_id: c2, is_active: true,
-      sites: [{ id: 'cs_2', label: '', contact_person: '李副理', phone: '03-3000-2222',
-        fax: '03-3000-2223', address: '桃園市中壢區科技路 000 號', email: '', note: '', is_default: true }] },
-    // 世祥：同一統編，台中／斗南兩個廠區，地址與聯絡人不同
-    { id: 'cu_3', name: '世祥精密工業有限公司', tax_id: '34567890', note: '',
-      default_company_id: c1, is_active: true,
-      sites: [
-        { id: 'cs_3a', label: '台中廠', contact_person: '吳小姐', phone: '04-2600-3333',
-          fax: '', address: '台中市神岡區豐洲路 00 號', email: '', note: '', is_default: true },
-        { id: 'cs_3b', label: '斗南廠', contact_person: '陳先生', phone: '05-5900-6666',
-          fax: '', address: '雲林縣斗南鎮工業路 00 號', email: '', note: '', is_default: false }
-      ] },
-    { id: 'cu_4', name: '清泉醫院', tax_id: '45678901', note: '',
-      default_company_id: c1, is_active: true,
-      sites: [{ id: 'cs_4', label: '', contact_person: '黃主任', phone: '03-4000-5555',
-        fax: '', address: '桃園市龍潭區中豐路 000 號', email: '', note: '', is_default: true }] },
-    // 鴻勁：同一客戶，不同產品線報價會找不同聯絡人
-    { id: 'cu_5', name: '鴻勁精密股份有限公司', tax_id: '56789012', note: '',
-      default_company_id: c2, is_active: true,
-      sites: [
-        { id: 'cs_5a', label: '設備採購', contact_person: '林經理', phone: '03-5900-7777',
-          fax: '', address: '新竹縣竹北市台元科技園區 00 號', email: '', note: '', is_default: true },
-        { id: 'cs_5b', label: '耗材採購', contact_person: '許小姐', phone: '03-5900-7778',
-          fax: '', address: '新竹縣竹北市台元科技園區 00 號', email: '', note: '', is_default: false }
-      ] }
-  ];
-
-  const products = [
-    { id: 'p_1', part_no: 'HP-PD400-G9', brand: 'HP',
-      name: 'A級商用電腦（標準配置）', spec: 'i5-14500 / 16G / 512G SSD / Win11 Pro',
-      unit: '台', list_price: 30000, default_cost: 0, category: '桌上型電腦',
-      default_supplier: '聯強國際', price_ref_date: '', price_ref_source: '', note: '',
-      has_bom: true, is_active: true, is_favorite: true,
-      components: [
-        { id: uid('bc'), sort_order: 1, name: 'HP ProDesk 主機', brand: 'HP', spec: 'i5-14500 / 8G / 256G',
-          qty: 1, cost: 18500, need_assembly: true, is_optional: false, supplier_name: '聯強國際', in_stock: false },
-        { id: uid('bc'), sort_order: 2, name: '16G DDR5 記憶體', brand: 'Kingston', spec: 'DDR5-5600 16G',
-          qty: 1, cost: 1800, need_assembly: true, is_optional: false, supplier_name: '展碁國際', in_stock: true },
-        { id: uid('bc'), sort_order: 3, name: 'SSD 升級 512G', brand: 'ADATA', spec: 'M.2 NVMe 512G',
-          qty: 1, cost: 1400, need_assembly: true, is_optional: false, supplier_name: '展碁國際', in_stock: true },
-        { id: uid('bc'), sort_order: 4, name: 'Office 安裝設定', brand: '', spec: '含資料轉移',
-          qty: 1, cost: 800, need_assembly: true, is_optional: true, supplier_name: '', in_stock: true }
-      ] },
-    { id: 'p_2', part_no: 'B5404CMA-0251A155H', brand: 'ASUS',
-      name: 'ASUS ExpertBook B5404CMA', spec: 'Ultra 5-125H / 16G / 512G / 14吋',
-      unit: '台', list_price: 32000, default_cost: 0, category: '筆記型電腦',
-      default_supplier: '建達國際', price_ref_date: '', price_ref_source: '', note: '',
-      has_bom: true, is_active: true, is_favorite: true,
-      components: [
-        { id: uid('bc'), sort_order: 1, name: 'ASUS ExpertBook B5404CMA', brand: 'ASUS', spec: 'Ultra 5-125H / 16G / 512G',
-          qty: 1, cost: 25800, need_assembly: false, is_optional: false, supplier_name: '建達國際', in_stock: false },
-        { id: uid('bc'), sort_order: 2, name: '原廠三年保固升級', brand: 'ASUS', spec: '3Y On-site',
-          qty: 1, cost: 2200, need_assembly: false, is_optional: true, supplier_name: '建達國際', in_stock: false }
-      ] },
-    { id: 'p_3', part_no: 'AP4620SDN', brand: 'FUJIFILM',
-      name: 'ApeosPrint 4620 SDN', spec: 'A4 黑白雷射 / 雙面 / 網路',
-      unit: '台', list_price: 18500, default_cost: 13200, category: '印表機',
-      default_supplier: '', price_ref_date: '', price_ref_source: '', note: '',
-      has_bom: false, is_active: true, is_favorite: true, components: [] },
-    { id: 'p_4', part_no: 'DLQ-3500CIIN', brand: 'EPSON',
-      name: 'DLQ-3500CIIN 點陣印表機', spec: '24針寬幅 / 網路版',
-      unit: '台', list_price: 42000, default_cost: 33500, category: '印表機',
-      default_supplier: '', price_ref_date: '', price_ref_source: '', note: '',
-      has_bom: false, is_active: true, is_favorite: false, components: [] },
-    { id: 'p_5', part_no: 'CT203484', brand: 'FUJIFILM',
-      name: 'CT203484 原廠碳粉匣', spec: '黑色 / 約 6,000 張',
-      unit: '支', list_price: 3800, default_cost: 2650, category: '耗材',
-      default_supplier: '', price_ref_date: '', price_ref_source: '', note: '',
-      has_bom: false, is_active: true, is_favorite: true, components: [] },
-    { id: 'p_6', part_no: '24B2XH', brand: 'AOC',
-      name: '24吋 FHD 護眼螢幕', spec: '1920x1080 / IPS / HDMI',
-      unit: '台', list_price: 3600, default_cost: 2480, category: '週邊',
-      default_supplier: '', price_ref_date: today(), price_ref_source: 'PChome', note: '',
-      has_bom: false, is_active: true, is_favorite: false, components: [] },
-    { id: 'p_7', part_no: '', brand: '',
-      name: '到府安裝服務', spec: '含線材整理、系統設定',
-      unit: '式', list_price: 2000, default_cost: 800, category: '服務',
-      default_supplier: '', price_ref_date: '', price_ref_source: '', note: '',
-      has_bom: false, is_active: true, is_favorite: false, components: [] }
-  ];
-
-  const categories = ['桌上型電腦', '筆記型電腦', '印表機', '耗材', '週邊', '服務'].map(name => ({ id: uid('cat'), name, parent_id: null, attr_defs: [] }));
-  // 示範資料：把商品接上 category_id，並補上料號來源／代理商料號／屬性等新欄位的預設
-  products.forEach(p => {
-    const c = categories.find(c => c.name === p.category);
-    p.category_id = c ? c.id : null;
-    if (p.part_no_source == null) p.part_no_source = 'company';
-    if (!Array.isArray(p.agent_stocks)) p.agent_stocks = [];
-    if (p.attrs == null) p.attrs = {};
-  });
+  // 業務／常用代理商／客戶／商品／分類一律不預填，全部由使用者自行建立
+  const users = [], suppliers = [], customers = [], products = [], categories = [];
 
   return {
     _schema: SCHEMA_V,
@@ -5675,14 +5597,9 @@ function viewUsers(v) {
    部門管理 —— 可自行新增／改名／刪除的部門清單（存 DB.settings.departments，隨雲端同步全公司共用）
    之後：庫存、報價依部門選價、權限設定都會用到這份清單
    =========================================================== */
-const DEFAULT_DEPARTMENTS = ['業務部', '專案部', '網路部', '倉管', '工程部', '採購部'];
-
-// 取得部門清單；首次使用（尚未建立）時自動帶入預設部門並存檔
+// 取得部門清單；不再自動帶入任何預設部門，全部由使用者自行新增（沒有就是空清單）
 function ensureDepartments() {
-  if (!Array.isArray(DB.settings.departments) || !DB.settings.departments.length) {
-    DB.settings.departments = DEFAULT_DEPARTMENTS.map(name => ({ id: uid('dept'), name }));
-    saveNow();
-  }
+  if (!Array.isArray(DB.settings.departments)) DB.settings.departments = [];
   return DB.settings.departments;
 }
 
